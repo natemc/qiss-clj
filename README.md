@@ -99,8 +99,7 @@ qiss$ lein run
 7 9 11
 
   / juxtaposition
-  / indexing does not require square brackets
-  `a`b`c`d`e 0 2 4
+  / indexing does not require square brackets  `a`b`c`d`e 0 2 4
 [:a :c :e]
   / monadic functions can be applied without square brackets
   count:{#x}
@@ -143,6 +142,28 @@ qiss$ lein run
 1
   (`a`b`c!1 2 3)`a`c
 [1 3]
+  / monadic = is the group function
+  / it creates a dict mapping distinct values to indexes
+  n:`c`a`d`b`a`b`c`c`d`e`a`a`b`e`c`b`c`b`e`e
+  =n
+:c| [0 6 7 14 16]
+:a| [1 4 10 11]
+:d| [2 8]
+:b| [3 5 12 15 17]
+:e| [9 13 18 19]
+  / most operations work on dicts analogously to vectors
+  10+`a`b`c!1 2 3
+:a| 11
+:b| 12
+:c| 13
+  / similarly, a dict can be used as an index
+  v:82 63 80 99 83 66 51 34 83 69 16 81 16 90 21 82 71 32 55 19
+  v@=n
+:c| [82 51 34 21 71]
+:a| [63 83 16 81]
+:d| [80 83]
+:b| [99 66 16 82 32]
+:e| [69 90 55 19]
 
   / tables
   t:([]a:,/3#/:1 2 3;b:9#10 20 30)
@@ -184,7 +205,7 @@ a b
 3 20 
 
   / special forms enable sql-like syntax
-  select +/a,+/b from([]a:,/3#/:1 2 3;b:9#10 20 30)where b<=20,a<3
+  select +/a,+/b from t where b<=20,a<3
 a b
 ----
 6 60
@@ -200,14 +221,14 @@ Unbounded!  There is much work to do.  These are some of the most
 pressing issues:
 
 * scope
-* compound indexing, i.e., `a`b`c`d`e(1 2 3;1 2 3) =>[[:a :b :c][:a :b :c]]
 * indexing at depth: (`a`b`c;`d`e`f)[1;1] => :e
 * dict op dict
 * keyed tables
 * by clause in select
+* xasc & xdesc
 * treat strings like vectors
 * nulls
-* cut and drop (i.e., the _ operator)
+* cut form of the _ operator
 * partial function application
 * ascii I/O
 * stacked adverbs e.g. ,//(1 2 3;(4 5 6;7 8 9)) => [1 2 3 4 5 6 7 8 9]
