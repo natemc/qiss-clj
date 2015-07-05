@@ -240,6 +240,15 @@
                                       (repeatedly x #(rand y))
                                       (repeatedly x #(rand-int y))))))))
   ([x y z] nil)) ; TODO: vector cond
+
+(defn under
+  ([x] (long x))
+  ([x y] (if (vector? x)
+           (err "nyi: cut")
+           (vec (if (<= 0 x)
+                  (drop x y)
+                  (drop-last (- x) y))))))
+
 (defn parse-long [x] (Long/parseLong x))
 (defn parse-double [x] (Double/parseDouble x))
 
@@ -255,6 +264,7 @@
           (keyword ",") {:f join :rank [1 2]}
           :& {:op true :f amp :rank [1 2]}
           :| {:op true :f pipe :rank [1 2]}
+          :_ {:op true :f under :rank [1 2]}
           := {:op true :f eq :rank [1 2]}
           :<> {:op true :f neq :rank [2]}
           :< {:op true :f less :rank [1 2]}
