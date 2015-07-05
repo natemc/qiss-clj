@@ -4,9 +4,9 @@ qiss is simple and succinct: a q-like programming language for the
 JVM.  Like all APL derivatives, qiss derives its expressiveness from
 the following features:
 
-Automatic vectorization
-Precedence-less right-to-left evaluation of expressions
-Syntax that requires minimal punctuation
+* Automatic vectorization
+* Precedence-less right-to-left evaluation of expressions
+* Syntax that requires minimal punctuation
 
 The interpreter is written in clojure, and the plan is to port it to
 ClojureScript so we can write in qisses (qiss on EcmaScript), too.
@@ -17,7 +17,7 @@ git clone https://github.com/natemc/qiss.git
 
 ## Usage
 
-qiss$ lein run
+qiss$ lein run 
 
 ## Options
 
@@ -26,6 +26,7 @@ None.
 ## Examples
 
 ```
+qiss$ lein run 
   / / with whitespace (including newline) preceding is a comment
 
   / operators are ambivalent
@@ -198,18 +199,18 @@ qiss$
 Unbounded!  There is much work to do.  These are some of the most
 pressing issues:
 
-scope
-compound indexing, i.e., `a`b`c`d`e(1 2 3;1 2 3) =>[[:a :b :c][:a :b :c]]
-indexing at depth: (`a`b`c;`d`e`f)[1;1] => :e
-dict op dict
-keyed tables
-by clause in select
-treat strings like vectors
-nulls
-cut and drop (i.e., the _ operator)
-partial function application
-ascii I/O
-stacked adverbs e.g. ,//(1 2 3;(4 5 6;7 8 9)) => [1 2 3 4 5 6 7 8 9]
+* scope
+* compound indexing, i.e., `a`b`c`d`e(1 2 3;1 2 3) =>[[:a :b :c][:a :b :c]]
+* indexing at depth: (`a`b`c;`d`e`f)[1;1] => :e
+* dict op dict
+* keyed tables
+* by clause in select
+* treat strings like vectors
+* nulls
+* cut and drop (i.e., the _ operator)
+* partial function application
+* ascii I/O
+* stacked adverbs e.g. ,//(1 2 3;(4 5 6;7 8 9)) => [1 2 3 4 5 6 7 8 9]
 
 ## License
 
