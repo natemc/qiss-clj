@@ -33,15 +33,19 @@
 (def grammar (clojure.java.io/resource "qiss/grammar"))
 (def xform   {:ladverbed (fn [& x] (vec (cons :adverbed x)))
               :lassign   (fn [& x] (vec (cons :assign x)))
+              :lat       (fn [& x] (vec (cons :at x)))
+              :ldot      (fn [& x] (vec (cons :dot x)))
               :ldyop     (fn [& x] (vec (cons :dyop x)))
               :lexpr     (fn [& x] (vec (cons :expr x)))
+              :lid       (fn [& x] (vec (cons :id x)))
               :ljuxt     (fn [& x] (vec (cons :juxt x)))
+              :llhs      (fn [& x] (vec (cons :lhs x)))
               :lmonop    (fn [& x] (vec (cons :monop x)))
               :lop       (fn [& x] (vec (cons :op x)))
               :lrhs      (fn [& x] (vec (cons :rhs x)))
               :lverb     (fn [& x] (vec (cons :verb x)))})
 (def parser  (insta/parser grammar))
-(def parse   #(insta/transform xform (parser %)))
+(def parse   (comp (partial insta/transform xform) parser))
 (def parses  #(mapv (partial insta/transform xform) (insta/parses parser %)))
 (def vis     (comp insta/visualize parse))
 
@@ -335,14 +339,13 @@
         (t-from-d r)
         r))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn index [t i]
-  (cond (table? t) (index-table t i)
-        (vector? i) (cond (vector? t) (mapv t i)
-                          (map? t) (mapv (:v t) (mapv #(.indexOf (:k t) %) i))
-                          :else (err (str "invalid index" i)))
-        (coll? i) (reduce index t i)
-        (vector? t) (t i)
-        :else ((:v t) (.indexOf (:k t) i))))
+(defn index [x i]
+  (cond (table? x) (index-table x i)
+        (vector? i) (mapv (partial index x) i)
+        (map? i) (mkdict (:k i) (index x (:v i)))
+        (coll? i) (reduce index x i)
+        (vector? x) (x i)
+        :else ((:v x) (.indexOf (:k x) i))))
 (defn invoke [e f a]
   (let [p (if (:pass-global-env f) (partial (:f f) e) (:f f))]
     (if (and (= 1 (count a))
@@ -674,7 +677,7 @@
        (fact "they can be dyadic"
              (keval "0+/1 2 3") => 6))
 ;;       (fact "they can be compounded"  TODO: fix
-;;             (keval "0+//(1 2 3;10 20 30)") => 66))
+;;             (keval ",//(1 2 3;(4 5 6;7 8 9))") => [1 2 3 4 5 6 7 8 9]))
 (facts "about calling functions"
        (fact "supplying all arguments causing invocation"
              (keval "div[10;3]") => 3))
@@ -709,6 +712,7 @@
              (keval "&1001b") => [0 3])
        (fact "works with longs"
              (keval "&0 1 2 3") => [1 2 2 3 3 3]))
+
 (facts "about parsing non-ambiguity"
        (fact adverbed
              (count (parses "f/")) => 1
