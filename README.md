@@ -17,7 +17,11 @@ git clone https://github.com/natemc/qiss.git
 
 ## Usage
 
-qiss$ lein run 
+Invoke qiss REPL via lein, which will automatically download everything you need. Two depencies are JDK and lein. They can be dowloaded from [Oracle](http://www.oracle.com/technetwork/java/javase/downloads/index.html) and from [Leiningen](http://leiningen.org/) 
+
+```
+$ cd qiss; lein run       
+```
 
 ## Options
 
