@@ -1,0 +1,79 @@
+expr       = exprx
+lexpr      = lexprx   (* limited expression: , is not join *)
+
+actuals    = <'['> exprsx <']'>
+adverb     = '/' | '\\' | '/:' | '\\:' | '\'' | '\':'
+<advcore>  = verb adverb
+<ladvcore> = lverb adverb
+adverbed   = advcore
+           | advcore ws? rhs
+           | lhs ws? advcore ws? rhs
+ladverbed  = ladvcore
+           | ladvcore ws? lrhs
+           | lhs ws? ladvcore ws? lrhs
+aggs       = aggsx
+<aggsx>    = lexprx (<','> lexprx)*
+assign     = id <':'> rhs
+lassign    = id <':'> lrhs
+at         = <'@'> | <'@'> ws? rhs | lhs ws? <'@'> ws? rhs
+bool       = #'[01]' <'b'>
+bools      = #'[01][01]+' <'b'>
+by         = <'by'> ws aggsx
+call       = target actuals
+char       = <'"'> #'\\.|[^\"]' <'"'>
+chars      = <'"'> #'(\\.|[^\"])(\\.|[^\"])+' <'"'>
+col        = id <':'> rhs
+cols       = col (<';'> col)*
+dot        = dotcore
+           | dotcore ws? rhs
+           | !(floatx|floatsx) lhs ws? dotcore ws? rhs
+<dotcore>  = !floatsx '.'
+dyop       = lhs ws? op ws? rhs
+ldyop      = lhs ws? lop ws? lrhs
+<exprx>    = select / sll / (at|dot|dyop) / nsll
+<lexprx>   = select / sll / (at|dot|ldyop) / lnsll
+exprs      = exprsx
+<exprsx>   = (exprx|hole) (<';'> (exprx|hole))*
+float      = !floatsx #'-?([0-9]*\.[0-9]+|[0-9]+\.[0-9]*)([eE][-+]?[0-9]+)?'
+floats     = &(floatx | (longx ws)+ floatx) floatsx
+<floatsx>  = #'-?([0-9]*\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?(([ \n\r\t]+)+-?([0-9]*\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?)+'
+<floatx>   = #'-?([0-9]*\.[0-9]+|[0-9]+\.[0-9]*)([eE][-+]?[0-9]+)?'
+formals    = <'['> id (<';'> id)* <']'>
+from       = <'from'> ws? exprx  (* lexprx? *)
+hole       = Epsilon
+id         = idx
+<idx>      = !where #'[a-zA-Z][a-zA-Z0-9_]*'
+juxt       = !(adverbed|dot|dyop|select) lhs ws? !dot rhs
+ljuxt      = !(adverbed|dot|dyop|select) lhs ws? !dot lrhs
+keycols    = <'['> col? (<';'> col)* <']'>
+lambda     = <'{'> formals? exprs <'}'>
+lhs        = id | lit | parexpr | sll
+list       = <'('> (exprx|hole) (<';'> (exprx|hole))+ <')'>
+<lit>      = bool | char | float | lambda | list | long | symbol | table
+long       = !(bool|bools|longsx) longx
+longs      = longsx
+<longx>    = #'-?[0-9]+'
+<longsx>   = #'-?[0-9]+([ \n\r\t]+-?[0-9]+)+'
+monop      = !(nfloat|nlong) op ws? rhs
+lmonop     = !(nfloat|nlong) lop ws? rhs
+nfloat     = #'-([0-9]*\.[0-9]+|[0-9]+\.[0-9]*)([eE][-+]?[0-9]+)?'
+nlong      = #'-[0-9]+'
+<nsll>     = adverbed | assign | call | id | juxt | lit | monop | op | parexpr
+<lnsll>    = ladverbed | lassign | call | id | ljuxt | lit | lmonop | lop | parexpr
+op         = '!' | '#' | '+' | '-' | '*' | '%' | ',' | '&' | '|' | '?' | relop
+lop        = '!' | '#' | '+' | '-' | '*' | '%' | '&' | '|' | '?' | relop
+<parexpr>  = <'('> exprx <')'>
+<relop>    = '~' | (!'<=' '<') | '<=' | '>=' | (!'>=') '>' | '=' | '<>'
+rhs        = exprx
+lrhs       = lexprx
+select     = <'select'> ws? aggs? ws? (by ws)? from ws? where?
+<sll>      = bools | chars | floats | longs | symbols (* simple list literal *)
+symbol     = !symbolsx <'`'> idx
+symbols    = symbolsx
+<symbolsx> = #'`[a-zA-Z][a-zA-Z0-9_]*(`[a-zA-Z][a-zA-Z0-9_]*)+'
+table      = <'('> keycols <';'>? cols <')'>
+target     = exprx
+verb       = adverbed | at | dot | id | lambda | op | parexpr
+lverb      = ladverbed | at | dot | id | lambda | lop | parexpr
+where      = <'where'> ws lexprx (<','> lexprx)*
+<ws>       = <#'[ \n\r\t]+'>
