@@ -16,10 +16,10 @@ ClojureScript so we can write in qisses (qiss on EcmaScript), too.
 ### Make sure you have the following installed:
   * a recent JDK from [Oracle](http://www.oracle.com/technetwork/java/javase/downloads/index.html)
   * git
-  * [Leiningen](http://leiningen.org/) 
+  * [Leiningen](http://leiningen.org/)
   * rlwrap
-  
-  ### Get the code
+
+### Get the code
 
 ```
 $ git clone https://github.com/natemc/qiss.git
@@ -63,9 +63,9 @@ qiss$ rlwrap lein run
 [1 2 3]
 §)1 2. 3 / float (64-bit; clojure double) vector literal
 [1.0 2.0 3.0]
-§)1001b / boolean vector literal. no spaces allowed!
+§)1001b / boolean vector literal.  no spaces allowed!
 [true false false true]
-§)`a`b`xyzyy / symbol vector literal.§)no spaces allowed!
+§)`a`b`xyzyy / symbol vector literal.  no spaces allowed!
 [:a :b :xyzzy]
 §)
 §)/ most dyadic operators are atomic: they automatically vectorize
@@ -116,7 +116,8 @@ qiss$ rlwrap lein run
 7 9 11
 §) 
 §)/ juxtaposition
-§)/ indexing does not require square brackets§)`a`b`c`d`e 0 2 4
+§)/ indexing does not require square brackets
+§)`a`b`c`d`e 0 2 4
 [:a :c :e]
 §)/ monadic functions can be applied without square brackets
 §)count:{#x}
@@ -251,6 +252,7 @@ pressing issues:
 * nulls: will nil do?
 * reshape (take a box) form of the # operator
 * partial function application
+* generic list literal with holes is a list constructor
 * vs and sv 
 * casting and parsing with $
 * if special form
