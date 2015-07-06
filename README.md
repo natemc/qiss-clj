@@ -14,18 +14,23 @@ ClojureScript so we can write in qisses (qiss on EcmaScript), too.
 ## Installation
 
 ### Make sure you have the following installed:
-  * a recent JDK
+  * a recent JDK from [Oracle](http://www.oracle.com/technetwork/java/javase/downloads/index.html)
   * git
-  * leiningen
+  * [Leiningen](http://leiningen.org/) 
   * rlwrap
   
   ### Get the code
+
 ```
 $ git clone https://github.com/natemc/qiss.git
 $ cd qiss 
 ```
 	
 ## Usage
+
+Like most clojure applications, qiss is invoked using leiningen.  The
+first time you run it, leiningen will automatically download the
+clojure libraries needed by qiss, so it may take a minute.
 
 ```
 qiss$ rlwrap lein run 
