@@ -36,6 +36,7 @@ ldot       = dotcore
 <ldy>      = lat | ldot | ldyop
 dyop       = lhs ws? op ws? rhs
 ldyop      = llhs ws? lop ws? lrhs
+empty      = '()'
 <exprx>    = select
 	   | !select dy
 	   | !(select|dy) (call|juxt)
@@ -69,7 +70,7 @@ llhs       = llhsx
 <lhsx>     = call | id | lit | parexpr | svl
 <llhsx>    = call | lid | lit | parexpr | svl
 list       = <'('> (exprx|hole) (<';'> (exprx|hole))+ <')'>
-<lit>      = bool | char | float | lambda | list | long | symbol | table
+<lit>      = bool | char | empty | float | lambda | list | long | symbol | table
 long       = !(bool|bools|longsx) longx
 longs      = longsx
 <longx>    = #'-?[0-9]+'
