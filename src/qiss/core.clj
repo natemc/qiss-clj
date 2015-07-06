@@ -28,7 +28,12 @@
 ;   time types
 ;   system
 
+; functions that will differ btwn JVM and JS
 (def err #(throw (Exception. (str "'" %))))
+(defn exit
+  ([] (exit 0))
+  ([x] (System/exit x)))
+(defn index-of [x i] (let [j (.indexOf x i)] (if (< j 0) (count x) j)))
 
 (def grammar (clojure.java.io/resource "qiss/grammar"))
 (def xform   {:ladverbed (fn [& x] (vec (cons :adverbed x)))
@@ -67,8 +72,8 @@
            java.lang.Character -10
            java.lang.String 10
            clojure.lang.Keyword -11
-           [e 0]))
-   ([e x y] (apply-monadic e x y)))
+           0))
+   ([e x y] (last (apply-monadic e x y))))
 
 (defn atomize [f]
   (fn self[x y]
@@ -107,7 +112,7 @@
   ([x] (if (vector? x)
          (let [k (vec (distinct x))]
            (reduce (fn [d [i g]]
-                     (let [j (.indexOf (:k d) g)]
+                     (let [j (index-of (:k d) g)]
                        (assoc d :v (assoc (:v d) j (conj ((:v d) j) i)))))
                    {:k k :v (vec (replicate (count k) []))}
                    (map (fn [x y] [x y]) (iterate inc 0) x)))
@@ -156,7 +161,13 @@
 
 (defn join
   ([x] [x])
-  ([x y] (vec (concat x y))))
+  ([x y] (if (vector? x)
+           (if (vector? y)
+             (vec (concat x y))
+             (conj x y))
+           (if (vector? y)
+             (vec (cons x y))
+             [x y]))))
 
 (defn ktake
   ([x] (count x))
@@ -226,29 +237,35 @@
                      (reductions p (first x) (second x))))))))
 
 (defn times
-  ([x] x) ;; TODO: first
+  ([x] (first x))
   ([x y] ((atomize *) x y)))
 
-(def builtin {:div {:f div :rank [2]}
-              :mod {:f kmod :rank [2]}})
+(def builtin {:div  {:f div :rank [2]}
+              :exit {:f exit :rank [0 1]}
+              :mod  {:f kmod :rank [2]}})
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (declare index)
 (defn ques
   ([x] (vec (distinct x)))
-  ([x y] (let [bc (fn [c s] (let [i (.indexOf c s)] (if (< i 0) (count c) i)))]
-           (cond (vector? x) (if (vector? y) (mapv #(bc x %) y) (bc x y))
-                 (map? x)    (index (:k x) (ques (:v x) y))
-                 :else       (if (vector? y)
-                               (index y (vec (repeatedly x #(rand-int (count y)))))
-                               (vec (if (float? y)
-                                      (repeatedly x #(rand y))
-                                      (repeatedly x #(rand-int y))))))))
+  ([x y] (cond (vector? x) (if (vector? y)
+                             (mapv #(index-of x %) y)
+                             (index-of x y))
+               (map? x)    (index (:k x) (ques (:v x) y))
+               :else       (if (vector? y)
+                             (index y (vec (repeatedly x #(rand-int (count y)))))
+                             (vec (if (float? y)
+                                    (repeatedly x #(rand y))
+                                    (repeatedly x #(rand-int y)))))))
   ([x y z] nil)) ; TODO: vector cond
 
+(defn deltas [x]
+  (vec (cons (first x) (map - (next x) (drop-last x)))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn under
   ([x] (long x))
-  ([x y] (if (vector? x)
-           (err "nyi: cut")
+  ([x y] (if (vector? x) ; y x+!'1_0-':x,#y
+           (let [i (mapv range (next (deltas (conj x (count y)))))]
+             (index y (mapv (fn [p q] (mapv #(+ p %) q)) x (null! i))))
            (vec (if (<= 0 x)
                   (drop x y)
                   (drop-last (- x) y))))))
@@ -259,7 +276,7 @@
 (def ops {
           (keyword "~") {:op true :f tilde  :rank [1 2]}
           :! {:op true :f bang :rank [1 2]}
-;;          :at {:f at :pass-global-env true :rank [1 2]} ;[1 2 3 4]}
+          :at {:f at :pass-global-env true :rank [1 2]} ;[1 2 3 4]}
           :+ {:op true :f plus :rank [1 2]}
           :- {:op true :f minus :rank [1 2]}
           :* {:op true :f times :rank [1 2]}
@@ -309,8 +326,9 @@
                     (= :id (first x)) (if (some #{(second x)} a)
                                         (second x)
                                         nil)
-                    :else (reduce strmax (mapv self x))))]
-    (vec (take (+ 1 (.indexOf a (mia x))) a))))
+                    :else (reduce strmax (mapv self x))))
+        n (mod (+ 1 (index-of a (mia x))) (+ 1 (count a)))]
+    (vec (take n a))))
 (defn args [f]
   (if-let [a (:formals f)]
     (mapv #(keyword (second %)) a)
@@ -340,12 +358,12 @@
         r))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn index [x i]
-  (cond (table? x) (index-table x i)
+  (cond (table? x)  (index-table x i)
         (vector? i) (mapv (partial index x) i)
-        (map? i) (mkdict (:k i) (index x (:v i)))
-        (coll? i) (reduce index x i)
+        (map? i)    (mkdict (:k i) (index x (:v i)))
+        (coll? i)   (reduce index x i)
         (vector? x) (x i)
-        :else ((:v x) (.indexOf (:k x) i))))
+        :else ((:v x) (index-of (:k x) i))))
 (defn invoke [e f a]
   (let [p (if (:pass-global-env f) (partial (:f f) e) (:f f))]
     (if (and (= 1 (count a))
@@ -390,11 +408,15 @@
     [(assoc e2 (keyword (:id x)) r) r]))
 
 (defn resolve-at [e x]
-  (let [[e2 rhs] (kresolve e (:rhs x))]
+  (if (:rhs x)
+    (let [[e2 rhs] (kresolve e (:rhs x))]
+      (if (:lhs x)
+        (let [[e3 lhs] (kresolve e2 (:lhs x))]
+          (apply-monadic e3 lhs rhs))
+        (at e2 rhs)))
     (if (:lhs x)
-      (let [[e3 lhs] (kresolve e2 (:lhs x))]
-        (apply-monadic e3 lhs rhs))
-      (at e2 rhs))))
+      (err "nyi: partially bound @ from lhs")
+      [e (ops :at)])))
 
 (defn resolve-call [e x]
   (loop [e e a (reverse (:actuals x)) r ()]
@@ -520,6 +542,7 @@
           (= t :char    ) [e (char (first v))]
           (= t :chars   ) [e v]
           (= t :dyop    ) (resolve-dyop e v)
+          (= t :empty   ) [e []]
           (= t :expr    ) (kresolve e v)
           (= t :float   ) [e (parse-double v)]
           (= t :floats  ) [e (mapv parse-double (str/split v #"[ \n\r\t]+"))]
@@ -572,18 +595,25 @@
         :else       (println x)))
 
 (defn repl []
+  (println "Welcome to qiss: short and simple.")
   (loop [e builtin] ; env
     (do ; (print "e ") (println e)
-        (print "  ") (flush))
-    (let [line (read-line)]
+;        (print "\u00b3)") (flush))
+        (print "\u00a7)") (flush))
+    (if-let [line (read-line)]
       (if (or (empty? line) (= \/ (first line))) ; skip comments
         (recur e)
-        (if (not= "\\\\" line)
-          (let [x (second (parse line))
-                [ne r] (kresolve e x)]
-            (if (not= :assign (first x))
-              (show r))
-            (recur ne)))))))
+        (if (and (not= "\\\\" line) (not= "exit" line))
+          (let [e2 (try
+                     (let [x (second (parse line))
+                           [ne r] (kresolve e x)]
+                       (if (not= :assign (first x))
+                         (show r))
+                       ne)
+                     (catch Exception ex
+                       (println ex)
+                       e))]
+              (recur e2)))))))
 
 (defn keval [x] (last (kresolve builtin (second (parse x)))))
 (defn krun [x]  (show (keval x)))
