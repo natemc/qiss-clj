@@ -5,30 +5,31 @@
   (:require [midje.sweet :refer :all])
   (:gen-class))
 
-; Backlog
-;   proper scoping (chained envs)
-;   indexing at depth
-;   dict+dict
-;   @ 3&4 args
-;   .
-;   keyed tables
-;   builtins
-;   treat strings like vectors
-;   special forms for queries
-;   conditional $
-;   nulls
-;   mixed-type lists with holes as factories
-;   k-ish console output
-;   file I/O
-;   java interop
-;   attributes
-;   lj
-;   enable UDFs to modify the global env
-;   dot notation for dictionaries
-;   time types
-;   system
+;; Backlog
+;;   proper scoping (chained envs)
+;;   indexing at depth
+;;   dict+dict
+;;   @ 3&4 args
+;;   .
+;;   keyed tables
+;;   builtins
+;;   treat strings like vectors
+;;   special forms for queries
+;;   conditional $
+;;   nulls
+;;   mixed-type lists with holes as factories
+;;   k-ish console output
+;;   file I/O
+;;   java interop
+;;   attributes
+;;   lj
+;;   enable UDFs to modify the global env
+;;   dot notation for dictionaries
+;;   time types
+;;   system
 
-; functions that will differ btwn JVM and JS
+;; functions that will differ btwn JVM and JS
+(def bool? (partial instance? java.lang.Boolean))
 (def err #(throw (Exception. (str "'" %))))
 (defn exit
   ([] (exit 0))
@@ -73,7 +74,7 @@
            java.lang.String 10
            clojure.lang.Keyword -11
            0))
-   ([e x y] (last (apply-monadic e x y))))
+  ([e x y] (last (apply-monadic e x y))))
 
 (defn atomize [f]
   (fn self[x y]
@@ -91,14 +92,14 @@
                            (err "length"))
                          (map? y) (err "nyi map op map")
                          :else {:k (:k x) :v (mapv #(self % y) (:v x))})
-          ; x is atom cases
+                                        ; x is atom cases
           (vector? y) (mapv #(self x %) y)
           (map? y) {:k (:k y) :v (mapv #(self x %) (:v y))}
           :else     (f x y))))
 
 (defn to-long [x]
   (cond (coll? x) (if (= 0 (count x)) [] (mapv to-long x))
-        (instance? java.lang.Boolean x) (if x 1 0)
+        (bool? x) (if x 1 0)
         :else x))
 
 (defn where
@@ -106,7 +107,15 @@
   ([e x] [e (where x)]))
 (defn amp
   ([x] (where x))
-  ([x y] ((atomize min) x y)))
+  ([x y] (let [f (fn [a b]
+                   (if (bool? a)
+                     (if (bool? b)
+                       (and a b)
+                       (min (long a) b))
+                     (if (bool? b)
+                       (min a (long b))
+                       (min a b))))]
+           ((atomize f) x y))))
 
 (defn eq
   ([x] (if (vector? x)
@@ -173,12 +182,12 @@
   ([x] (count x))
   ;; take on a dictionary
   ([x y] (cond (coll? x) () ;; TODO: take a box
-               (coll? y) (if (instance? java.lang.Boolean x)
+               (coll? y) (if (bool? x)
                            (if x [(first y)] [])
                            (if (<= 0 x)
                              (mapv #(y (mod % (count y))) (range x))
                              (vec (take-last (- x) y)))) ; TODO neg overtake
-               :else (if (instance? java.lang.Boolean x)
+               :else (if (bool? x)
                        (if x [y] [])
                        (vec (repeat x y))))))
 
@@ -190,7 +199,7 @@
   (fn [e & x]
     (let [p (if (:pass-global-env f) (partial (:f f) e) (:f f))]
       (apply (partial mapv (fn [& a] (apply p a))) x))))
-    
+
 (defn each-left [f]
   (fn [e x y]
     (let [p (if (:pass-global-env f) (partial (:f f) e) (:f f))]
@@ -341,7 +350,7 @@
   (fn [e & x]
     (if (not (some #{(count x)} (:rank f)))
       (do (println f) (println x) (err "rank")))
-    (let [eb (merge e (zipmap (:formals f) x))]
+    (let [eb (merge e (merge (:env f) (zipmap (:formals f) x)))]
       (loop [ec eb p (:exprs f) r nil]
         (if (empty? p)
           r
@@ -376,7 +385,7 @@
 (defn can-be-monadic [x] (some #{1} (:rank x)))
 (defn can-be-dyadic [x] (some #{2} (:rank x)))
 (defn apply-monadic [e f x]
-  ; (println "apply-monadic" f "\t" x)
+                                        ; (println "apply-monadic" f "\t" x)
   (if (or (vector? f) (:k f) (table? f))
     [e (index f x)]
     [e (if (:pass-global-env f) ((:f f) e x) ((:f f) x))]))
@@ -448,6 +457,7 @@
 (defn resolve-lambda [e x]
   (let [a (args x)
         w (merge x {:formals a
+                    :env e
                     :pass-global-env true
                     :rank [(count a)]})
         f (feval w)]
@@ -504,7 +514,8 @@
                 cn      (if (= :assign (first p))
                           (keyword (second (second p)))
                           (guess-col p))
-                [e4 rr] (kresolve e (insta/transform (sub-table t i) (first a)))
+                [e4 rr] (kresolve e (insta/transform (sub-table t i)
+                                                     (first a)))
                 cd      (if (coll? rr) rr [rr])]
             (recur e (next a) (add-to-dict r cn cd)))))
       [e3 (if i (index t i) t)])))
@@ -523,7 +534,7 @@
           (recur ne (next a) (cons rr r)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn kresolve [e x]
+(defn kresolve [e x] ; translation unit, env, parse tree
   (let [t (if (coll? x) (first x) x)
         v (if (coll? x)
             (cond (= :list t)          (next x)
@@ -535,7 +546,7 @@
             nil)]
     (cond (= t :adverbed) (resolve-adverbed e v)
           (= t :assign  ) (resolve-assign e v)
-          (= t :at    )   (resolve-at e v)
+          (= t :at      ) (resolve-at e v)
           (= t :bool    ) [e (= "1" v)]
           (= t :bools   ) [e (mapv #(= \1 %) v)]
           (= t :call    ) (resolve-call e v)
@@ -598,8 +609,8 @@
   (println "Welcome to qiss: short and simple.")
   (loop [e builtin] ; env
     (do ; (print "e ") (println e)
-;        (print "\u00b3)") (flush))
-        (print "\u00a7)") (flush))
+                                        ;        (print "\u00b3)") (flush))
+      (print "\u00a7)") (flush))
     (if-let [line (read-line)]
       (if (or (empty? line) (= \/ (first line))) ; skip comments
         (recur e)
@@ -613,7 +624,7 @@
                      (catch Exception ex
                        (println ex)
                        e))]
-              (recur e2)))))))
+            (recur e2)))))))
 
 (defn keval [x] (last (kresolve builtin (second (parse x)))))
 (defn krun [x]  (show (keval x)))
@@ -811,8 +822,8 @@
              (count (parses "`a")) => 1)
        (fact "symbol list literals"
              (count (parses "`a`b`c`d`e")) => 1))
-       ;; gave up on this one: couldn't fix the <exprx> rule
-       ;; (fact "select"
-       ;;       (count
-       ;;        (parses
-       ;;         "select +/a,+/b from([]a:,/3#/:1 2;b:6#10 20 30)where b<=20")) => 1))
+;; gave up on this one: couldn't fix the <exprx> rule
+;; (fact "select"
+;;       (count
+;;        (parses
+;;         "select +/a,+/b from([]a:,/3#/:1 2;b:6#10 20 30)where b<=20")) => 1))
