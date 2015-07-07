@@ -810,7 +810,7 @@
        (fact "symbols"
              (count (parses "`a")) => 1)
        (fact "symbol list literals"
-             (count (parses "`a`b`c`d`e")) => 1)
+             (count (parses "`a`b`c`d`e")) => 1))
        ;; gave up on this one: couldn't fix the <exprx> rule
        ;; (fact "select"
        ;;       (count
