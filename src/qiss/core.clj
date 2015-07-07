@@ -318,7 +318,7 @@
                  q (next %2)]
              (assoc %1 p (if (or (not= 1 (count q))
                                  (some #{(first %2)}
-                                       [:actuals :aggs :exprs :where]))
+                                       [:actuals :aggs :exprs :formals :where]))
                            q
                            (first q))))
           {}
@@ -345,17 +345,18 @@
 
 (declare kresolve)
 
-;; TODO inner functions, scope, closures
+;; TODO think through updating closed-over variables
+;; vs locals vs globals ...
 (defn feval [tu f]
   (fn [e & x]
     (if (not (some #{(count x)} (:rank f)))
       (do (println f) (println x) (err "rank")))
-    (let [eb (merge e (merge (:env f) (zipmap (:formals f) x)))]
-      (loop [ec eb p (:exprs f) r nil]
+    (let [e2 (merge e (merge (:env f) (zipmap (:formals f) x)))]
+      (loop [e3 e2 p (:exprs f) r nil]
         (if (empty? p)
           r
-          (let [[ed rr] (kresolve tu ec (first p))]
-            (recur ed (next p) rr)))))))
+          (let [[e4 rr] (kresolve tu e3 (first p))]
+            (recur e4 (next p) rr)))))))
 (defn index-table [t i]
   (if (or (and (vector? i) (keyword? (first i)))
           (keyword? i))
