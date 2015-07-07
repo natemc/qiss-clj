@@ -111,9 +111,9 @@
                    (if (bool? a)
                      (if (bool? b)
                        (and a b)
-                       (min (long a) b))
+                       (min (if a 1 0) b))
                      (if (bool? b)
-                       (min a (long b))
+                       (min a (if b 1 0))
                        (min a b))))]
            ((atomize f) x y))))
 
@@ -144,7 +144,15 @@
 
 (defn pipe
   ([x] (vec (reverse x)))
-  ([x y] ((atomize max) x y)))
+  ([x y] (let [f (fn [a b]
+                   (if (bool? a)
+                     (if (bool? b)
+                       (or a b)
+                       (max (if a 1 0) b))
+                     (if (bool? b)
+                       (max a (if b 1 0))
+                       (max a b))))]
+           ((atomize f) x y))))
 
 (defn mkdict [k v] {:k k :v v})
 
