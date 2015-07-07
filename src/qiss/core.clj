@@ -346,7 +346,7 @@
 (declare kresolve)
 
 ;; TODO inner functions, scope, closures
-(defn feval [f]
+(defn feval [tu f]
   (fn [e & x]
     (if (not (some #{(count x)} (:rank f)))
       (do (println f) (println x) (err "rank")))
@@ -354,7 +354,7 @@
       (loop [ec eb p (:exprs f) r nil]
         (if (empty? p)
           r
-          (let [[ed rr] (kresolve ec (first p))]
+          (let [[ed rr] (kresolve tu ec (first p))]
             (recur ed (next p) rr)))))))
 (defn index-table [t i]
   (if (or (and (vector? i) (keyword? (first i)))
@@ -394,86 +394,87 @@
 
 
 
-(defn resolve-adverbed [e x]
+(defn resolve-adverbed [tu e x]
   (if (contains? x :lhs) ; eval must be right to left!
     (if (contains? x :rhs)
-      (let [[e2 r] (kresolve e  (:rhs x))
-            [e3 o] (kresolve e2 (:verb x))
-            [e4 l] (kresolve e3 (:lhs x))
+      (let [[e2 r] (kresolve tu e  (:rhs x))
+            [e3 o] (kresolve tu e2 (:verb x))
+            [e4 l] (kresolve tu e3 (:lhs x))
             m      (adverbs (keyword (:adverb x)))]
         [e4 ((m o) e l r)])
       (err "nyi: bind lhs of adverbed expr (partial)"))
     (if (contains? x :rhs)
-      (let [[e2 r] (kresolve e  (:rhs x))
-            [e3 o] (kresolve e2 (:verb x))
+      (let [[e2 r] (kresolve tu e  (:rhs x))
+            [e3 o] (kresolve tu e2 (:verb x))
             m      (adverbs (keyword (:adverb x)))]
         [e3 ((m o) e r)])
-      (let [[e2 o] (kresolve e (:verb x))
+      (let [[e2 o] (kresolve tu e (:verb x))
             m      (adverbs (keyword (:adverb x)))]
         [e2 (merge o {:f (m o)})]))))
 
-(defn resolve-assign [e x]
-  (let [[e2 r] (kresolve e (:rhs x))]
+(defn resolve-assign [tu e x]
+  (let [[e2 r] (kresolve tu e (:rhs x))]
     [(assoc e2 (keyword (:id x)) r) r]))
 
-(defn resolve-at [e x]
+(defn resolve-at [tu e x]
   (if (:rhs x)
-    (let [[e2 rhs] (kresolve e (:rhs x))]
+    (let [[e2 rhs] (kresolve tu e (:rhs x))]
       (if (:lhs x)
-        (let [[e3 lhs] (kresolve e2 (:lhs x))]
+        (let [[e3 lhs] (kresolve tu e2 (:lhs x))]
           (apply-monadic e3 lhs rhs))
         (at e2 rhs)))
     (if (:lhs x)
       (err "nyi: partially bound @ from lhs")
       [e (ops :at)])))
 
-(defn resolve-call [e x]
+(defn resolve-call [tu e x]
   (loop [e e a (reverse (:actuals x)) r ()]
     (if (empty? a) ;; TODO: partial
-      (let [[ne f] (kresolve e (:target x))]
+      (let [[ne f] (kresolve tu e (:target x))]
         (if (or (vector? f) (:k f))
           (if (= 1 (count r))
             [ne (index f (first r))]
             [ne (index f r)])
           (invoke ne f r)))
-      (let [[ne rr] (kresolve e (first a))]
+      (let [[ne rr] (kresolve tu e (first a))]
         (recur ne (next a) (cons rr r))))))
 
-(defn resolve-dyop [e x]
+(defn resolve-dyop [tu e x]
   (let [o        (ops (keyword (:op x)))
-        [e2 rhs] (kresolve e (:rhs x))
-        [e3 lhs] (kresolve e2 (:lhs x))]
+        [e2 rhs] (kresolve tu e (:rhs x))
+        [e3 lhs] (kresolve tu e2 (:lhs x))]
     (apply-dyadic e3 o lhs rhs)))
 
-(defn resolve-juxt [e x]
-  (let [[e2 rhs] (kresolve e (:rhs x))
-        [e3 o] (kresolve e2 (:lhs x))]
+(defn resolve-juxt [tu e x]
+  (let [[e2 rhs] (kresolve tu e (:rhs x))
+        [e3 o] (kresolve tu e2 (:lhs x))]
     (if (:second rhs)
       (invoke e3 rhs [o (:second rhs)])
       (if (can-be-dyadic o)
         [e3 (merge o {:second rhs})]
         (apply-monadic e3 o rhs)))))
 
-(defn resolve-lambda [e x]
+(defn resolve-lambda [tu t e x]
   (let [a (args x)
         w (merge x {:formals a
                     :env e
                     :pass-global-env true
-                    :rank [(count a)]})
-        f (feval w)]
+                    :rank [(count a)]
+                    :text t})
+        f (feval tu w)]
     [e (assoc w :f f)]))
 
-(defn resolve-list [e x]
+(defn resolve-list [tu e x]
   (let [p (reverse x)]
     (loop [e e i p r ()]
       (if (empty? i)
         [e (vec r)]
-        (let [[ne nr] (kresolve e (first i))]
+        (let [[ne nr] (kresolve tu e (first i))]
           (recur ne (next i) (cons nr r)))))))
 
-(defn resolve-monop [e x]
+(defn resolve-monop [tu e x]
   (let [o (ops (keyword (:op x)))
-        [e2 a] (kresolve e (:rhs x))]
+        [e2 a] (kresolve tu e (:rhs x))]
     (apply-monadic e2 o a)))
 
 (defn sub-table [t i]
@@ -481,15 +482,15 @@
                  [:at [:lhs [:id x]] [:rhs [:raw i]]]
                  [:id x]))})
 
-(defn apply-constraints [env t w]
+(defn apply-constraints [tu env t w]
   (if w
-    (loop [[e i] (apply where (kresolve env (first w)))
+    (loop [[e i] (apply where (kresolve tu env (first w)))
            c     (next w)]
       (if (empty? c)
         [e i]
         (let [[e2 j] (apply where
-                            (kresolve e (insta/transform (sub-table t i)
-                                                         (first c))))]
+                            (kresolve tu e (insta/transform (sub-table t i)
+                                                            (first c))))]
           (recur [e2 (index i j)] (next c)))))
     [e nil]))
 
@@ -501,9 +502,10 @@
 (defn add-to-dict [d k v]
   (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
 
-(defn resolve-select [e x]
-  (let [[e2 t] (kresolve e (:from x))
-        [e3 i] (apply-constraints (merge e2 (zipmap (:k t) (:v t)))
+(defn resolve-select [tu e x]
+  (let [[e2 t] (kresolve tu e (:from x))
+        [e3 i] (apply-constraints tu
+                                  (merge e2 (zipmap (:k t) (:v t)))
                                   t
                                   (:where x))]
     (if-let [s (:aggs x)]
@@ -514,13 +516,13 @@
                 cn      (if (= :assign (first p))
                           (keyword (second (second p)))
                           (guess-col p))
-                [e4 rr] (kresolve e (insta/transform (sub-table t i)
-                                                     (first a)))
+                [e4 rr] (kresolve tu e (insta/transform (sub-table t i)
+                                                        (first a)))
                 cd      (if (coll? rr) rr [rr])]
             (recur e (next a) (add-to-dict r cn cd)))))
       [e3 (if i (index t i) t)])))
 
-(defn resolve-table [e x]
+(defn resolve-table [tu e x]
   (let [b (:cols x)
         c (map (comp map-from-tuples next)
                (if (= :col (first b)) [b] b))]
@@ -530,11 +532,11 @@
           [e (t-from-d (mkdict (mapv #(keyword (:id %)) c)
                                (vec r)))]
           (err "length"))
-        (let [[ne rr] (kresolve e (first a))]
+        (let [[ne rr] (kresolve tu e (first a))]
           (recur ne (next a) (cons rr r)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn kresolve [e x] ; translation unit, env, parse tree
+(defn kresolve [tu e x] ; translation unit, env, parse tree
   (let [t (if (coll? x) (first x) x)
         v (if (coll? x)
             (cond (= :list t)          (next x)
@@ -544,33 +546,36 @@
                   (= 2 (count x))      (second x)
                   :else                (next x))
             nil)]
-    (cond (= t :adverbed) (resolve-adverbed e v)
-          (= t :assign  ) (resolve-assign e v)
-          (= t :at      ) (resolve-at e v)
+    (cond (= t :adverbed) (resolve-adverbed tu e v)
+          (= t :assign  ) (resolve-assign tu e v)
+          (= t :at      ) (resolve-at tu e v)
           (= t :bool    ) [e (= "1" v)]
           (= t :bools   ) [e (mapv #(= \1 %) v)]
-          (= t :call    ) (resolve-call e v)
+          (= t :call    ) (resolve-call tu e v)
           (= t :char    ) [e (char (first v))]
           (= t :chars   ) [e v]
-          (= t :dyop    ) (resolve-dyop e v)
+          (= t :dyop    ) (resolve-dyop tu e v)
           (= t :empty   ) [e []]
-          (= t :expr    ) (kresolve e v)
+          (= t :expr    ) (kresolve tu e v)
           (= t :float   ) [e (parse-double v)]
           (= t :floats  ) [e (mapv parse-double (str/split v #"[ \n\r\t]+"))]
           (= t :hole    ) [e :hole] ;; nil ?
           (= t :id      ) [e (e (keyword v))]
-          (= t :juxt    ) (resolve-juxt e v)
-          (= t :lambda  ) (resolve-lambda e v)
-          (= t :list    ) (resolve-list e v)
+          (= t :juxt    ) (resolve-juxt tu e v)
+          (= t :lambda  ) (resolve-lambda tu
+                                          (apply (partial subs tu) (insta/span x))
+                                          e
+                                          v)
+          (= t :list    ) (resolve-list tu e v)
           (= t :long    ) [e (parse-long v)]
           (= t :longs   ) [e (mapv parse-long (str/split v #"[ \n\r\t]+"))]
-          (= t :monop   ) (resolve-monop e v)
+          (= t :monop   ) (resolve-monop tu e v)
           (= t :op      ) [e (ops (keyword v))]
           (= t :raw     ) [e v]
-          (= t :select  ) (resolve-select e v)
+          (= t :select  ) (resolve-select tu e v)
           (= t :symbol  ) [e (keyword v)]
           (= t :symbols ) [e (mapv keyword (next (str/split v #"`")))]
-          (= t :table   ) (resolve-table e v)
+          (= t :table   ) (resolve-table tu e v)
           :else           [e x])))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -587,7 +592,7 @@
       (println (substr (format f k v) 0 w)))))
 
 (defn show-lambda [x]
-  (println x))
+  (println (:text x)))
 
 (defn show-table [x]
   (let [h (mapv name (:k x))
@@ -622,7 +627,7 @@
         (if (and (not= "\\\\" line) (not= "exit" line))
           (let [e2 (try
                      (let [x (second (parse line))
-                           [ne r] (kresolve e x)]
+                           [ne r] (kresolve line e x)]
                        (if (not= :assign (first x))
                          (show r))
                        ne)
@@ -631,7 +636,7 @@
                        e))]
             (recur e2)))))))
 
-(defn keval [x] (last (kresolve builtin (second (parse x)))))
+(defn keval [x] (last (kresolve x builtin (second (parse x)))))
 (defn krun [x]  (show (keval x)))
 
 (defn -main
