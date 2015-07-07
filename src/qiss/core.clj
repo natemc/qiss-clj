@@ -586,6 +586,9 @@
     (doseq [[k v] (map list (take n (:k x)) (take n (:v x)))]
       (println (substr (format f k v) 0 w)))))
 
+(defn show-lambda [x]
+  (println x))
+
 (defn show-table [x]
   (let [h (mapv name (:k x))
         n (min (:rows viewport) (count (first (:v x)))) ; TODO: fix
@@ -602,7 +605,9 @@
 
 (defn show [x]
   (cond (vector? x) (println x) ; TODO - distinguish uniform vs mixed (use meta?)
-        (map? x)    (if (:t x) (show-table x) (show-dict x))
+        (map? x)    (cond (:t x) (show-table x)
+                          (:f x) (show-lambda x)
+                          :else (show-dict x))
         :else       (println x)))
 
 (defn repl []
