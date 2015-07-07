@@ -105,6 +105,12 @@ qiss$ rlwrap lein run
 §)add:{x+y}
 §)add[3;4]
 7
+§) 
+§)/ lambdas are closures
+§)f:{[a]{a+x}}3 / a is captured
+§)f@!10 / @ for monadic function application; just like indexing
+[3 4 5 6 7 8 9 10 11 12]
+§) 
 §)/ BEWARE! () do not invoke a function, [] do
 §) 
 §)/ dyadic functions, including user-defined ones, can be used infix
