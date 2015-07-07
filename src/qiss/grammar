@@ -38,15 +38,15 @@ dyop       = lhs ws? op ws? rhs
 ldyop      = llhs ws? lop ws? lrhs
 empty      = '()'
 <exprx>    = select
-	   | !select dy
-	   | !(select|dy) (call|juxt)
-	   | !(select|call|dy|juxt) svl
-	   | !(select|call|dy|juxt|svl) nsvl
+	   / dy
+	   / nsvl
+	   / (call|juxt)
+	   / svl
 <lexprx>   = select
-	   | !select ldy
-	   | !(select|ldy) (call|ljuxt)
-	   | !(select|call|ldy|ljuxt) svl
-	   | !(select|call|ldy|ljuxt|svl) lnsvl
+	   / ldy
+	   / lnsvl
+	   / (call|ljuxt)
+	   / svl
 exprs      = exprsx
 <exprsx>   = (exprx|hole) (<';'> (exprx|hole))*
 float      = !floatsx #'-?([0-9]*\.[0-9]+|[0-9]+\.[0-9]*)([eE][-+]?[0-9]+)?'
@@ -54,12 +54,12 @@ floats     = &(floatx | (longx ws)+ floatx) floatsx
 <floatsx>  = #'-?([0-9]*\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?(([ \n\r\t]+)+-?([0-9]*\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?)+'
 <floatx>   = #'-?([0-9]*\.[0-9]+|[0-9]+\.[0-9]*)([eE][-+]?[0-9]+)?'
 formals    = <'['> id (<';'> id)* <']'>
-from       = <'from'> ws? exprx  (* lexprx? *)
+from       = <'from'> ws? lexprx  (* lexprx? *)
 hole       = Epsilon
 id         = idx
 lid        = lidx
 <idx>      = #'[a-zA-Z][a-zA-Z0-9_]*'
-<lidx>     = !keyword #'[a-zA-Z][a-zA-Z0-9_]*'
+<lidx>     = !keyword idx
 juxt       = !(advin|dy|floatsx|select) lhs ws? !dot rhs
 ljuxt      = !(advin|dy|floatsx|select) llhs ws? !dot lrhs
 keycols    = <'['> col? (<';'> col)* <']'>
@@ -67,8 +67,8 @@ keyword    = 'by'|'delete'|'from'|'select'|'update'|'where'
 lambda     = <'{'> formals? exprs <'}'>
 lhs        = lhsx
 llhs       = llhsx
-<lhsx>     = call | id | lit | parexpr | svl
-<llhsx>    = call | lid | lit | parexpr | svl
+<lhsx>     = call | id | !svl lit | parexpr | svl
+<llhsx>    = call | lid | !svl lit | parexpr | svl
 list       = <'('> (exprx|hole) (<';'> (exprx|hole))+ <')'>
 <lit>      = bool | char | empty | float | lambda | list | long | symbol | table
 long       = !(bool|bools|longsx) longx
@@ -88,7 +88,7 @@ lop        = '!' | '#' | '+' | '-' | '*' | '%' | '&' | '_' | '|' | '?' | relop
 rhs        = exprx
 lrhs       = lexprx
 select     = <'select'> ws? aggs? ws? (by ws)? from ws? where?
-<svl>      = bools | chars | floats | longs | symbols (* simple list literal *)
+<svl>      = bools | chars | floats | longs | symbols (* simple vector literal *)
 symbol     = !symbolsx <'`'> idx
 symbols    = symbolsx
 <symbolsx> = #'`[a-zA-Z][a-zA-Z0-9_]*(`[a-zA-Z][a-zA-Z0-9_]*)+'

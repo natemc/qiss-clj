@@ -129,7 +129,7 @@ qiss$ rlwrap lein run
 §)/ adverbs
 §)/ loops are expressed via higher-order functions called adverbs
 §)/ adverbs are suffixed to the operator or function they modify
-§)1 2+/:3 4 5 /§)/: is each-right
+§)1 2+/:3 4 5 / /: is each-right
 [[4 5] [5 6] [6 7]]
 §)1 2+\:3 4 5 / \: is each-left
 [[4 5 6] [5 6 7]]
