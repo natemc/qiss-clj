@@ -6,7 +6,6 @@
   (:gen-class))
 
 ;; Backlog
-;;   proper scoping (chained envs)
 ;;   indexing at depth
 ;;   dict+dict
 ;;   @ 3&4 args
@@ -97,6 +96,17 @@
           (map? y) {:k (:k y) :v (mapv #(self x %) (:v y))}
           :else     (f x y))))
 
+(defmacro promote-bools [bf of x y]
+  `(let [f# (fn [a# b#]
+             (if (bool? a#)
+               (if (bool? b#)
+                 (~bf a# b#)
+                 (~of (if a# 1 0) b#))
+               (if (bool? b#)
+                 (~of a# (if b# 1 0))
+                 (~of a# b#))))]
+    ((atomize f#) ~x ~y)))
+
 (defn to-long [x]
   (cond (coll? x) (if (= 0 (count x)) [] (mapv to-long x))
         (bool? x) (if x 1 0)
@@ -107,15 +117,7 @@
   ([e x] [e (where x)]))
 (defn amp
   ([x] (where x))
-  ([x y] (let [f (fn [a b]
-                   (if (bool? a)
-                     (if (bool? b)
-                       (and a b)
-                       (min (if a 1 0) b))
-                     (if (bool? b)
-                       (min a (if b 1 0))
-                       (min a b))))]
-           ((atomize f) x y))))
+  ([x y] (promote-bools and min x y)))
 
 (defn eq
   ([x] (if (vector? x)
@@ -144,15 +146,7 @@
 
 (defn pipe
   ([x] (vec (reverse x)))
-  ([x y] (let [f (fn [a b]
-                   (if (bool? a)
-                     (if (bool? b)
-                       (or a b)
-                       (max (if a 1 0) b))
-                     (if (bool? b)
-                       (max a (if b 1 0))
-                       (max a b))))]
-           ((atomize f) x y))))
+  ([x y] (promote-bools or max x y)))
 
 (defn mkdict [k v] {:k k :v v})
 
@@ -244,7 +238,7 @@
              (t-from-d x)
              (err "can only flip column dicts")))
          (err "nyi flipping stuff other than dicts")))
-  ([x y] ((atomize +) x y)))
+  ([x y] (promote-bools #(+ (map to-long [%1 %2])) + x y)))
 
 (defn scan [f]
   (fn [e & x]

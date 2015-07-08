@@ -244,7 +244,7 @@ qiss$
 Unbounded!  There is much work to do.  These are some of the most
 pressing issues:
 
-* scope: chain envs, pass them around consistently
+* get rid of :pass-global-env
 * keyed tables
 * by clause in select
 * load/run scripts
