@@ -276,7 +276,7 @@
   ([x] (long x))
   ([x y] (if (vector? x) ; y x+!'1_0-':x,#y
            (let [i (mapv range (next (deltas (conj x (count y)))))]
-             (index y (mapv (fn [p q] (mapv #(+ p %) q)) x (null! i))))
+             (index y (mapv (fn [p q] (mapv #(+ p %) q)) x i)))
            (vec (if (<= 0 x)
                   (drop x y)
                   (drop-last (- x) y))))))
@@ -388,7 +388,7 @@
 (defn can-be-monadic [x] (some #{1} (:rank x)))
 (defn can-be-dyadic [x] (some #{2} (:rank x)))
 (defn apply-monadic [e f x]
-                                        ; (println "apply-monadic" f "\t" x)
+  ;; (println "apply-monadic" f "\t" x)
   (if (or (vector? f) (:k f) (table? f))
     [e (index f x)]
     [e (if (:pass-global-env f) ((:f f) e x) ((:f f) x))]))
@@ -398,7 +398,7 @@
 
 
 (defn resolve-adverbed [tu e x]
-  (if (contains? (null! x) :lhs) ; eval must be right to left!
+  (if (contains? x :lhs) ; eval must be right to left!
     (if (contains? x :rhs)
       (let [[e2 r] (kresolve tu e  (:rhs x))
             [e3 o] (kresolve tu e2 (:verb x))
@@ -407,7 +407,7 @@
         [e4 ((m o) e l r)])
       (err "nyi: bind lhs of adverbed expr (partial)"))
     (if (contains? x :rhs)
-      (let [[e2 r] (kresolve tu (null! e)  (:rhs x))
+      (let [[e2 r] (kresolve tu e  (:rhs x))
             [e3 o] (kresolve tu e2 (:verb x))
             m      (adverbs (keyword (:adverb x)))]
         [e3 ((m o) e r)])
@@ -497,7 +497,7 @@
                             (kresolve tu e (insta/transform (sub-table t i)
                                                             (first c))))]
           (recur [e2 (index i j)] (next c)))))
-    [e nil]))
+    [env nil]))
 
 (defn guess-col [x]
   (cond (empty? x)        :x
@@ -507,8 +507,8 @@
 (defn add-to-dict [d k v]
   (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
 
-(defn compute-aggs [tu e t i s]
-  (loop [e e a s r {:t true :k [] :v []}]
+(defn compute-aggs [tu e t i a]
+  (loop [e e a a r {:t true :k [] :v []}]
     (if (empty? a)
       [e r]
       (let [p       (first a)
@@ -526,19 +526,8 @@
                                   (merge e2 (zipmap (:k t) (:v t)))
                                   t
                                   (:where x))]
-    (if-let [s (:aggs x)]
-      (loop [e e3 a s r {:t true :k [] :v []}]
-        (if (empty? (null! a))
-          [e r]
-          (let [p       (first a)
-                cn      (if (= :assign (first p))
-                          (keyword (second (second p)))
-                          (guess-col p))
-                [e4 rr] (kresolve tu e (insta/transform (sub-table t i)
-                                                        (first a)))
-                cd      (if (coll? rr) rr [rr])]
-            (recur e4 (next a) (add-to-dict r cn cd)))))
-;;      (compute-aggs tu e3 t i s)
+    (if-let [a (:aggs x)]
+      (compute-aggs tu e3 t i a)
       [e3 (if i (index t i) t)])))
 
 (defn resolve-table-helper [tu e b]
@@ -619,29 +608,36 @@
 (defn show-lambda [x]
   (println (:text x)))
 
-(defn show-table [x]
-  (let [h (mapv name (:k x))
+(defn table-as-strings [x]
+  (let [h (mapv name (:k x)) ; col header
         n (min (:rows viewport) (count (first (:v x)))) ; TODO: fix
-        c (mapv #(vec (take n %)) (:v x))
+        c (mapv #(vec (take n %)) (:v x)) ; col data
         s (mapv #(mapv str %) c)
         w (mapv #(apply max (cons (count %1) (map count %2))) h s)
-        f (mapv #(str "%-" (+ 1 %) "s") w)]
-    (doseq [[f s] (map list f h)] (printf f s))
-    (println)
-    (println (str/join (replicate (+ -1 (count w) (reduce + w)) "-")))
-    (doseq [i (range n)]
-      (doseq [[f s] (map list f s)] (printf f (s i)))
-      (println))))
+        f (mapv #(str "%-" % "s") w)
+        fmt-row (fn [& r] (str/join " " (map format f r)))]
+    (vec (cons (apply fmt-row h)
+               (cons (str/join (replicate (+ -1 (count w) (reduce + w)) "-"))
+                     (apply (partial map fmt-row) s))))))
+
+(defn show-table [x]
+  (println (str/join "\n" (table-as-strings x))))
+
+(defn show-keyed-table [x]
+  (let [k (table-as-strings (:k x))
+        v (table-as-strings (:v x))]
+    (println (str/join "\n" (map (fn [& r] (str/join "| " r)) k v)))))
 
 (defn show [x]
   (cond (vector? x) (println x) ; TODO - distinguish uniform vs mixed (use meta?)
-        (map? x)    (cond (:t x) (show-table x)
-                          (:f x) (show-lambda x)
-                          :else (show-dict x))
+        (map? x)    (cond (:kt x) (show-keyed-table x)
+                          (:t x)  (show-table x)
+                          (:f x)  (show-lambda x)
+                          :else   (show-dict x))
         :else       (println x)))
 
 (defn repl []
-  (println "Welcome to qiss: short and simple.")
+  (println "Welcome to qiss.  qiss is short and simple.")
   (loop [e builtin] ; env
     (do ; (print "e ") (println e)
                                         ;        (print "\u00b3)") (flush))
