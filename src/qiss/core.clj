@@ -1,6 +1,6 @@
 (ns qiss.core
   (:require [instaparse.core :as insta])
-  (:require [clojure.stacktrace :refer :all])
+  (:require [clojure.stacktrace :as st])
   (:require [clojure.string :as str])
   (:require [midje.sweet :refer :all])
   (:gen-class))
@@ -398,7 +398,7 @@
 
 
 (defn resolve-adverbed [tu e x]
-  (if (contains? x :lhs) ; eval must be right to left!
+  (if (contains? (null! x) :lhs) ; eval must be right to left!
     (if (contains? x :rhs)
       (let [[e2 r] (kresolve tu e  (:rhs x))
             [e3 o] (kresolve tu e2 (:verb x))
@@ -407,7 +407,7 @@
         [e4 ((m o) e l r)])
       (err "nyi: bind lhs of adverbed expr (partial)"))
     (if (contains? x :rhs)
-      (let [[e2 r] (kresolve tu e  (:rhs x))
+      (let [[e2 r] (kresolve tu (null! e)  (:rhs x))
             [e3 o] (kresolve tu e2 (:verb x))
             m      (adverbs (keyword (:adverb x)))]
         [e3 ((m o) e r)])
@@ -481,9 +481,11 @@
     (apply-monadic e2 o a)))
 
 (defn sub-table [t i]
-  {:id (fn [x] (if (some #{(keyword x)} (:k t))
-                 [:at [:lhs [:id x]] [:rhs [:raw i]]]
-                 [:id x]))})
+  (if i
+    {:id (fn [x] (if (some #{(keyword x)} (:k t))
+                   [:at [:lhs [:id x]] [:rhs [:raw i]]]
+                   [:id x]))}
+    {}))
 
 (defn apply-constraints [tu env t w]
   (if w
@@ -505,6 +507,19 @@
 (defn add-to-dict [d k v]
   (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
 
+(defn compute-aggs [tu e t i s]
+  (loop [e e a s r {:t true :k [] :v []}]
+    (if (empty? a)
+      [e r]
+      (let [p       (first a)
+            cn      (if (= :assign (first p))
+                      (keyword (second (second p)))
+                      (guess-col p))
+            [e2 rr] (kresolve tu e (insta/transform (sub-table t i)
+                                                    (first a)))
+            cd      (if (coll? rr) rr [rr])]
+        (recur e2 (next a) (add-to-dict r cn cd))))))
+
 (defn resolve-select [tu e x]
   (let [[e2 t] (kresolve tu e (:from x))
         [e3 i] (apply-constraints tu
@@ -513,7 +528,7 @@
                                   (:where x))]
     (if-let [s (:aggs x)]
       (loop [e e3 a s r {:t true :k [] :v []}]
-        (if (empty? a)
+        (if (empty? (null! a))
           [e r]
           (let [p       (first a)
                 cn      (if (= :assign (first p))
@@ -522,12 +537,12 @@
                 [e4 rr] (kresolve tu e (insta/transform (sub-table t i)
                                                         (first a)))
                 cd      (if (coll? rr) rr [rr])]
-            (recur e (next a) (add-to-dict r cn cd)))))
+            (recur e4 (next a) (add-to-dict r cn cd)))))
+;;      (compute-aggs tu e3 t i s)
       [e3 (if i (index t i) t)])))
 
-(defn resolve-table [tu e x]
-  (let [b (:cols x)
-        c (map (comp map-from-tuples next)
+(defn resolve-table-helper [tu e b]
+  (let [c (map (comp map-from-tuples next)
                (if (= :col (first b)) [b] b))]
     (loop [e e a (reverse (map :rhs c)) r ()]
       (if (empty? a)
@@ -537,6 +552,13 @@
           (err "length"))
         (let [[ne rr] (kresolve tu e (first a))]
           (recur ne (next a) (cons rr r)))))))
+
+(defn resolve-table [tu e x]
+  (let [[e2 t] (resolve-table-helper tu e (:cols x))]
+    (if-let [kc (:keycols x)]
+      (let [[e3 k] (resolve-table-helper tu e2 kc)]
+        [e3 (assoc (mkdict k t) :kt true)])
+      [e2 t])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn kresolve [tu e x] ; translation unit, env, parse tree
