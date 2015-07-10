@@ -58,6 +58,7 @@
 (defn all [x] (every? (fn [x] x) x))
 (defn any [x] (some (fn [x] x) x))
 
+(defn mkdict [k v] {:k k :v v})
 (defn dict? [x] (and (map? x) (not (:t x)))) ;; disqualify keyed tables, too?
 (defn table? [x] (and (map? x) (:t x)))
 (defn cols [x] (:k x))
@@ -151,12 +152,11 @@
   ([x] (vec (reverse x)))
   ([x y] (promote-bools or max x y)))
 
-(defn mkdict [k v] {:k k :v v})
-
 (defn tilde
   ([x] (if (vector? x) (mapv tilde x) (not x)))
   ([x y] (= x y)))
 
+(declare pound)
 (defn bang
   ([x] (cond (= java.lang.Long (type x)) (vec (range x))
              (map? x) (:k x)
@@ -193,7 +193,6 @@
              (vec (cons x y))
              [x y]))))
 
-(declare pound)
 (defn take-from-vec [n x]
   (if (<= 0 n)
     (mapv #(x (mod % (count x))) (range n))
@@ -393,22 +392,30 @@
         (t-from-d r)
         r))))
 (declare apply-constraints)
+(declare builtin)
+(defn index-keyed-table-helper [t i o]
+  (let [k (:k t)
+        [e r] (apply-constraints ""
+                                 (merge builtin (zipmap (:k k) (:v k)))
+                                 k
+                                 (map (fn [x y]
+                                        [:call
+                                         [:target o]
+                                         [:actuals [:id (name x)] [:raw y]]])
+                                      (cols k)
+                                      (:v i)))]
+    (index-table (:v t) r)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn index-keyed-table [t i]
   (cond (dict? i)
-        (if (= (keycols t) (:k i))
-          (let [k (:k t)
-                [e r] (apply-constraints "" (zipmap (:k k) (:v k)) k
-                                         (map (fn [x y]
-                                                [:dyop
-                                                 [:lhs [:id (name x)]]
-                                                 [:op "="]
-                                                 [:rhs [:raw y]]])
-                                              (cols k)
-                                              (:v i)))]
-            (index-table (:v t) r))
-          (err "mismatch" t i))
-        (table? i) (err "nyi")
-        :else (err "nyi")))
+        (if (not= (keycols t) (:k i))
+          (err "mismatch" t i)
+          (index-keyed-table-helper t i [:op "="]))
+        (table? i)
+        (if (not= (keycols t) (cols i))
+          (err "mismatch" t  i)
+          (index-keyed-table-helper t i [:id "in"]))
+        :else (err "nyi"))) ;; TODO: allow trivial index
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TODO: unify apply-dyadic, apply-monadic, index, invoke,
@@ -685,10 +692,11 @@
                           :else   (show-dict x))
         :else       (println x)))
 
+(defn eval-no-env [x] (last (kresolve x {} (second (parse x)))))
 (def builtin {:div  {:f div :rank [2]}
               :exit {:f exit :rank [0 1]}
               :mod  {:f kmod :rank [2]}
-              :in (keval "{(#y)>y?x}")})
+              :in (eval-no-env "{(#y)>y?x}")})
 
 (defn repl []
   (println "Welcome to qiss.  qiss is short and simple.")
