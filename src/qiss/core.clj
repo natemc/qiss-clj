@@ -29,7 +29,7 @@
 
 ;; functions that will differ btwn JVM and JS
 (def bool? (partial instance? java.lang.Boolean))
-(def err #(throw (Exception. (str "'" %))))
+(def err (fn [& x] (throw (Exception. (str/join ["'" (str/join " " x)])))))
 (defn exit
   ([] (exit 0))
   ([x] (System/exit x)))
@@ -58,7 +58,11 @@
 (defn all [x] (every? (fn [x] x) x))
 (defn any [x] (some (fn [x] x) x))
 
+(defn dict? [x] (and (map? x) (not (:t x)))) ;; disqualify keyed tables, too?
 (defn table? [x] (and (map? x) (:t x)))
+(defn cols [x] (:k x))
+(defn keyed-table? [x] (and (map? x) (:kt x)))
+(defn keycols [x] (cols (:k x)))
 (defn d-from-t [x] (dissoc x :t))
 (defn t-from-d [x] (assoc x :t true))
 
@@ -75,26 +79,25 @@
            0))
   ([e x y] (last (apply-monadic e x y))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn atomize [f]
   (fn self[x y]
-    (cond (vector? x) (cond (vector? y)
-                            (if (= (count x) (count y))
-                              (mapv self x y)
-                              (err "length"))
-                            (map? y) (if (= (count x) (count (:k y)))
-                                       {:k (:k y) :v (mapv self x (:v y))}
-                                       (err "length"))
-                            :else (mapv #(self % y) x))
-          (map? x) (cond (vector? y)
-                         (if (= (count (:k x)) (count y))
-                           {:k (:k x) :v (mapv self (:v x) y)}
-                           (err "length"))
-                         (map? y) (err "nyi map op map")
-                         :else {:k (:k x) :v (mapv #(self % y) (:v x))})
-                                        ; x is atom cases
+    (cond (vector? x) (cond (vector? y) (if (= (count x) (count y))
+                                          (mapv self x y)
+                                          (err "length" f x y))
+                            (map? y)    (if (= (count x) (count (:k y)))
+                                          (mkdict (:k y) (mapv self x (:v y)))
+                                          (err "length" f x y))
+                            :else       (mapv #(self % y) x))
+          (map? x)    (cond (vector? y) (if (= (count (:k x)) (count y))
+                                          {:k (:k x) :v (mapv self (:v x) y)}
+                                          (err "length" f x y))
+                            (map? y)    (err "nyi" f x y)
+                            :else       (mkdict (:k x) (mapv #(self % y) (:v x))))
+          ;; x is atom cases
           (vector? y) (mapv #(self x %) y)
-          (map? y) {:k (:k y) :v (mapv #(self x %) (:v y))}
-          :else     (f x y))))
+          (map? y)    (mkdict (:k y) (mapv #(self x %) (:v y)))
+          :else       (f x y))))
 
 (defmacro promote-bools [bf of x y]
   `(let [f# (fn [a# b#]
@@ -157,10 +160,20 @@
 (defn bang
   ([x] (cond (= java.lang.Long (type x)) (vec (range x))
              (map? x) (:k x)
-             :else (err (str "nyi: monadic ! on " x))))
-  ([x y] (if (= (count x) (count y))
-           (mkdict x y)
-           (err "length"))))
+             :else (err "nyi: monadic ! on" x)))
+  ([x y] (if (vector? x)
+           (if (vector? y)
+             (if (= (count x) (count y))
+               (mkdict x y)
+               (err "length" x y))
+             (err "mismatch" x "!" y))
+           (if (and (table? x) (table? y))
+             (if (= (pound x) (pound y))
+               (assoc (mkdict x y) :kt true)
+               (err "length" x y))
+             (if (or (coll? x) (coll? y))
+               (err "type" x y)
+               (mkdict [x] [y]))))))
 
 (defn div [x y] ((atomize quot) x y))
 (defn kmod [x y] ((atomize mod) x y))
@@ -180,18 +193,31 @@
              (vec (cons x y))
              [x y]))))
 
-(defn ktake
-  ([x] (count x))
-  ;; take on a dictionary
-  ([x y] (cond (coll? x) () ;; TODO: take a box
-               (coll? y) (if (bool? x)
-                           (if x [(first y)] [])
-                           (if (<= 0 x)
-                             (mapv #(y (mod % (count y))) (range x))
-                             (vec (take-last (- x) y)))) ; TODO neg overtake
-               :else (if (bool? x)
-                       (if x [y] [])
-                       (vec (repeat x y))))))
+(declare pound)
+(defn take-from-vec [n x]
+  (if (<= 0 n)
+    (mapv #(x (mod % (count x))) (range n))
+    (vec (take-last (- n) x)))) ; TODO neg overtake
+(defn take-from-dict [n x] (mkdict (pound n (:k x)) (pound n (:v x))))
+(defn take-from-table [n x]
+  (t-from-d (mkdict (:k x) (mapv (partial pound n) (:v x)))))
+(defn take-from-keyed-table [n x]
+  (assoc (mkdict (pound n (:k x)) (pound n (:v x))) :kt true))
+(defn pound
+  ([x] (cond (vector? x) (count x)
+             (map?    x) (cond (:kt x) (count (first (:v (:k x))))
+                               (:t x)  (count (first (:v x)))
+                               :else   (count (:v x)))
+             :else       (err (str "Can't apply # to " x))))
+  ([x y] (if (coll? x)
+           () ;; TODO: take a box
+           (let [n (if (bool? x) (if x 1 0) x)]
+             (cond (not (coll? y)) (vec (repeat n y))
+                   (vector? y)     (take-from-vec n y)
+                   (map?    y)     (cond (:kt y) (take-from-keyed-table n y)
+                                         (:t y)  (take-from-table n y)
+                                         :else   (take-from-dict n y))
+                   :else           (err "nyi: # on " y))))))
 
 (defn minus
   ([x] (- x))
@@ -251,9 +277,6 @@
   ([x] (first x))
   ([x y] ((atomize *) x y)))
 
-(def builtin {:div  {:f div :rank [2]}
-              :exit {:f exit :rank [0 1]}
-              :mod  {:f kmod :rank [2]}})
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (declare index)
 (defn ques
@@ -292,7 +315,7 @@
           :- {:op true :f minus :rank [1 2]}
           :* {:op true :f times :rank [1 2]}
           :% {:op true :f fdiv :rank [1 2]}
-          :# {:op true :f ktake :rank [1 2]}
+          :# {:op true :f pound :rank [1 2]}
           (keyword ",") {:f join :rank [1 2]}
           :& {:op true :f amp :rank [1 2]}
           :| {:op true :f pipe :rank [1 2]}
@@ -346,6 +369,7 @@
     (mapv keyword (implicit-args (:exprs f)))))
 
 (declare kresolve)
+(declare resolve-full-expr)
 
 ;; TODO think through updating closed-over variables
 ;; vs locals vs globals ...
@@ -357,7 +381,7 @@
       (loop [e3 e2 p (:exprs f) r nil]
         (if (empty? p)
           r
-          (let [[e4 rr] (kresolve tu e3 (first p))]
+          (let [[e4 rr] (resolve-full-expr tu e3 (first p))]
             (recur e4 (next p) rr)))))))
 (defn index-table [t i]
   (if (or (and (vector? i) (keyword? (first i)))
@@ -368,13 +392,34 @@
       (if (vector? i)
         (t-from-d r)
         r))))
+(declare apply-constraints)
+(defn index-keyed-table [t i]
+  (cond (dict? i)
+        (if (= (keycols t) (:k i))
+          (let [k (:k t)
+                [e r] (apply-constraints "" (zipmap (:k k) (:v k)) k
+                                         (map (fn [x y]
+                                                [:dyop
+                                                 [:lhs [:id (name x)]]
+                                                 [:op "="]
+                                                 [:rhs [:raw y]]])
+                                              (cols k)
+                                              (:v i)))]
+            (index-table (:v t) r))
+          (err "mismatch" t i))
+        (table? i) (err "nyi")
+        :else (err "nyi")))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; TODO: unify apply-dyadic, apply-monadic, index, invoke,
+;; resolve-at, resolve-call, and resolve-juxt
 (defn index [x i]
-  (cond (table? x)  (index-table x i)
-        (vector? i) (mapv (partial index x) i)
-        (map? i)    (mkdict (:k i) (index x (:v i)))
-        (coll? i)   (reduce index x i)
-        (vector? x) (x i)
+  (cond (vector? i)      (mapv (partial index x) i)
+        (table? x)       (index-table x i)
+        (keyed-table? x) (index-keyed-table x i)
+        (map? i)         (mkdict (:k i) (index x (:v i)))
+        (coll? i)        (reduce index x i)
+        (vector? x)      (x i)
         :else ((:v x) (index-of (:k x) i))))
 (defn invoke [e f a]
   (let [p (if (:pass-global-env f) (partial (:f f) e) (:f f))]
@@ -413,7 +458,7 @@
         [e3 ((m o) e r)])
       (let [[e2 o] (kresolve tu e (:verb x))
             m      (adverbs (keyword (:adverb x)))]
-        [e2 (merge o {:f (m o)})]))))
+        [e2 (merge o {:f (m o) :pass-global-env true})]))))
 
 (defn resolve-assign [tu e x]
   (let [[e2 r] (kresolve tu e (:rhs x))]
@@ -463,9 +508,8 @@
                     :env e
                     :pass-global-env true
                     :rank [(count a)]
-                    :text t})
-        f (feval tu w)]
-    [e (assoc w :f f)]))
+                    :text t})]
+    [e (assoc w :f (feval tu w))]))
 
 (defn resolve-list [tu e x]
   (let [p (reverse x)]
@@ -525,7 +569,7 @@
         [e3 i] (apply-constraints tu
                                   (merge e2 (zipmap (:k t) (:v t)))
                                   t
-                                  (:where x))]
+                                  (null! (:where x)))]
     (if-let [a (:aggs x)]
       (compute-aggs tu e3 t i a)
       [e3 (if i (index t i) t)])))
@@ -570,7 +614,7 @@
           (= t :chars   ) [e v]
           (= t :dyop    ) (resolve-dyop tu e v)
           (= t :empty   ) [e []]
-          (= t :expr    ) (kresolve tu e v)
+          (= t :expr    ) (resolve-full-expr tu e v)
           (= t :float   ) [e (parse-double v)]
           (= t :floats  ) [e (mapv parse-double (str/split v #"[ \n\r\t]+"))]
           (= t :hole    ) [e :hole] ;; nil ?
@@ -592,6 +636,11 @@
           (= t :table   ) (resolve-table tu e v)
           :else           [e x])))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn resolve-full-expr [tu e x]
+  (let [[e2 r] (kresolve tu e x)]
+    (if (and (= :juxt (first x)) (:second r))
+      (apply-monadic e2 r (:second r))
+      [e2 r])))
 
 (def viewport {:rows 25 :cols 80})
 
@@ -636,6 +685,11 @@
                           :else   (show-dict x))
         :else       (println x)))
 
+(def builtin {:div  {:f div :rank [2]}
+              :exit {:f exit :rank [0 1]}
+              :mod  {:f kmod :rank [2]}
+              :in (keval "{(#y)>y?x}")})
+
 (defn repl []
   (println "Welcome to qiss.  qiss is short and simple.")
   (loop [e builtin] ; env
@@ -648,7 +702,7 @@
         (if (and (not= "\\\\" line) (not= "exit" line))
           (let [e2 (try
                      (let [x (second (parse line))
-                           [ne r] (kresolve line e x)]
+                           [ne r] (resolve-full-expr line e x)]
                        (if (not= :assign (first x))
                          (show r))
                        ne)
@@ -749,7 +803,9 @@
        (fact "they can be dyadic"
              (keval "0+/1 2 3") => 6)
        (fact "/: does"
-             (keval "1 2 3*/:1 2") => [[1 2 3] [2 4 6]]))
+             (keval "1 2 3*/:1 2") => [[1 2 3] [2 4 6]])
+       (fact "can be assigned"
+             (keval "{a:+/;a[0;3 4 5]}[]") => 12))
 ;;       (fact "they can be compounded"  TODO: fix
 ;;             (keval ",//(1 2 3;(4 5 6;7 8 9))") => [1 2 3 4 5 6 7 8 9]))
 (facts "about calling functions"
