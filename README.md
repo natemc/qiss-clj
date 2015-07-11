@@ -233,6 +233,12 @@ a b
 a b
 ----
 6 60
+§)select +/b by a from t
+a| b 
+-| --
+1| 30
+2| 30
+3| 30
 §) 
 §)/ exit
 §)\\
@@ -244,25 +250,26 @@ qiss$
 Unbounded!  There is much work to do.  These are some of the most
 pressing issues:
 
-* get rid of :pass-global-env
-* keyed tables
-* by clause in select
+* fix grammar: infix with vector literal on lhs (e.g., 1 2 in 1 2 3)
+* keying tables with !
 * load/run scripts
+* ascii I/O 
 * test cases
 * port to ClojureScript
 * indexing at depth: (`a`b`c;`d`e`f)[0 1;0 1] => [[:a :b] [:d :e]]
-* dot
+* .
 * dict op dict
 * xasc & xdesc
 * treat strings like vectors: indexing, join, take, drop, ...
 * nulls: will nil do?
 * reshape (take a box) form of the # operator
 * partial function application
+* 3- and 4-arg versions of @ andf .
 * generic list literal with holes is a list constructor
+* get rid of :pass-global-env 
 * vs and sv 
 * casting and parsing with $
 * if special form
-* ascii I/O
 * stacked adverbs e.g. ,//(1 2 3;(4 5 6;7 8 9)) => [1 2 3 4 5 6 7 8 9]
 * better console output
 * vector conditional form of ?

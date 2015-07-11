@@ -57,8 +57,9 @@
 (defn null! [x] (do (println x) x))
 (defn all [x] (every? (fn [x] x) x))
 (defn any [x] (some (fn [x] x) x))
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn mkdict [k v] {:k k :v v})
+(defn add-to-dict [d k v] (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
 (defn dict? [x] (and (map? x) (not (:t x)))) ;; disqualify keyed tables, too?
 (defn table? [x] (and (map? x) (:t x)))
 (defn cols [x] (:k x))
@@ -122,16 +123,17 @@
 (defn amp
   ([x] (where x))
   ([x y] (promote-bools and min x y)))
-
+(defn group [x]
+  (if (vector? x)
+    (let [k (vec (distinct x))]
+      (reduce (fn [d [i g]]
+                (let [j (index-of (:k d) g)]
+                  (assoc d :v (assoc (:v d) j (conj ((:v d) j) i)))))
+              {:k k :v (vec (replicate (count k) []))}
+              (map (fn [x y] [x y]) (iterate inc 0) x)))
+    (err "can't group non-vector " x)))
 (defn eq
-  ([x] (if (vector? x)
-         (let [k (vec (distinct x))]
-           (reduce (fn [d [i g]]
-                     (let [j (index-of (:k d) g)]
-                       (assoc d :v (assoc (:v d) j (conj ((:v d) j) i)))))
-                   {:k k :v (vec (replicate (count k) []))}
-                   (map (fn [x y] [x y]) (iterate inc 0) x)))
-         (err "can't group non-vector " x)))
+  ([x] (group x))
   ([x y] ((atomize =) x y)))
 
 (defn neq
@@ -202,21 +204,25 @@
   (t-from-d (mkdict (:k x) (mapv (partial pound n) (:v x)))))
 (defn take-from-keyed-table [n x]
   (assoc (mkdict (pound n (:k x)) (pound n (:v x))) :kt true))
+(defn kcount [x]
+  (cond (vector? x) (count x)
+        (map?    x) (cond (:kt x) (count (first (:v (:k x))))
+                          (:t x)  (count (first (:v x)))
+                          :else   (count (:v x)))
+        :else       1))
+(defn ktake [x y]
+  (if (coll? x)
+    (err "nyi: reshape") ;; TODO: take a box
+    (let [n (if (bool? x) (if x 1 0) x)]
+      (cond (not (coll? y)) (vec (repeat n y))
+            (vector? y)     (take-from-vec n y)
+            (map?    y)     (cond (:kt y) (take-from-keyed-table n y)
+                                  (:t y)  (take-from-table n y)
+                                  :else   (take-from-dict n y))
+            :else           (err "nyi: # on " y)))))
 (defn pound
-  ([x] (cond (vector? x) (count x)
-             (map?    x) (cond (:kt x) (count (first (:v (:k x))))
-                               (:t x)  (count (first (:v x)))
-                               :else   (count (:v x)))
-             :else       (err (str "Can't apply # to " x))))
-  ([x y] (if (coll? x)
-           () ;; TODO: take a box
-           (let [n (if (bool? x) (if x 1 0) x)]
-             (cond (not (coll? y)) (vec (repeat n y))
-                   (vector? y)     (take-from-vec n y)
-                   (map?    y)     (cond (:kt y) (take-from-keyed-table n y)
-                                         (:t y)  (take-from-table n y)
-                                         :else   (take-from-dict n y))
-                   :else           (err "nyi: # on " y))))))
+  ([x] (kcount x))
+  ([x y] (ktake x y)))
 
 (defn minus
   ([x] (- x))
@@ -253,16 +259,18 @@
         (reduce p (first x))
         (reduce p (first x) (second x))))))
 
+(defn flip [x]
+  (cond (map? x)    (if (table? x)
+                      (d-from-t x)
+                      (if (and (all (mapv keyword? (:k x)))
+                               (all (mapv vector? (:v x)))
+                               (apply = (mapv count (:v x))))
+                        (t-from-d x)
+                        (err "can only flip column dicts")))
+        (vector? x) (apply mapv vector x)
+        :else       (err "nyi: flip" x)))
 (defn plus
-  ([x] (if (map? x)
-         (if (table? x)
-           (d-from-t x)
-           (if (and (all (mapv keyword? (:k x)))
-                    (all (mapv vector? (:v x)))
-                    (apply = (mapv count (:v x))))
-             (t-from-d x)
-             (err "can only flip column dicts")))
-         (err "nyi flipping stuff other than dicts")))
+  ([x] (flip x))
   ([x y] (promote-bools #(+ (map to-long [%1 %2])) + x y)))
 
 (defn scan [f]
@@ -342,7 +350,7 @@
                  q (next %2)]
              (assoc %1 p (if (or (not= 1 (count q))
                                  (some #{(first %2)}
-                                       [:actuals :aggs :exprs :formals :where]))
+                                       [:actuals :aggs :by :exprs :formals :where]))
                            q
                            (first q))))
           {}
@@ -421,10 +429,10 @@
 ;; TODO: unify apply-dyadic, apply-monadic, index, invoke,
 ;; resolve-at, resolve-call, and resolve-juxt
 (defn index [x i]
-  (cond (vector? i)      (mapv (partial index x) i)
-        (table? x)       (index-table x i)
+  (cond (table? x)       (index-table x i)
         (keyed-table? x) (index-keyed-table x i)
         (map? i)         (mkdict (:k i) (index x (:v i)))
+        (vector? i)      (mapv (partial index x) i)
         (coll? i)        (reduce index x i)
         (vector? x)      (x i)
         :else ((:v x) (index-of (:k x) i))))
@@ -548,38 +556,53 @@
                             (kresolve tu e (insta/transform (sub-table t i)
                                                             (first c))))]
           (recur [e2 (index i j)] (next c)))))
-    [env nil]))
+    [env (vec (range (pound t)))]))
 
 (defn guess-col [x]
   (cond (empty? x)        :x
         (= :id (first x)) (keyword (second x))
         :else (last (map guess-col (next x)))))
 
-(defn add-to-dict [d k v]
-  (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
-
 (defn compute-aggs [tu e t i a]
-  (loop [e e a a r {:t true :k [] :v []}]
+  (loop [e e a a r {:k [] :v []}]
     (if (empty? a)
       [e r]
-      (let [p       (first a)
-            cn      (if (= :assign (first p))
-                      (keyword (second (second p)))
-                      (guess-col p))
-            [e2 rr] (kresolve tu e (insta/transform (sub-table t i)
-                                                    (first a)))
-            cd      (if (coll? rr) rr [rr])]
-        (recur e2 (next a) (add-to-dict r cn cd))))))
+      (let [p      (first a)
+            n      (if (= :assign (first p))
+                     (keyword (second (second p)))
+                     (guess-col p))
+            [e2 d] (kresolve tu e (insta/transform (sub-table t i)
+                                                    p))]
+        (recur e2 (next a) (add-to-dict r n d))))))
+
+(defn raze [x] (vec (mapcat #(if (coll? %) % [%]) x)))
+(defn except [x y]
+  (let [p (if (coll? y) #(some #{%} y) #(= % y))]
+    (vec (remove p x))))
 
 (defn resolve-select [tu e x]
   (let [[e2 t] (kresolve tu e (:from x))
         [e3 i] (apply-constraints tu
                                   (merge e2 (zipmap (:k t) (:v t)))
                                   t
-                                  (null! (:where x)))]
-    (if-let [a (:aggs x)]
-      (compute-aggs tu e3 t i a)
-      [e3 (if i (index t i) t)])))
+                                  (:where x))]
+    (if-let [b (:by x)]
+      (let [[e4 g] (compute-aggs tu e3 t i b)
+            j      (index i (group (flip (:v g))))
+            k      (t-from-d (mkdict (:k g) (flip (:k j))))]
+        (if-let [a (:aggs x)]
+          (let [u (mapv #(last (compute-aggs tu e4 t % a)) (:v j))
+                v (t-from-d (mkdict (:k (first u)) (flip (mapv :v u))))]
+            [e4 (assoc (mkdict k v) :kt true)])
+          (let [c (except (:k t) (:k g)) ;; cols not in the by clause
+                v (t-from-d (mkdict c (mapv #(index % (:v j)) (index t c))))]
+            [e4 (assoc (mkdict k v) :kt true)])))
+      (if-let [a (:aggs x)]
+        (let [[e5 r] (compute-aggs tu e3 t i a)
+              n      (apply max (mapv kcount (:v r)))
+              v      (mapv #(if (= 1 (kcount %)) (ktake n %) %) (:v r))]
+          [e5 (assoc r :t true :v v)])
+        [e3 (index t i)]))))
 
 (defn resolve-table-helper [tu e b]
   (let [c (map (comp map-from-tuples next)
@@ -625,7 +648,9 @@
           (= t :float   ) [e (parse-double v)]
           (= t :floats  ) [e (mapv parse-double (str/split v #"[ \n\r\t]+"))]
           (= t :hole    ) [e :hole] ;; nil ?
-          (= t :id      ) [e (e (keyword v))]
+          (= t :id      ) (if-let [u (e (keyword v))]
+                            [e u]
+                            (err v "not found in scope"))
           (= t :juxt    ) (resolve-juxt tu e v)
           (= t :lambda  ) (resolve-lambda tu
                                           (apply (partial subs tu) (insta/span x))
@@ -696,7 +721,9 @@
 (def builtin {:div  {:f div :rank [2]}
               :exit {:f exit :rank [0 1]}
               :mod  {:f kmod :rank [2]}
-              :in (eval-no-env "{(#y)>y?x}")})
+              :avg  (eval-no-env "{(+/x)%#x}")
+              :in   (eval-no-env "{(#y)>y?x}")
+              :last (eval-no-env "{x@-1+#x}")})
 
 (defn repl []
   (println "Welcome to qiss.  qiss is short and simple.")
@@ -845,6 +872,18 @@
              (keval ",1 2 3") => [[1 2 3]])
        (fact "dyadic joins"
              (keval "1 2,3 4") => [1 2 3 4]))
+(facts "about select"
+       (fact "no agg required"
+             (keval "select from([]a:1 2 3)") => (keval "([]a:1 2 3)"))
+       (fact "id agg guesses result column to match original column"
+             (keval "select a from([]a:1 2 3)") => (keval "([]a:1 2 3)")))
+(facts "about by"
+       (fact "simple case"
+             (keval "select +/b by a from([]a:6#`a`b`c;b:!6)") =>
+             (keval "([a:`a`b`c]b:3 5 7)"))
+       (fact "compound by clause"
+             (keval "select by a,b from([]a:8#`a`a`b`b;b:8#`a`b;c:!8)") =>
+             (keval "([a:`a`a`b`b;b:`a`b`a`b];c:(0 4;1 5;2 6;3 7))")))
 (facts "about where"
        (fact "works with bools"
              (keval "&1001b") => [0 3])
