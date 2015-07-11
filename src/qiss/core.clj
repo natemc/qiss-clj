@@ -57,8 +57,9 @@
 (defn null! [x] (do (println x) x))
 (defn all [x] (every? (fn [x] x) x))
 (defn any [x] (some (fn [x] x) x))
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn mkdict [k v] {:k k :v v})
+(defn add-to-dict [d k v] (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
 (defn dict? [x] (and (map? x) (not (:t x)))) ;; disqualify keyed tables, too?
 (defn table? [x] (and (map? x) (:t x)))
 (defn cols [x] (:k x))
@@ -122,16 +123,17 @@
 (defn amp
   ([x] (where x))
   ([x y] (promote-bools and min x y)))
-
+(defn group [x]
+  (if (vector? x)
+    (let [k (vec (distinct x))]
+      (reduce (fn [d [i g]]
+                (let [j (index-of (:k d) g)]
+                  (assoc d :v (assoc (:v d) j (conj ((:v d) j) i)))))
+              {:k k :v (vec (replicate (count k) []))}
+              (map (fn [x y] [x y]) (iterate inc 0) x)))
+    (err "can't group non-vector " x)))
 (defn eq
-  ([x] (if (vector? x)
-         (let [k (vec (distinct x))]
-           (reduce (fn [d [i g]]
-                     (let [j (index-of (:k d) g)]
-                       (assoc d :v (assoc (:v d) j (conj ((:v d) j) i)))))
-                   {:k k :v (vec (replicate (count k) []))}
-                   (map (fn [x y] [x y]) (iterate inc 0) x)))
-         (err "can't group non-vector " x)))
+  ([x] (group x))
   ([x y] ((atomize =) x y)))
 
 (defn neq
@@ -342,7 +344,7 @@
                  q (next %2)]
              (assoc %1 p (if (or (not= 1 (count q))
                                  (some #{(first %2)}
-                                       [:actuals :aggs :exprs :formals :where]))
+                                       [:actuals :aggs :by :exprs :formals :where]))
                            q
                            (first q))))
           {}
@@ -548,15 +550,12 @@
                             (kresolve tu e (insta/transform (sub-table t i)
                                                             (first c))))]
           (recur [e2 (index i j)] (next c)))))
-    [env nil]))
+    [env (vec (range (pound t)))]))
 
 (defn guess-col [x]
   (cond (empty? x)        :x
         (= :id (first x)) (keyword (second x))
         :else (last (map guess-col (next x)))))
-
-(defn add-to-dict [d k v]
-  (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
 
 (defn compute-aggs [tu e t i a]
   (loop [e e a a r {:t true :k [] :v []}]
@@ -567,19 +566,33 @@
                       (keyword (second (second p)))
                       (guess-col p))
             [e2 rr] (kresolve tu e (insta/transform (sub-table t i)
-                                                    (first a)))
+                                                    p))
             cd      (if (coll? rr) rr [rr])]
         (recur e2 (next a) (add-to-dict r cn cd))))))
+
+(defn raze [x] (vec (apply concat x)))
 
 (defn resolve-select [tu e x]
   (let [[e2 t] (kresolve tu e (:from x))
         [e3 i] (apply-constraints tu
                                   (merge e2 (zipmap (:k t) (:v t)))
                                   t
-                                  (null! (:where x)))]
-    (if-let [a (:aggs x)]
-      (compute-aggs tu e3 t i a)
-      [e3 (if i (index t i) t)])))
+                                  (:where x))]
+    (if-let [b (:by x)]
+      (let [[e4 g] (compute-aggs tu e3 t i b)
+            j      (index i (group (first (:v g))))]
+        (if-let [a (:aggs x)]
+          (let [k (t-from-d (mkdict (:k g) [(:k j)]))
+                u (mapv #(last (compute-aggs tu e4 t % a)) (:v j))
+                v (t-from-d (mkdict (:k (first u))
+                                    [(raze (apply (partial map
+                                                           (fn [& p] (raze p)))
+                                                  (map :v u)))]))]
+            [e4 (assoc (mkdict k v) :kt true)])
+          [e j])) ;; TODO
+      (if-let [a (:aggs x)]
+        (null! (compute-aggs tu e3 t i a))
+        [e3 (if i (index t i) t)]))))
 
 (defn resolve-table-helper [tu e b]
   (let [c (map (comp map-from-tuples next)
@@ -625,7 +638,9 @@
           (= t :float   ) [e (parse-double v)]
           (= t :floats  ) [e (mapv parse-double (str/split v #"[ \n\r\t]+"))]
           (= t :hole    ) [e :hole] ;; nil ?
-          (= t :id      ) [e (e (keyword v))]
+          (= t :id      ) (if-let [u (e (keyword v))]
+                            [e u]
+                            (err v "not found in scope"))
           (= t :juxt    ) (resolve-juxt tu e v)
           (= t :lambda  ) (resolve-lambda tu
                                           (apply (partial subs tu) (insta/span x))
@@ -845,6 +860,12 @@
              (keval ",1 2 3") => [[1 2 3]])
        (fact "dyadic joins"
              (keval "1 2,3 4") => [1 2 3 4]))
+(facts "about by"
+       (fact "simple case"
+             (keval "select +/b by a from([]a:6#`a`b`c;b:!6)") =>
+             (assoc (mkdict (t-from-d (mkdict [:a] [[:a :b :c]]))
+                            (t-from-d (mkdict [:b] [[3 5 7]])))
+                    :kt true)))
 (facts "about where"
        (fact "works with bools"
              (keval "&1001b") => [0 3])
