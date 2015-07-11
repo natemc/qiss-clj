@@ -30,7 +30,7 @@ RUN apt-get update && apt-get install -y rlwrap vim nodejs nodejs-legacy npm git
 # until repo goes public, we have to use this.
 # http://stackoverflow.com/questions/23391839/clone-private-git-repo-with-dockerfile
 # there's a implied WORKDIR of / here..
-RUN git clone https://3376880cd7bfdab8103e9f5fa94e404ac818c0cb@github.com/natemc/qiss # hi
+RUN git clone https://3376880cd7bfdab8103e9f5fa94e404ac818c0cb@github.com/natemc/qiss 
 WORKDIR /qiss
 #
 # use below when repo goes public
@@ -60,7 +60,11 @@ RUN mkdir -p src/hello_world && wget https://github.com/clojure/clojurescript/re
 
 EXPOSE 3000
 
+# qiss
+#WORKDIR /qiss
 #CMD rlwrap lein run - lein does not like rlwrap, wrap around the docker process
 #CMD lein run
+
+# node
 WORKDIR /mynodeapp 
 CMD npm start
