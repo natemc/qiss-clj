@@ -7,3 +7,7 @@ pom.xml.asc
 *.class
 /.lein-*
 /.nrepl-port
+*.swp
+/.repl-0.0-3308
+/clojurescript/node_modules
+/clojurescript/out
