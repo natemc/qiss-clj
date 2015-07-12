@@ -57,7 +57,11 @@
 (defn all [x] (every? (fn [x] x) x))
 (defn any [x] (some (fn [x] x) x))
 (defn catv [x y] (vec (concat x y)))
+(defn except [x y]
+  (let [p (if (coll? y) #(some #{%} y) #(= % y))]
+    (vec (remove p x))))
 (defn null! [x] (do (println x) x))
+(defn raze [x] (vec (mapcat #(if (coll? %) % [%]) x)))
 (defn removev [v i] (catv (subvec v 0 i) (subvec v (+ 1 i) (count v))))
 (defn til-count [x] (vec (range (count x))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -68,7 +72,10 @@
 (defn keyed-table? [x] (and (map? x) (:kt x)))
 (defn table? [x] (and (map? x) (:t x)))
 (defn add-to-dict [d k v] (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
-(defn cols [x] (:k x))
+(defn cols [x]
+  (cond (table? x)       (:k x)
+        (keyed-table? x) (catv (:k (:k x)) (:k (:v x)))
+        :else            (err "cols cannot be applied to" x)))
 (defn keycols [x] (cols (:k x)))
 (defn d-from-t [x] (dissoc x :t))
 (defn t-from-d [x] (assoc x :t true))
@@ -165,8 +172,10 @@
 
 (declare kcount)
 (defn unkey-table [x]
-  (let [k (:k x) v (:v x)]
-    (make-table (catv (:k k) (:k v)) (catv (:v k) (:v v)))))
+  (if (table? x)
+    x
+    (let [k (:k x) v (:v x)]
+      (make-table (catv (:k k) (:k v)) (catv (:v k) (:v v))))))
 (defn key-table-by-colname [x y]
   (let [i (index-of (:k y) x)]
     (if (= i (count (:k y)))
@@ -618,34 +627,32 @@
                                                     p))]
         (recur e2 (next a) (add-to-dict r n d))))))
 
-(defn raze [x] (vec (mapcat #(if (coll? %) % [%]) x)))
-(defn except [x y]
-  (let [p (if (coll? y) #(some #{%} y) #(= % y))]
-    (vec (remove p x))))
-
 (defn resolve-select [tu e x]
   (let [[e2 t] (kresolve tu e (:from x))
+        ut     (unkey-table t)
         [e3 i] (apply-constraints tu
-                                  (merge e2 (zipmap (:k t) (:v t)))
-                                  t
+                                  (merge e2 (zipmap (:k ut) (:v ut)))
+                                  ut
                                   (:where x))]
     (if-let [b (:by x)]
-      (let [[e4 g] (compute-aggs tu e3 t i b)
+      (let [[e4 g] (compute-aggs tu e3 ut i b)
             j      (index i (group (flip (:v g))))
             k      (make-table (:k g) (flip (:k j)))]
         (if-let [a (:aggs x)]
-          (let [u (mapv #(last (compute-aggs tu e4 t % a)) (:v j))
+          (let [u (mapv #(last (compute-aggs tu e4 ut % a)) (:v j))
                 v (make-table (:k (first u)) (flip (mapv :v u)))]
             [e4 (assoc (make-dict k v) :kt true)])
           (let [c (except (:k t) (:k g)) ;; cols not in the by clause
-                v (make-table c (mapv #(index % (:v j)) (index t c)))]
+                v (make-table c (mapv #(index % (:v j)) (index ut c)))]
             [e4 (assoc (make-dict k v) :kt true)])))
       (if-let [a (:aggs x)]
-        (let [[e5 r] (compute-aggs tu e3 t i a)
+        (let [[e5 r] (compute-aggs tu e3 ut i a)
               n      (apply max (mapv kcount (:v r)))
               v      (mapv #(if (= 1 (kcount %)) (ktake n %) %) (:v r))]
           [e5 (assoc r :t true :v v)])
-        [e3 (index t i)]))))
+        [e3 (if (keyed-table? t)
+              (key-table-by-colnames (keycols t) (index ut i))
+              (index t i))]))))
 
 (defn resolve-table-helper [tu e b]
   (let [c (map (comp map-from-tuples next)
