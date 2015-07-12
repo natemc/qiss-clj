@@ -60,11 +60,6 @@
 (defn except [x y]
   (let [p (if (coll? y) #(some #{%} y) #(= % y))]
     (vec (remove p x))))
-(defn klast [x]
-  (cond (vector? x) (last x)
-        (table? x)  (index x (- (count x) 1))
-        (map? x)    (klast (:v x))
-        :else       (err "can't apply last to" x)))
 (defn null! [x] (do (println x) x))
 (defn raze [x] (vec (mapcat #(if (coll? %) % [%]) x)))
 (defn removev [v i] (catv (subvec v 0 i) (subvec v (+ 1 i) (count v))))
@@ -84,6 +79,13 @@
 (defn keycols [x] (cols (:k x)))
 (defn d-from-t [x] (dissoc x :t))
 (defn t-from-d [x] (assoc x :t true))
+
+(declare index)
+(defn klast [x]
+  (cond (vector? x) (last x)
+        (table? x)  (index x (- (count x) 1))
+        (map? x)    (klast (:v x))
+        :else       (err "can't apply last to" x)))
 
 (declare apply-monadic)
 (declare index)
