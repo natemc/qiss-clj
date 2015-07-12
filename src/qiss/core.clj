@@ -1,5 +1,7 @@
 (ns qiss.core
   (:require [instaparse.core :as insta])
+  (:require [clojure-csv.core :as csv])
+  (:require [clojure.java.io :as io])
   (:require [clojure.stacktrace :as st])
   (:require [clojure.string :as str])
   (:require [midje.sweet :refer :all])
@@ -34,7 +36,12 @@
   ([] (exit 0))
   ([x] (System/exit x)))
 (defn index-of [x i] (let [j (.indexOf x i)] (if (< j 0) (count x) j)))
-
+(defn string [x]
+  (cond (string? x)  x
+        (keyword? x) (name x)
+        :else        (str/join x))) ;; vector of char
+(defn read-lines [x]
+  (with-open [r (io/reader (string x))] (vec (line-seq r))))
 (def grammar (clojure.java.io/resource "qiss/grammar"))
 (def xform   {:ladverbed (fn [& x] (vec (cons :adverbed x)))
               :lassign   (fn [& x] (vec (cons :assign x)))
@@ -373,9 +380,25 @@
                   (drop x y)
                   (drop-last (- x) y))))))
 
-(defn parse-long [x] (Long/parseLong x))
-(defn parse-double [x] (Double/parseDouble x))
-
+(defn parse-double [x]
+  (if (coll? x) (mapv parse-double x) (Double/parseDouble x)))
+(defn parse-long [x]
+  (if (coll? x) (mapv parse-long x) (Long/parseLong x)))
+(defn parse-symbol [x]
+  (if (coll? x) (mapv keyword x) (keyword x)))
+(defn parse-data [x y]
+  (cond (= \J x) (parse-long y)
+        (= \F x) (parse-double y)
+        (= \S x) (parse-symbol y)
+        (= \* x) y
+        :else (err "nyi: parse type" (str x))))
+(defn rcsv [c f] ;; col types and file name
+  (let [d (csv/parse-csv (slurp (string f)))] ;; assumes header line
+    (mapv parse-data (string c) (flip (vec d)))))
+(defn rcsvh [c f] ;; col types and file name
+  (let [[h & d] (csv/parse-csv (slurp (string f)))] ;; assumes header line
+    (make-table (vec h) (mapv parse-data (string c) (flip (vec d))))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (def ops {
           (keyword "~") {:op true :f tilde  :rank [1 2]}
           :! {:op true :f bang :rank [1 2]}
@@ -717,7 +740,7 @@
           (= t :empty   ) [e []]
           (= t :expr    ) (resolve-full-expr tu e v)
           (= t :float   ) [e (parse-double v)]
-          (= t :floats  ) [e (mapv parse-double (str/split v #"[ \n\r\t]+"))]
+          (= t :floats  ) [e (parse-double (str/split v #"[ \n\r\t]+"))]
           (= t :hole    ) [e :hole] ;; nil ?
           (= t :id      ) (if-let [u (e (keyword v))]
                             [e u]
@@ -729,7 +752,7 @@
                                           v)
           (= t :list    ) (resolve-list tu e v)
           (= t :long    ) [e (parse-long v)]
-          (= t :longs   ) [e (mapv parse-long (str/split v #"[ \n\r\t]+"))]
+          (= t :longs   ) [e (parse-long (str/split v #"[ \n\r\t]+"))]
           (= t :monop   ) (resolve-monop tu e v)
           (= t :op      ) [e (ops (keyword v))]
           (= t :raw     ) [e v]
@@ -825,12 +848,15 @@
             e
             (rest (parse f :start :exprs)))))
   
-(def builtin (kload {:div  {:f div :rank [2]}
-                     :exit {:f exit :rank [0 1]}
-                     :last {:f klast :rank [1]}
-                     :mod  {:f kmod :rank [2]}
-                     :sv   {:f sv :rank [2]}
-                     :vs   {:f vs :rank [2]}}
+(def builtin (kload {:div   {:f div :rank [2]}
+                     :exit  {:f exit :rank [0 1]}
+                     :last  {:f klast :rank [1]}
+                     :mod   {:f kmod :rank [2]}
+                     :rcsv  {:f rcsv :rank [2]}
+                     :rcsvh {:f rcsvh :rank [2]}
+                     :read  {:f read-lines :rank [1]}
+                     :sv    {:f sv :rank [2]}
+                     :vs    {:f vs :rank [2]}}
                     "src/qiss/qiss.qiss"))
 
 (defn repl [e] ; env
