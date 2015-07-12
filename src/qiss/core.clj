@@ -106,6 +106,13 @@
            0))
   ([e x y] (last (apply-monadic e x y))))
 
+(defn dot
+  ([e x] (cond (dict? x)        (:v x)
+               (keyed-table? x) (:v x)
+               (keyword? x)     (if-let [u (e x)] u (err x "not found"))
+               :else            (err "nyi: . on" x)))
+  ([e x y] (err "nyi: .")))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn atomize [f]
   (fn self[x y]
@@ -215,16 +222,16 @@
                                             (vec (drop x (:v y)))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn key-table [x y]
-  (cond (table? x)                  (if (= (kcount x) (kcount y))
-                                      (assoc (make-dict x y) :kt true)
-                                      (err "length" x y))
-        (vector? x)                 (key-table-by-colnames x y)
-        (= java.lang.Long (type x)) (key-table-by-long x y)
-        (keyword? x)                (key-table-by-colname x y)
-        :else                       (err "nyi" x "!" y)))
+  (cond (table? x)   (if (= (kcount x) (kcount y))
+                       (assoc (make-dict x y) :kt true)
+                       (err "length" x y))
+        (vector? x)  (key-table-by-colnames x y)
+        (number? x)  (key-table-by-long x y)
+        (keyword? x) (key-table-by-colname x y)
+        :else        (err "nyi" x "!" y)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn bang
-  ([x] (cond (= java.lang.Long (type x)) (vec (range x))
+  ([x] (cond (number? x) (vec (range x))
              (vector? x) (til-count x)
              (map? x) (:k x)
              :else (err "nyi: monadic ! on" x)))
@@ -262,16 +269,27 @@
              (vec (cons x y))
              [x y]))))
 
+(declare findv)
 (declare ktake)
 (defn take-from-vec [n x]
   (if (<= 0 n)
     (mapv #(x (mod % (count x))) (range n))
     (vec (take-last (- n) x)))) ; TODO neg overtake
-(defn take-from-dict [n x] (make-dict (ktake n (:k x)) (ktake n (:v x))))
+(defn take-from-dict [n x]
+  (cond (number? n) (make-dict (ktake n (:k x)) (ktake n (:v x)))
+        (keyword? n) (take-from-dict [n] x)
+        ;; TODO: introduce nulls like q does in this case?
+        (not (every? #(some #{%} (:k x)) n)) (err "mismatch: #" n x)
+        :else (make-dict n (index (:v x) (findv (:k x) n)))))
 (defn take-from-table [n x]
-  (make-table (:k x) (mapv (partial ktake n) (:v x))))
+  (cond (number? n) (make-table (:k x) (mapv (partial ktake n) (:v x)))
+        (keyword? n) (take-from-table [n] x)
+        (not (every? #(some #{%} (cols x)) n)) (err "mismatch: #" n x)
+        :else (make-table n (index (:v x) (findv (cols x) n)))))
 (defn take-from-keyed-table [n x]
-  (assoc (make-dict (ktake n (:k x)) (ktake n (:v x))) :kt true))
+  (if (number? n)
+    (assoc (make-dict (ktake n (:k x)) (ktake n (:v x))) :kt true)
+    (take-from-table n (unkey-table x))))
 (defn kcount [x]
   (cond (vector? x) (count x)
         (map?    x) (cond (:kt x) (count (first (:v (:k x))))
@@ -279,7 +297,7 @@
                           :else   (count (:v x)))
         :else       1))
 (defn ktake [x y]
-  (if (coll? x)
+  (if (and (coll? x) (not (empty? x)) (number? (first x)))
     (err "nyi: reshape") ;; TODO: take a box
     (let [n (if (bool? x) (if x 1 0) x)]
       (cond (not (coll? y)) (vec (repeat n y))
@@ -406,25 +424,26 @@
       (.write w (csv/write-csv d)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (def ops {
-          (keyword "~") {:op true :f tilde  :rank [1 2]}
-          :! {:op true :f bang :rank [1 2]}
-          :at {:f at :pass-global-env true :rank [1 2]} ;[1 2 3 4]}
-          :+ {:op true :f plus :rank [1 2]}
-          :- {:op true :f minus :rank [1 2]}
-          :* {:op true :f times :rank [1 2]}
-          :% {:op true :f fdiv :rank [1 2]}
-          :# {:op true :f pound :rank [1 2]}
-          (keyword ",") {:f join :rank [1 2]}
-          :& {:op true :f amp :rank [1 2]}
-          :| {:op true :f pipe :rank [1 2]}
-          :_ {:op true :f under :rank [1 2]}
-          := {:op true :f eq :rank [1 2]}
-          :<> {:op true :f neq :rank [2]}
-          :< {:op true :f less :rank [1 2]}
-          :> {:op true :f greater :rank [1 2]}
-          :<= {:op true :f le :rank [2]} ; don't know what the monadic form does in k
-          :>= {:op true :f ge :rank [2]}
-          :? {:op true :f ques :rank [1 2 3]}
+          (keyword "~") {:op true :f tilde  :text "~" :rank [1 2]}
+          :! {:op true :f bang :text "!" :rank [1 2]}
+          :at {:f at :pass-global-env true :text "@" :rank [1 2]} ;[1 2 3 4]}
+          :dot {:f dot :pass-global-env true :text "." :rank [1 2]} ;[1 2 3 4]}
+          :+ {:op true :f plus :text "+" :rank [1 2]}
+          :- {:op true :f minus :text "-" :rank [1 2]}
+          :* {:op true :f times :text "*" :rank [1 2]}
+          :% {:op true :f fdiv :text "%" :rank [1 2]}
+          :# {:op true :f pound :text "#" :rank [1 2]}
+          (keyword ",") {:f join :text "," :rank [1 2]}
+          :& {:op true :f amp :text "&" :rank [1 2]}
+          :| {:op true :f pipe :text "|" :rank [1 2]}
+          :_ {:op true :f under :text "_" :rank [1 2]}
+          := {:op true :f eq :text "=" :rank [1 2]}
+          :<> {:op true :f neq :text "<>" :rank [2]}
+          :< {:op true :f less :text "<" :rank [1 2]}
+          :> {:op true :f greater :text ">" :rank [1 2]}
+          :<= {:op true :f le :text "<=" :rank [2]} ; don't know what the monadic form does in k
+          :>= {:op true :f ge :text ">=" :rank [2]}
+          :? {:op true :f ques :text "?" :rank [1 2 3]}
           })
 (def adverbs {:' each
               (keyword "\\:") each-left
@@ -593,6 +612,17 @@
       (err "nyi: partially bound @ from lhs")
       [e (ops :at)])))
 
+(defn resolve-dot [tu e x]
+  (if (:rhs x)
+    (let [[e2 rhs] (kresolve tu e (:rhs x))]
+      (if (:lhs x)
+        (let [[e3 lhs] (kresolve tu e2 (:lhs x))]
+          (apply apply-dyadic e3 lhs rhs)) ;; TODO: generalize
+        [e2 (dot e2 rhs)]))
+    (if (:lhs x)
+      (err "nyi: partially bound . from lhs")
+      [e (ops :dot)])))
+
 (defn resolve-call [tu e x]
   (loop [e e a (reverse (:actuals x)) r ()]
     (if (empty? a) ;; TODO: partial
@@ -742,6 +772,7 @@
           (= t :call    ) (resolve-call tu e v)
           (= t :char    ) [e (char (first v))]
           (= t :chars   ) [e (vec v)]
+          (= t :dot     ) (resolve-dot tu e v)
           (= t :dyop    ) (resolve-dyop tu e v)
           (= t :empty   ) [e []]
           (= t :expr    ) (resolve-full-expr tu e v)
@@ -836,7 +867,7 @@
     (println (str/join "\n" (map (fn [& r] (str/join "| " r)) k v)))))
 
 (defn show-vector [x] ;; TODO - distinguish uniform vs mixed (use meta?)
-  (println (stringify x)))
+  (println x))
 
 (defn show [x]
   (cond (vector? x) (show-vector x)

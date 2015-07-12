@@ -348,13 +348,15 @@ pressing issues:
 * fix grammar so loading/running scripts isn't so fragile
 * test cases
 * nulls: will nil do?
-* xcol and xcols
+* xasc
+* xdesc
+* update
 * port to ClojureScript
 * indexing at depth: (`a`b`c;`d`e`f)[0 1;0 1] => [[:a :b] [:d :e]]
 * .
 * dict op dict
-* xasc & xdesc
-* update, delete, and insert
+* insert
+* delete
 * reshape (take a box) form of the # operator
 * partial function application
 * 3- and 4-arg versions of @ andf .

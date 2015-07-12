@@ -32,7 +32,7 @@ dot        = dotcore
 ldot       = dotcore
            | dotcore ws? lrhs
            | !(floatx|floatsx) llhs ws? dotcore ws? lrhs
-<dotcore>  = !floatsx '.'
+<dotcore>  = !floatsx <'.'>
 <dy>       = at | dot | dyop
 <ldy>      = lat | ldot | ldyop
 dyop       = lhs ws? op ws? rhs
