@@ -11,8 +11,7 @@
 ;;   @ 3&4 args
 ;;   .
 ;;   builtins
-;;   treat strings like vectors
-;;   special forms for queries
+;;   update, insert, delete
 ;;   conditional $
 ;;   nulls
 ;;   mixed-type lists with holes as factories
@@ -26,6 +25,7 @@
 ;;   time types
 ;;   \t and do (see clojure's time and dotimes functions)
 ;;   system
+;;   something like functional query but easier to use
 
 ;; functions that will differ btwn JVM and JS
 (def bool? (partial instance? java.lang.Boolean))
@@ -60,6 +60,11 @@
 (defn except [x y]
   (let [p (if (coll? y) #(some #{%} y) #(= % y))]
     (vec (remove p x))))
+(defn klast [x]
+  (cond (vector? x) (last x)
+        (table? x)  (index x (- (count x) 1))
+        (map? x)    (klast (:v x))
+        :else       (err "can't apply last to" x)))
 (defn null! [x] (do (println x) x))
 (defn raze [x] (vec (mapcat #(if (coll? %) % [%]) x)))
 (defn removev [v i] (catv (subvec v 0 i) (subvec v (+ 1 i) (count v))))
@@ -106,6 +111,8 @@
           (map? x)    (cond (vector? y) (if (= (count (:k x)) (count y))
                                           {:k (:k x) :v (mapv self (:v x) y)}
                                           (err "length" f x y))
+                            ;; TODO: for key elements in common, call self
+                            ;; for the rest, leave them alone / copy them
                             (map? y)    (err "nyi" f x y)
                             :else       (make-dict (:k x) (mapv #(self % y) (:v x))))
           ;; x is atom cases
@@ -225,6 +232,12 @@
 
 (defn div [x y] ((atomize quot) x y))
 (defn kmod [x y] ((atomize mod) x y))
+(defn sv [x y]
+ (vec (str/join (if (vector? x) (str/join x) x)
+                (mapv str/join y))))
+(defn vs [x y]
+  (mapv vec (str/split (str/join y)
+                       (re-pattern (if (vector? x) (str/join x) (str x))))))
 
 (defn fdiv
   ([x] (if (coll? x) (mapv #(double (/ %)) x)
@@ -803,16 +816,24 @@
         :else       (println x)))
 
 (defn eval-no-env [x] (last (kresolve x {} (second (parse x)))))
-(def builtin {:div  {:f div :rank [2]}
-              :exit {:f exit :rank [0 1]}
-              :mod  {:f kmod :rank [2]}
-              :avg  (eval-no-env "{(+/x)%#x}")
-              :in   (eval-no-env "{(#y)>((),y)?x}")
-              :last (eval-no-env "{x@-1+#x}")})
 
-(defn repl []
+(defn kload [e x]
+  (let [f (slurp x)]
+    (reduce #(let [[ne r] (resolve-full-expr f %1 %2)] ne)
+            e
+            (rest (parse f :start :exprs)))))
+  
+(def builtin (kload {:div  {:f div :rank [2]}
+                     :exit {:f exit :rank [0 1]}
+                     :last {:f klast :rank [1]}
+                     :mod  {:f kmod :rank [2]}
+                     :sv   {:f sv :rank [2]}
+                     :vs   {:f vs :rank [2]}}
+                    "src/qiss/qiss.qiss"))
+
+(defn repl [e] ; env
   (println "Welcome to qiss.  qiss is short and simple.")
-  (loop [e builtin] ; env
+  (loop [e e]
     (do ; (print "e ") (println e)
                                         ;        (print "\u00b3)") (flush))
       (print "\u00a7)") (flush))
@@ -837,7 +858,7 @@
 (defn -main
   "qiss repl"
   [& args]
-  (repl))
+  (repl builtin))
 
 (facts "about bools"
        (fact "bools eval to themselves"

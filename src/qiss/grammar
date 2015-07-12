@@ -25,6 +25,7 @@ char       = <'"'> #'\\.|[^\"]' <'"'>
 chars      = <'"'> #'(\\.|[^\"])(\\.|[^\"])+' <'"'>
 col        = lid <':'> rhs
 cols       = col (<';'> col)*
+comment    = ws '/' #'.*'
 dot        = dotcore
            | dotcore ws? rhs
            | !(floatx|floatsx) lhs ws? dotcore ws? rhs
@@ -42,20 +43,22 @@ empty      = '()'
 	   / nsvl
 	   / (call|juxt)
 	   / svl
+	   / <comment>
 <lexprx>   = select
 	   / ldy
 	   / lnsvl
 	   / (call|ljuxt)
 	   / svl
+	   / <comment>
 exprs      = exprsx
-<exprsx>   = (exprx|hole) (<';'> (exprx|hole))*
+<exprsx>   = (exprx|hole) (ws? <';'> ws? (exprx|hole))*
 float      = !floatsx #'-?([0-9]*\.[0-9]+|[0-9]+\.[0-9]*)([eE][-+]?[0-9]+)?'
 floats     = &(floatx | (longx ws)+ floatx) floatsx
 <floatsx>  = #'-?([0-9]*\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?(([ \n\r\t]+)+-?([0-9]*\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?)+'
 <floatx>   = #'-?([0-9]*\.[0-9]+|[0-9]+\.[0-9]*)([eE][-+]?[0-9]+)?'
 formals    = <'['> id (<';'> id)* <']'>
 from       = <'from'> ws? lexprx  (* lexprx? *)
-hole       = Epsilon
+hole       = ws?
 id         = idx
 lid        = lidx
 <idx>      = #'[a-zA-Z][a-zA-Z0-9_]*'

@@ -1,0 +1,3 @@
+avg:{(+/x)%#x};
+in:{(#y)>((),y)?x}
+/ Don't put a newline at EOF: the grammar needs work
