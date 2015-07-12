@@ -18,7 +18,6 @@
 ;;   nulls
 ;;   mixed-type lists with holes as factories
 ;;   k-ish console output
-;;   file I/O
 ;;   java interop
 ;;   attributes
 ;;   lj
@@ -355,11 +354,13 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (declare index)
+(defn findv [x y]
+  (if (vector? y)
+    (mapv #(index-of x %) y)
+    (index-of x y)))
 (defn ques
   ([x] (vec (distinct x)))
-  ([x y] (cond (vector? x) (if (vector? y)
-                             (mapv #(index-of x %) y)
-                             (index-of x y))
+  ([x y] (cond (vector? x) (findv x y)
                (map? x)    (index (:k x) (ques (:v x) y))
                :else       (if (vector? y)
                              (index y (vec (repeatedly x #(rand-int (count y)))))
@@ -398,6 +399,11 @@
 (defn rcsvh [c f] ;; col types and file name
   (let [[h & d] (csv/parse-csv (slurp (string f)))] ;; assumes header line
     (make-table (vec h) (mapv parse-data (string c) (flip (vec d))))))
+(defn wcsv [f t] ;; output file and table
+  (let [make-string (fn [x] (mapv #(if (keyword? %) (name %) (str %)) x))
+        d (cons (mapv name (cols t)) (map make-string (flip (:v t))))]
+    (with-open [w (io/writer (string f))]
+      (.write w (csv/write-csv d)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (def ops {
           (keyword "~") {:op true :f tilde  :rank [1 2]}
@@ -847,16 +853,40 @@
     (reduce #(let [[ne r] (resolve-full-expr f %1 %2)] ne)
             e
             (rest (parse f :start :exprs)))))
-  
-(def builtin (kload {:div   {:f div :rank [2]}
+
+(defn msome [p & c] ;; like some but p takes multiple args
+  (when (not (any (mapv empty? c)))
+    (or (apply p (mapv first c))
+        (recur p (mapv next c)))))
+
+(defn lj [x y]
+  (cond (not (keyed-table? y)) (err "rhs of lj must be a keyed table")
+        (not (every? #(some #{%} (cols x)) (keycols y))) (err "mismatch: lj" x y)
+        ;; for every row in x, find the index of the first matching row in y
+        :else
+        (let [j (apply mapv
+                       (fn [& p] (let [k (apply msome
+                                                (fn [i & q] (when (= p q) i))
+                                                (iterate inc 0)
+                                                (:v (:k y)))]
+                                   (if k k (kcount y))))
+                       (index (:v x) (findv (cols x) (keycols y))))
+              r (index-table (:v y) j)]
+          (make-table (catv (:k x) (:k r)) (catv (:v x) (:v r))))))
+
+(def builtin (kload {:cols  {:f cols :rank [1]}
+                     :div   {:f div :rank [2]}
                      :exit  {:f exit :rank [0 1]}
+                     :keys  {:f keycols :rank [1]}
                      :last  {:f klast :rank [1]}
+                     :lj    {:f lj :rank [2]}
                      :mod   {:f kmod :rank [2]}
                      :rcsv  {:f rcsv :rank [2]}
                      :rcsvh {:f rcsvh :rank [2]}
                      :read  {:f read-lines :rank [1]}
                      :sv    {:f sv :rank [2]}
-                     :vs    {:f vs :rank [2]}}
+                     :vs    {:f vs :rank [2]}
+                     :wcsv  {:f wcsv :rank [2]}}
                     "src/qiss/qiss.qiss"))
 
 (defn repl [e] ; env
@@ -1039,7 +1069,12 @@
              (keval "&1001b") => [0 3])
        (fact "works with longs"
              (keval "&0 1 2 3") => [1 2 2 3 3 3]))
-
+(facts "about lj"
+       (fact "uses rhs key col"
+             (keval "([]a:`a`b`c)lj([a:`a`b`c]b:1 2 3)") => (keval "([]a:`a`b`c;b:1 2 3)"))
+       (fact "two key cols"
+             (keval "([]a:`a`b`c;b:1 2 3)lj([a:`a`b`c;b:1 2 3]c:10 20 30)") =>
+             (keval "([]a:`a`b`c;b:1 2 3;c:10 20 30)")))
 (facts "about parsing non-ambiguity"
        (fact adverbed
              (count (parses "f/")) => 1
