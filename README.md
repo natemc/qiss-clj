@@ -69,7 +69,7 @@ qiss$ rlwrap lein run
 [:a :b :xyzzy]
 §)
 §)/ most dyadic operators are atomic: they automatically vectorize
-§)1+!5 / !5 means "til 5" i.e. 0 1 2 3 4
+§)1+!5 / ! is the key operator; !5 means "til 5" i.e. 0 1 2 3 4
 [1 2 3 4 5]
 §)(!5)*2
 [0 2 4 6 8]
@@ -227,7 +227,7 @@ a b
 2 20 
 3 10 
 3 20 
-§) 
+§)
 §)/ special forms enable sql-like syntax
 §)select +/a,+/b from t where b<=20,a<3
 a b
@@ -239,6 +239,65 @@ a| b
 1| 30
 2| 30
 3| 30
+§)/ note the vertical bar in the above select result
+§)/ this denotes a keyed table
+§)/ the ! operator can be used to manipulate a table's keys
+§)1!t / make t's first column a key  
+a| b 
+-| --
+1| 10
+1| 20
+1| 30
+2| 10
+2| 20
+2| 30
+3| 10
+3| 20
+3| 30
+§)`b!t / create key column(s) by name
+§)`b!t
+b | a
+--| -
+10| 1
+20| 1
+30| 1
+10| 2
+20| 2
+30| 2
+10| 3
+20| 3
+30| 3
+§)0!select +/b by a from t / remove keys from a keyed table
+a b 
+----
+1 60
+2 60
+3 60
+§)/ to create a keyed table as a literal, place the key columns in the []
+§)([a:`a`b`c`d`e]b:10*1+!5)
+a | b 
+--| --
+:a| 10
+:b| 20
+:c| 30
+:d| 40
+:e| 50
+§) 
+§)/ a query on a keyed table preserve its keys if the query 
+§)/ has no aggregations and no by clause
+§)select from 1!t where a in 1 2
+a| b 
+-| --
+1| 10
+1| 20
+1| 30
+2| 10
+2| 20
+2| 30
+§)select +/b from 1!t where a in 1 2
+b  
+---
+120
 §) 
 §)/ exit
 §)\\
@@ -257,6 +316,7 @@ pressing issues:
 * casting and parsing with $ 
 * ascii I/O 
 * test cases
+* lj
 * port to ClojureScript
 * indexing at depth: (`a`b`c;`d`e`f)[0 1;0 1] => [[:a :b] [:d :e]]
 * .
