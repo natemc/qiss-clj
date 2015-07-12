@@ -10,7 +10,6 @@
 ;;   dict+dict
 ;;   @ 3&4 args
 ;;   .
-;;   keyed tables
 ;;   builtins
 ;;   treat strings like vectors
 ;;   special forms for queries
@@ -25,6 +24,7 @@
 ;;   enable UDFs to modify the global env
 ;;   dot notation for dictionaries
 ;;   time types
+;;   \t and do (see clojure's time and dotimes functions)
 ;;   system
 
 ;; functions that will differ btwn JVM and JS
@@ -54,16 +54,21 @@
 (def parses  #(mapv (partial insta/transform xform) (insta/parses parser %)))
 (def vis     (comp insta/visualize parse))
 
-(defn null! [x] (do (println x) x))
 (defn all [x] (every? (fn [x] x) x))
 (defn any [x] (some (fn [x] x) x))
+(defn catv [x y] (vec (concat x y)))
+(defn null! [x] (do (println x) x))
+(defn removev [v i] (catv (subvec v 0 i) (subvec v (+ 1 i) (count v))))
+(defn til-count [x] (vec (range (count x))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn mkdict [k v] {:k k :v v})
-(defn add-to-dict [d k v] (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
+(defn make-dict [k v] {:k k :v v})
+(defn make-keyed-table [k v] {:k k :v v :kt true})
+(defn make-table [c d] {:k c :v d :t true})
 (defn dict? [x] (and (map? x) (not (:t x)))) ;; disqualify keyed tables, too?
-(defn table? [x] (and (map? x) (:t x)))
-(defn cols [x] (:k x))
 (defn keyed-table? [x] (and (map? x) (:kt x)))
+(defn table? [x] (and (map? x) (:t x)))
+(defn add-to-dict [d k v] (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
+(defn cols [x] (:k x))
 (defn keycols [x] (cols (:k x)))
 (defn d-from-t [x] (dissoc x :t))
 (defn t-from-d [x] (assoc x :t true))
@@ -88,17 +93,17 @@
                                           (mapv self x y)
                                           (err "length" f x y))
                             (map? y)    (if (= (count x) (count (:k y)))
-                                          (mkdict (:k y) (mapv self x (:v y)))
+                                          (make-dict (:k y) (mapv self x (:v y)))
                                           (err "length" f x y))
                             :else       (mapv #(self % y) x))
           (map? x)    (cond (vector? y) (if (= (count (:k x)) (count y))
                                           {:k (:k x) :v (mapv self (:v x) y)}
                                           (err "length" f x y))
                             (map? y)    (err "nyi" f x y)
-                            :else       (mkdict (:k x) (mapv #(self % y) (:v x))))
+                            :else       (make-dict (:k x) (mapv #(self % y) (:v x))))
           ;; x is atom cases
           (vector? y) (mapv #(self x %) y)
-          (map? y)    (mkdict (:k y) (mapv #(self x %) (:v y)))
+          (map? y)    (make-dict (:k y) (mapv #(self x %) (:v y)))
           :else       (f x y))))
 
 (defmacro promote-bools [bf of x y]
@@ -140,11 +145,11 @@
   ([x y] ((atomize not=) x y)))
 
 (defn greater
-  ([x] (vec (sort-by x (comp - compare) (range (count x))))) ; idesc
+  ([x] (vec (sort-by x (comp - compare) (til-count x)))) ; idesc
   ([x y] ((atomize >) x y)))
 
 (defn less
-  ([x] (vec (sort-by x (range (count x))))) ; iasc
+  ([x] (vec (sort-by x (til-count x)))) ; iasc
   ([x y] ((atomize <) x y)))
 
 (defn ge [x y] ((atomize >=) x y))
@@ -158,24 +163,56 @@
   ([x] (if (vector? x) (mapv tilde x) (not x)))
   ([x y] (= x y)))
 
-(declare pound)
+(declare kcount)
+(defn unkey-table [x]
+  (let [k (:k x) v (:v x)]
+    (make-table (catv (:k k) (:k v)) (catv (:v k) (:v v)))))
+(defn key-table-by-colname [x y]
+  (let [i (index-of (:k y) x)]
+    (if (= i (count (:k y)))
+      (err "mismatch: key col" x y)
+      (make-keyed-table (make-table [x] [((:v y) i)])
+                        (make-table (removev (:k y) i) (removev (:v y) i))))))
+(defn key-table-by-colnames [x y]
+  (let [i (mapv #(index-of (:k y) %) x)]
+    (if (any (mapv (partial = (count (:k y))) i))
+      (err "mismatch: key cols" x y)
+      (make-keyed-table
+       (make-table x (index (:v y) i))
+       (make-table (except (:k y) x)
+                   (index (:v y) (except (til-count (:k y)) i)))))))
+(defn key-table-by-long [x y]
+  (cond (= x 0) y
+        (< x 0) (err "lhs of ! must be >=0 when keying a table")
+        (<= (count (:k y)) x) (err "can't key" x "cols from" y)
+        :else (make-keyed-table (make-table (vec (take x (:k y)))
+                                            (vec (take x (:v y))))
+                                (make-table (vec (drop x (:k y)))
+                                            (vec (drop x (:v y)))))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn key-table [x y]
+  (cond (table? x)                  (if (= (kcount x) (kcount y))
+                                      (assoc (make-dict x y) :kt true)
+                                      (err "length" x y))
+        (vector? x)                 (key-table-by-colnames x y)
+        (= java.lang.Long (type x)) (key-table-by-long x y)
+        (keyword? x)                (key-table-by-colname x y)
+        :else                       (err "nyi" x "!" y)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn bang
   ([x] (cond (= java.lang.Long (type x)) (vec (range x))
+             (vector? x) (til-count x)
              (map? x) (:k x)
              :else (err "nyi: monadic ! on" x)))
-  ([x y] (if (vector? x)
-           (if (vector? y)
-             (if (= (count x) (count y))
-               (mkdict x y)
-               (err "length" x y))
-             (err "mismatch" x "!" y))
-           (if (and (table? x) (table? y))
-             (if (= (pound x) (pound y))
-               (assoc (mkdict x y) :kt true)
-               (err "length" x y))
-             (if (or (coll? x) (coll? y))
-               (err "type" x y)
-               (mkdict [x] [y]))))))
+  ([x y] (cond (table? y)               (key-table x y)
+               (keyed-table? y)         (key-table x (unkey-table y))
+               (vector? x)              (if (vector? y)
+                                          (if (= (count x) (count y))
+                                            (make-dict x y)
+                                            (err "length" x y))
+                                          (err "mismatch" x "!" y))
+               (or (coll? x) (coll? y)) (err "type" x y)
+               :else                    (make-dict [x] [y]))))
 
 (defn div [x y] ((atomize quot) x y))
 (defn kmod [x y] ((atomize mod) x y))
@@ -195,15 +232,16 @@
              (vec (cons x y))
              [x y]))))
 
+(declare ktake)
 (defn take-from-vec [n x]
   (if (<= 0 n)
     (mapv #(x (mod % (count x))) (range n))
     (vec (take-last (- n) x)))) ; TODO neg overtake
-(defn take-from-dict [n x] (mkdict (pound n (:k x)) (pound n (:v x))))
+(defn take-from-dict [n x] (make-dict (ktake n (:k x)) (ktake n (:v x))))
 (defn take-from-table [n x]
-  (t-from-d (mkdict (:k x) (mapv (partial pound n) (:v x)))))
+  (make-table (:k x) (mapv (partial ktake n) (:v x))))
 (defn take-from-keyed-table [n x]
-  (assoc (mkdict (pound n (:k x)) (pound n (:v x))) :kt true))
+  (assoc (make-dict (ktake n (:k x)) (ktake n (:v x))) :kt true))
 (defn kcount [x]
   (cond (vector? x) (count x)
         (map?    x) (cond (:kt x) (count (first (:v (:k x))))
@@ -423,7 +461,12 @@
         (if (not= (keycols t) (cols i))
           (err "mismatch" t  i)
           (index-keyed-table-helper t i [:id "in"]))
-        :else (err "nyi"))) ;; TODO: allow trivial index
+        (and (coll? i) (= (count i) (count (keycols t))))
+        (index-keyed-table t (make-dict (keycols t) i))
+        (and (not (coll? i)) (= 1 (count (keycols t))))
+        (let [d (d-from-t (index-keyed-table t (make-dict (keycols t) [i])))]
+          (make-dict (:k d) (mapv first (:v d))))
+        :else (err "nyi")))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TODO: unify apply-dyadic, apply-monadic, index, invoke,
@@ -431,7 +474,7 @@
 (defn index [x i]
   (cond (table? x)       (index-table x i)
         (keyed-table? x) (index-keyed-table x i)
-        (map? i)         (mkdict (:k i) (index x (:v i)))
+        (map? i)         (make-dict (:k i) (index x (:v i)))
         (vector? i)      (mapv (partial index x) i)
         (coll? i)        (reduce index x i)
         (vector? x)      (x i)
@@ -589,14 +632,14 @@
     (if-let [b (:by x)]
       (let [[e4 g] (compute-aggs tu e3 t i b)
             j      (index i (group (flip (:v g))))
-            k      (t-from-d (mkdict (:k g) (flip (:k j))))]
+            k      (make-table (:k g) (flip (:k j)))]
         (if-let [a (:aggs x)]
           (let [u (mapv #(last (compute-aggs tu e4 t % a)) (:v j))
-                v (t-from-d (mkdict (:k (first u)) (flip (mapv :v u))))]
-            [e4 (assoc (mkdict k v) :kt true)])
+                v (make-table (:k (first u)) (flip (mapv :v u)))]
+            [e4 (assoc (make-dict k v) :kt true)])
           (let [c (except (:k t) (:k g)) ;; cols not in the by clause
-                v (t-from-d (mkdict c (mapv #(index % (:v j)) (index t c))))]
-            [e4 (assoc (mkdict k v) :kt true)])))
+                v (make-table c (mapv #(index % (:v j)) (index t c)))]
+            [e4 (assoc (make-dict k v) :kt true)])))
       (if-let [a (:aggs x)]
         (let [[e5 r] (compute-aggs tu e3 t i a)
               n      (apply max (mapv kcount (:v r)))
@@ -610,8 +653,7 @@
     (loop [e e a (reverse (map :rhs c)) r ()]
       (if (empty? a)
         (if (apply = (map count r))
-          [e (t-from-d (mkdict (mapv #(keyword (:id %)) c)
-                               (vec r)))]
+          [e (make-table (mapv #(keyword (:id %)) c) (vec r))]
           (err "length"))
         (let [[ne rr] (kresolve tu e (first a))]
           (recur ne (next a) (cons rr r)))))))
@@ -620,7 +662,7 @@
   (let [[e2 t] (resolve-table-helper tu e (:cols x))]
     (if-let [kc (:keycols x)]
       (let [[e3 k] (resolve-table-helper tu e2 kc)]
-        [e3 (assoc (mkdict k t) :kt true)])
+        [e3 (assoc (make-dict k t) :kt true)])
       [e2 t])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -884,6 +926,13 @@
        (fact "compound by clause"
              (keval "select by a,b from([]a:8#`a`a`b`b;b:8#`a`b;c:!8)") =>
              (keval "([a:`a`a`b`b;b:`a`b`a`b];c:(0 4;1 5;2 6;3 7))")))
+(facts "about keying tables"
+       (fact "can key by first n columns"
+             (keval "1!([]a:`a`b`c;b:1 2 3)") => (keval "([a:`a`b`c]b:1 2 3)")
+             (keval "2!([]a:`a`b;b:1 2;c:3 4") => (keval "([a:`a`b;b:1 2]c:3 4"))
+       (fact "can key by col name(s)"
+             (keval "`a!([]a:`a`b`c;b:1 2 3)") => (keval "([a:`a`b`c]b:1 2 3)")
+             (keval "`a`c!([]a:`a`b;b:1 2;c:3 4") => (keval "([a:`a`b;c:3 4]b:1 2")))
 (facts "about where"
        (fact "works with bools"
              (keval "&1001b") => [0 3])

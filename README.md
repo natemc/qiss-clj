@@ -251,8 +251,10 @@ Unbounded!  There is much work to do.  These are some of the most
 pressing issues:
 
 * fix grammar: infix with vector literal on lhs (e.g., 1 2 in 1 2 3)
-* keying tables with !
 * load/run scripts
+* treat strings like vectors: indexing, join, take, drop, ... 
+* vs and sv 
+* casting and parsing with $ 
 * ascii I/O 
 * test cases
 * port to ClojureScript
@@ -260,16 +262,14 @@ pressing issues:
 * .
 * dict op dict
 * xasc & xdesc
-* treat strings like vectors: indexing, join, take, drop, ...
 * nulls: will nil do?
+* update, delete, and insert
 * reshape (take a box) form of the # operator
 * partial function application
 * 3- and 4-arg versions of @ andf .
 * generic list literal with holes is a list constructor
 * get rid of :pass-global-env 
-* vs and sv 
-* casting and parsing with $
-* if special form
+* if special form 
 * stacked adverbs e.g. ,//(1 2 3;(4 5 6;7 8 9)) => [1 2 3 4 5 6 7 8 9]
 * better console output
 * vector conditional form of ?
