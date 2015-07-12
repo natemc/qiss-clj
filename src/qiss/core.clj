@@ -430,13 +430,13 @@
 (defn feval [tu f]
   (fn [e & x]
     (if (not (some #{(count x)} (:rank f)))
-      (do (println f) (println x) (err "rank")))
-    (let [e2 (merge e (merge (:env f) (zipmap (:formals f) x)))]
-      (loop [e3 e2 p (:exprs f) r nil]
-        (if (empty? p)
-          r
-          (let [[e4 rr] (resolve-full-expr tu e3 (first p))]
-            (recur e4 (next p) rr)))))))
+      (err "rank" (:text f) (vec x))
+      (let [e2 (merge e (merge (:env f) (zipmap (:formals f) x)))]
+        (loop [e3 e2 p (:exprs f) r nil]
+          (if (empty? p)
+            r
+            (let [[e4 rr] (resolve-full-expr tu e3 (first p))]
+              (recur e4 (next p) rr))))))))
 (defn index-table [t i]
   (if (or (and (vector? i) (keyword? (first i)))
           (keyword? i))
@@ -450,7 +450,7 @@
 (declare builtin)
 (defn index-keyed-table-helper [t i o]
   (let [k (:k t)
-        [e r] (apply-constraints ""
+        [e j] (apply-constraints ""
                                  (merge builtin (zipmap (:k k) (:v k)))
                                  k
                                  (map (fn [x y]
@@ -459,22 +459,29 @@
                                          [:actuals [:id (name x)] [:raw y]]])
                                       (cols k)
                                       (:v i)))]
-    (index-table (:v t) r)))
+    (let [r (index-table (:v t) j)]
+      r)))
+      ;; (if (not (table? i))
+      ;;   (let [d (d-from-t r)]
+      ;;     (make-dict (:k d) (mapv first (:v d))))
+      ;;   r))))
+(defn ikth-foo [t i]
+  (let [d (d-from-t (index-keyed-table-helper t i [:op "="]))]
+    (make-dict (:k d) (mapv first (:v d)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn index-keyed-table [t i]
   (cond (dict? i)
         (if (not= (keycols t) (:k i))
           (err "mismatch" t i)
-          (index-keyed-table-helper t i [:op "="]))
+          (ikth-foo t i))
         (table? i)
         (if (not= (keycols t) (cols i))
-          (err "mismatch" t  i)
+          (err "mismatch" t i)
           (index-keyed-table-helper t i [:id "in"]))
         (and (coll? i) (= (count i) (count (keycols t))))
         (index-keyed-table t (make-dict (keycols t) i))
         (and (not (coll? i)) (= 1 (count (keycols t))))
-        (let [d (d-from-t (index-keyed-table t (make-dict (keycols t) [i])))]
-          (make-dict (:k d) (mapv first (:v d))))
+        (index-keyed-table t (make-dict (keycols t) [i]))
         :else (err "nyi")))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -690,7 +697,7 @@
           (= t :bools   ) [e (mapv #(= \1 %) v)]
           (= t :call    ) (resolve-call tu e v)
           (= t :char    ) [e (char (first v))]
-          (= t :chars   ) [e v]
+          (= t :chars   ) [e (vec v)]
           (= t :dyop    ) (resolve-dyop tu e v)
           (= t :empty   ) [e []]
           (= t :expr    ) (resolve-full-expr tu e v)
@@ -727,28 +734,54 @@
 
 (defn substr [s b e] (subs s b (min e (count s))))
 
-(defn show-dict [x]
-  (let [n  (min (:rows viewport) (count (:k x)))
-        w  (:cols viewport)
-        kw (apply max (map #(count (str %)) (take n (:k x))))
+(declare stringify)
+(defn stringify-dict [x]
+  (let [ks (mapv stringify (:k x))
+        kw (apply max (map count ks))
         f  (str "%" kw "s| %s")]
-    (doseq [[k v] (map list (take n (:k x)) (take n (:v x)))]
-      (println (substr (format f k v) 0 w)))))
-
-(defn show-lambda [x]
-  (println (:text x)))
-
+    (str/join "\n" (map #(format f %1 %2) ks (mapv stringify (:v x))))))
 (defn table-as-strings [x]
   (let [h (mapv name (:k x)) ; col header
         n (min (:rows viewport) (count (first (:v x)))) ; TODO: fix
         c (mapv #(vec (take n %)) (:v x)) ; col data
-        s (mapv #(mapv str %) c)
+        s (mapv #(mapv stringify %) c)
         w (mapv #(apply max (cons (count %1) (map count %2))) h s)
         f (mapv #(str "%-" % "s") w)
         fmt-row (fn [& r] (str/join " " (map format f r)))]
     (vec (cons (apply fmt-row h)
                (cons (str/join (replicate (+ -1 (count w) (reduce + w)) "-"))
                      (apply (partial map fmt-row) s))))))
+(defn stringify-keyed-table [x]
+  (let [k (table-as-strings (:k x))
+        v (table-as-strings (:v x))]
+    (str/join "\n" (map (fn [& r] (str/join "| " r)) k v))))
+(defn stringify-lambda [x] (:text x))
+(defn stringify-table [x]
+  (str/join "\n" (table-as-strings x)))
+(defn stringify-vector [x]
+  (if (and (< 0 (count x)) (char? (first x)))
+    (str/join x)
+    (str (mapv stringify x))))
+(defn stringify [x]
+  (cond (vector? x)      (stringify-vector x)
+        (table? x)       (stringify-table x)
+        (keyed-table? x) (stringify-keyed-table x)
+        (map? x)         (if (:f x)
+                           (stringify-lambda x)
+                           (stringify-dict x))
+        :else            (str x)))
+  
+(defn show-dict [x]
+  (let [n  (min (:rows viewport) (count (:k x)))
+        w  (:cols viewport)
+        ks (mapv stringify (take n (:k x)))
+        kw (apply max (map count ks))
+        f  (str "%" kw "s| %s")]
+    (doseq [[k v] (map list ks (take n (map  stringify (:v x))))]
+      (println (substr (format f k v) 0 w)))))
+
+(defn show-lambda [x]
+  (println (:text x)))
 
 (defn show-table [x]
   (println (str/join "\n" (table-as-strings x))))
@@ -758,8 +791,11 @@
         v (table-as-strings (:v x))]
     (println (str/join "\n" (map (fn [& r] (str/join "| " r)) k v)))))
 
+(defn show-vector [x] ;; TODO - distinguish uniform vs mixed (use meta?)
+  (println (stringify x)))
+
 (defn show [x]
-  (cond (vector? x) (println x) ; TODO - distinguish uniform vs mixed (use meta?)
+  (cond (vector? x) (show-vector x)
         (map? x)    (cond (:kt x) (show-keyed-table x)
                           (:t x)  (show-table x)
                           (:f x)  (show-lambda x)
@@ -771,7 +807,7 @@
               :exit {:f exit :rank [0 1]}
               :mod  {:f kmod :rank [2]}
               :avg  (eval-no-env "{(+/x)%#x}")
-              :in   (eval-no-env "{(#y)>y?x}")
+              :in   (eval-no-env "{(#y)>((),y)?x}")
               :last (eval-no-env "{x@-1+#x}")})
 
 (defn repl []
@@ -807,23 +843,23 @@
        (fact "bools eval to themselves"
              (keval "1b") => true
              (keval "0b") => false))
-(facts "about simple bool list literals"
+(facts "about simple bool vector literals"
        (fact "compact"
              (keval "1001001b") => [true false false true false false true]))
 (facts "about chars"
        (facts "chars eval to themselves"
               (keval "\"a\"") => \a))
-(facts "about simple char list literals"
-       (fact "char list literals eval to clojure strings"
-             (keval "\"abc\"") => "abc"))
+(facts "about simple char vector literals"
+       (fact "char vector literals eval to vectors of char"
+             (keval "\"abc\"") => [\a \b \c]))
 (facts "about floats"
        (fact "floats eval to themselves"
              (keval "1.") => 1.0
              (keval "-1.") => -1.0))
-(facts "about float list literals"
+(facts "about float vector literals"
        (fact "no punctuation"
              (keval "1.4 2.5 3.6") => [1.4 2.5 3.6])
-       (fact "any float promotes the whole list"
+       (fact "any float promotes the whole vector"
              (keval "1 2.0 3") => [1.0 2.0 3.0])
        (fact "fractional part not needed if it is zero"
              (keval "1 2. 3") => [1.0 2.0 3.0])
@@ -840,14 +876,14 @@
        (fact "longs subtract"
              (keval "1-10") => -9
              (keval "100-42") => 58))
-(facts "about simple long list literals"
+(facts "about simple long vector literals"
        (fact "no puncuation"
              (keval "1 2 3") => [1 2 3])
        (fact "monadic - sticks to literals"
              (keval "1 -2 3") => [1 -2 3])
        (fact "spaces may be added for formatting"
              (keval "1    2     3") => [1 2 3]))
-(facts "about mixed lists"
+(facts "about mixed vectors"
        (fact "top-level indexing"
              (keval "(`a`b`c;1)0") => [:a :b :c]))
 (facts "about !"
@@ -863,7 +899,7 @@
 (facts "about symbols"
        (fact "symbols eval to clojure keywords"
              (keval "`abc") => :abc))
-(facts "about symbol list literals"
+(facts "about symbol vector literals"
        (fact "no spaces"
              (keval "`abc`def") => [:abc :def]))
 ;; TODO             (keval "`abc `def") => error
@@ -896,7 +932,7 @@
        (fact "supplying all arguments causing invocation"
              (keval "div[10;3]") => 3))
 (facts "about indexing at depth"
-       (fact "2-d list"
+       (fact "2-d vector"
              (keval "(`a`b`c;1 2 3)[0;1]") => :b
              (keval "(`a`b`c;1 2 3)[0;0 1]") => [:a :b]))
 (facts "about lambdas"
@@ -907,7 +943,7 @@
 (facts "about juxtaposition"
        (fact "lambdas juxtapose without whitespace"
              (keval "{x}3") => 3)
-       (fact "symbol list literals followed by longs"
+       (fact "symbol vector literals followed by longs"
              (keval "`a`b`c`d`e 1") => :b
              (keval "`a`b`c`d`e 1 2 3") => [:b :c :d])
        (fact "dyadic user-defined functions can be used infix"
@@ -916,7 +952,7 @@
        (fact "square brackets no semicolons"
              (keval "1 2 3 4[0 2]") => [1 3]))
 (facts "about join"
-       (fact "monadic enlists"
+       (fact "monadic envectors"
              (keval ",1") => [1]
              (keval ",1 2 3") => [[1 2 3]])
        (fact "dyadic joins"
@@ -925,7 +961,9 @@
        (fact "no agg required"
              (keval "select from([]a:1 2 3)") => (keval "([]a:1 2 3)"))
        (fact "id agg guesses result column to match original column"
-             (keval "select a from([]a:1 2 3)") => (keval "([]a:1 2 3)")))
+             (keval "select a from([]a:1 2 3)") => (keval "([]a:1 2 3)"))
+       (fact "works on keyed tables"
+             (keval "select from([a:`a`b]b:1 2)") => (keval "([a:`a`b]b:1 2)")))
 (facts "about by"
        (fact "simple case"
              (keval "select +/b by a from([]a:6#`a`b`c;b:!6)") =>
@@ -940,6 +978,13 @@
        (fact "can key by col name(s)"
              (keval "`a!([]a:`a`b`c;b:1 2 3)") => (keval "([a:`a`b`c]b:1 2 3)")
              (keval "`a`c!([]a:`a`b;b:1 2;c:3 4") => (keval "([a:`a`b;c:3 4]b:1 2")))
+(facts "about indexing keyed tables"
+       (fact "can be done with a dict"
+             (keval "([a:`a`b`c]b:1 2 3)`a!`a") => (keval "`b!1"))
+       (fact "can be done with just the value of a dict"
+             (keval "([a:`a`b`c]b:1 2 3)`c") => (keval "`b!3"))
+       (fact "can be done with a table"
+             (keval "([a:`a`b`c]b:1 2 3)([]a:`a`c)") => (keval "([]b:1 3)")))
 (facts "about where"
        (fact "works with bools"
              (keval "&1001b") => [0 3])
@@ -959,7 +1004,7 @@
        (fact "bools"
              (count (parses "0b")) => 1
              (count (parses "1b")) => 1)
-       (fact "bool list literals"
+       (fact "bool vector literals"
              (count (parses "010b")) => 1
              (count (parses "1001b")) => 1)
        (fact "call"
@@ -969,7 +1014,7 @@
        (fact "chars"
              (count (parses "\"a\"")) => 1
              (count (parses "\"\\\"\"")) => 1)
-       (fact "char list lterals"
+       (fact "char vector lterals"
              (count (parses "\"abc\"")) => 1
              (count (parses "\"abc\\\"\"def")) => 1)
        (fact "dyop"
@@ -980,7 +1025,7 @@
        (fact "floats"
              (count (parses "1.")) => 1
              (count (parses "-1.")) => 1)
-       (fact "float list literals"
+       (fact "float vector literals"
              (count (parses "1. 2 3")) => 1
              (count (parses "1 2. 3")) => 1
              (count (parses "-1 2. 3")) => 1
@@ -1003,14 +1048,14 @@
              (count (parses "`a`b`c{x y}0 1 2")) => 1)
        (fact "longs"
              (count (parses "1")) => 1)
-       (fact "long list literals"
+       (fact "long vector literals"
              (count (parses "1 2 3")) => 1
              (count (parses "1    2    3")) => 1)
        (fact "monop"
              (count (parses "*1 2 3")) => 1)
        (fact "symbols"
              (count (parses "`a")) => 1)
-       (fact "symbol list literals"
+       (fact "symbol vector literals"
              (count (parses "`a`b`c`d`e")) => 1))
 ;; gave up on this one: couldn't fix the <exprx> rule
 ;; (fact "select"

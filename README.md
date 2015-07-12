@@ -156,12 +156,18 @@ qiss$ rlwrap lein run
 [2 4 0 4 4 4 3 2 3 2]
 §) 
 §)/ dicts are formed using the ! operator on two vectors
-§)/ BEWARE the interpreter will die if the vectors' lengths don't match 
 §)`a`b`c!1 2 3
 :a| 1
 :b| 2
 :c| 3
-§)/ dict indexing is analogous to vector indexing
+§)/ BEWARE the interpreter will die if the vectors' lengths don't match
+§)/ as a convenience, two atoms can be made into a dict
+§)/ as if they were two vectors, each of length one
+§)(,`a)!,1
+:a| 1
+§)`a!1
+:a| 1
+§)/ dict indexing is analogous to vector indexing 
 §)(`a`b`c!1 2 3)`a
 1
 §)(`a`b`c!1 2 3)`a`c
@@ -218,6 +224,7 @@ a b
 §)t 0 / a single row is a dict
 :a| 1
 :b| 10
+§)/ IMPORTANT: therefore, a table can be treated as a vector of dicts
 §)t@&25>t`b
 a b
 ----
@@ -227,7 +234,7 @@ a b
 2 20 
 3 10 
 3 20 
-§)
+§) 
 §)/ special forms enable sql-like syntax
 §)select +/a,+/b from t where b<=20,a<3
 a b
@@ -240,7 +247,21 @@ a| b
 2| 30
 3| 30
 §)/ note the vertical bar in the above select result
-§)/ this denotes a keyed table
+§)/ this denotes a keyed table, which is a dict made from two tables
+§)/ a keyed table is indexed by its key 
+§)/ since a keyed table's key is a table, a single index is a dict
+§) (select +/b by a from t)`a!1
+:b| 60 
+§)/ multiple indexes are a table
+§)(select +/b by a from t)([]a:1 3)
+b 
+--
+60
+60
+§)/ as a convenience, a single row can be retrievd from a
+§)/ keyed table by supplying only the value of the implied dict
+§) (select +/b by a from t)1 / same as indexing with `a!1
+:b| 60 
 §)/ the ! operator can be used to manipulate a table's keys
 §)1!t / make t's first column a key  
 a| b 
@@ -299,6 +320,20 @@ b
 ---
 120
 §) 
+§)/ there is no string type in qiss; strings are vectors of chars
+§)"x" / char
+\x
+§)"xyzzy" / vector of char
+xyzzy
+§)/ a vector of char behaves like any vector wrt atomic ops
+§)"foo","bar" 
+foobar
+§)(,"foo"),,"bar" / to make a pair of strings, enlist them first
+["foo" "bar"]
+§)"foo"="foo" / atomic =
+["true" "true" "true"]
+§)"foo"~"foo" / use ~ (match) to compare strings as a unit
+true
 §)/ exit
 §)\\
 qiss$
@@ -311,7 +346,6 @@ pressing issues:
 
 * fix grammar: infix with vector literal on lhs (e.g., 1 2 in 1 2 3)
 * load/run scripts
-* treat strings like vectors: indexing, join, take, drop, ... 
 * vs and sv 
 * casting and parsing with $ 
 * ascii I/O 
