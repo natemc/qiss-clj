@@ -66,7 +66,8 @@
 (defn except [x y]
   (let [p (if (coll? y) #(some #{%} y) #(= % y))]
     (vec (remove p x))))
-(defn null! [x] (do (println x) x))
+(defn null! [& x] (do (apply println x) (last x)))
+;; (defn null! [x] (do (println x) x))
 (defn raze [x] (vec (mapcat #(if (coll? %) % [%]) x)))
 (defn removev [v i] (catv (subvec v 0 i) (subvec v (+ 1 i) (count v))))
 (defn til-count [x] (vec (range (count x))))
@@ -372,13 +373,18 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (declare index)
-(defn findv [x y]
-  (if (vector? y)
-    (mapv #(index-of x %) y)
-    (index-of x y)))
+(declare first-index)
+(defn findv [x y] (if (vector? y) (mapv #(index-of x %) y) (index-of x y)))
+(defn find-table [x y]
+  (if (and (or (dict? y) (table? y))
+           (every? #(some #{%} (cols x)) (:k y)))
+    (let [f (partial first-index (:v x))]
+      (if (dict? y) (apply f (:v y)) (apply mapv f (:v y))))
+    (err "mismatch: ?" x y)))
 (defn ques
   ([x] (vec (distinct x)))
   ([x y] (cond (vector? x) (findv x y)
+               (table? x)  (find-table x y)
                (map? x)    (index (:k x) (ques (:v x) y))
                :else       (if (vector? y)
                              (index y (vec (repeatedly x #(rand-int (count y)))))
@@ -530,36 +536,15 @@
         :else (mapv (partial index-table t) i)))
 (declare apply-constraints)
 (declare builtin)
-(defn index-keyed-table-helper [t i o]
-  (let [k (:k t)
-        [e j] (apply-constraints ""
-                                 (merge builtin (zipmap (:k k) (:v k)))
-                                 k
-                                 (map (fn [x y]
-                                        [:call
-                                         [:target o]
-                                         [:actuals [:id (name x)] [:raw y]]])
-                                      (cols k)
-                                      (:v i)))]
-    (let [r (index-table (:v t) j)]
-      r)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn index-keyed-table [t i]
-  (cond (dict? i)
-        (if (not= (keycols t) (:k i))
-          (err "mismatch" t i)
-          (let [d (d-from-t (index-keyed-table-helper t i [:op "="]))]
-            (make-dict (:k d) (mapv first (:v d)))))
-        (table? i)
-        (if (not= (keycols t) (cols i))
-          (err "mismatch" t i)
-          (index-keyed-table-helper t i [:id "in"]))
+  (cond (or (dict? i) (table? i)) (index-table (:v t) (find-table (:k t) i))
+        ;; user supplied just the value of a dict we hope conforms
         (and (coll? i) (= (count i) (count (keycols t))))
         (index-keyed-table t (make-dict (keycols t) i))
         (and (not (coll? i)) (= 1 (count (keycols t))))
         (index-keyed-table t (make-dict (keycols t) [i]))
-        :else (err "nyi")))
-
+        :else (err "nyi: index keyed table" t i)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TODO: unify apply-dyadic, apply-monadic, index, invoke,
 ;; resolve-at, resolve-call, and resolve-juxt
@@ -913,17 +898,20 @@
     (or (apply p (mapv first c))
         (recur p (mapv next c)))))
 
+(defn first-index [data & p] ;; data is vector of vectors
+  (if-let [k (apply msome
+                    (fn [i & q] (when (= p q) i))
+                    (iterate inc 0)
+                    data)]
+    k
+    (count (first data))))
 (defn lj [x y]
   (cond (not (keyed-table? y)) (err "rhs of lj must be a keyed table")
         (not (every? #(some #{%} (cols x)) (keycols y))) (err "mismatch: lj" x y)
         ;; for every row in x, find the index of the first matching row in y
         :else
         (let [j (apply mapv
-                       (fn [& p] (let [k (apply msome
-                                                (fn [i & q] (when (= p q) i))
-                                                (iterate inc 0)
-                                                (:v (:k y)))]
-                                   (if k k (kcount y))))
+                       (partial first-index (:v (:k y)))
                        (index (:v x) (findv (cols x) (keycols y))))
               r (index-table (:v y) j)]
           (make-table (catv (:k x) (:k r)) (catv (:v x) (:v r))))))
@@ -1041,6 +1029,15 @@
              (keval "!3") => [0 1 2])
        (fact "monadic ! on a dict is key"
              (keval "!`a`b`c!1 2 3") => [:a :b :c]))
+(facts "about ?"
+       (fact "container?... => find"
+             (keval "(!5)?0") => 0
+             (keval "(!5)?0 2 4") => [0 2 4]
+             (keval "(!5)?10 3 1") => [5 3 1]
+             (keval "(`a`b`c!1 2 3)?2") => :b
+             (keval "(`a`b`c!1 2 3)?3 1") => [:c :a]
+             (keval "([]a:1 2 3)?([]a:1 2)") => [0 1]
+             (keval "([a:`a`b`c]b:1 2 3)?([]b:1 2)") => (keval "([]a:`a`b)")))
 (facts "about +"
        (fact "+ is atomic"
              (keval "1+10 20") => [11 21]
@@ -1121,7 +1118,13 @@
              (keval "`a`b`c`d`e{x y}1 2 3") => [:b :c :d]))
 (facts "about indexing"
        (fact "square brackets no semicolons"
-             (keval "1 2 3 4[0 2]") => [1 3]))
+             (keval "1 2 3 4[0 2]") => [1 3])
+       (fact "with @"
+             (keval "1 2 3 4@0 2") => [1 3])
+       (fact "with juxt"
+             (keval "{x 0 2}1 2 3 4") => [1 3])
+       (fact "repeated"
+             (keval "1 2 3 4@(0 2;1 3)") => [[1 3] [2 4]]))
 (facts "about join"
        (fact "monadic envectors"
              (keval ",1") => [1]
