@@ -1,5 +1,5 @@
 avg:{(+/x)%#x};
-in:{(#y)>((),y)?x}
-xcol:{+(x,(#x)_cols y)!.+y}
+in:{(#y)>((),y)?x};
+xcol:{+(x,(#x)_cols y)!.+y};
 xcols:{cy:cols y; (x,cy@&~cy in x)#y}
 / Don't put a newline at EOF: the grammar needs work
