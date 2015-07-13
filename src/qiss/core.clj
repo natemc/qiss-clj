@@ -98,6 +98,7 @@
 (declare index)
 (declare invoke)
 (defn simple-xform [e x i f test]
+  ;; TODO switch to loop to preserve env modifications?
   (mapv (fn [j p] (if (test j i)
                     (last (invoke e f [p]))
                     p))
@@ -1183,7 +1184,14 @@
        (fact "vector indexed with vector"
              (keval "@[!4;1 3;{x+1}]") => [0 2 2 4])
        (fact "vector repeatedly indexed with vector"
-             (keval "@[!4;(0 1;1 2);{x+1}]") => [1 3 3 3]))
+             (keval "@[!4;(0 1;1 2);{x+1}]") => [1 3 3 3])
+       (fact "dict indexed with atom"
+             (keval "@[`a`b`c!1 2 3;`a;{x+1}]") => (keval "`a`b`c!2 2 3"))
+       (fact "dict indexed with vector"
+             (keval "@[`a`b`c!1 2 3;`a`c;{x+1}]") => (keval "`a`b`c!2 2 4"))
+       (fact "dict indexed repeatedly with vector"
+             (keval "@[`a`b`c!1 2 3;(`a`b;`a`c);{x+1}]") =>
+             (keval "`a`b`c!3 3 4")))
 (facts "about join"
        (fact "monadic envectors"
              (keval ",1") => [1]
