@@ -348,8 +348,6 @@ pressing issues:
 * fix grammar so loading/running scripts isn't so fragile
 * test cases
 * nulls: will nil do?
-* xasc
-* xdesc
 * update
 * port to ClojureScript
 * indexing at depth: (`a`b`c;`d`e`f)[0 1;0 1] => [[:a :b] [:d :e]]

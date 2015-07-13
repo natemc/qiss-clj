@@ -1,5 +1,13 @@
+alpha:"abcdefghijklmnopqrstuvwxyz";
+ALPHA:"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+asc:{x@<x};
 avg:{(+/x)%#x};
+desc:{x@>x};
+except:{x@&~x in y};
 in:{(#y)>((),y)?x};
+inter:{x@&x in y};
+rotate:{y(x+!#y)mod(#y)};
+union:{?x,y};
 xcol:{+(x,(#x)_cols y)!.+y};
 xcols:{cy:cols y; (x,cy@&~cy in x)#y}
 / Don't put a newline at EOF: the grammar needs work

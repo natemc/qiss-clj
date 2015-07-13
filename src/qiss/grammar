@@ -38,13 +38,13 @@ ldot       = dotcore
 dyop       = lhs ws? op ws? rhs
 ldyop      = llhs ws? lop ws? lrhs
 empty      = '()'
-<exprx>    = select
+<exprx>    = (select|update)
 	   / dy
 	   / nsvl
 	   / (call|juxt)
 	   / svl
 	   / <comment>
-<lexprx>   = select
+<lexprx>   = (select|update)
 	   / ldy
 	   / lnsvl
 	   / (call|ljuxt)
@@ -63,9 +63,9 @@ id         = idx
 lid        = lidx
 <idx>      = #'[a-zA-Z][a-zA-Z0-9_]*'
 <lidx>     = !keyword idx
-juxt       = !(advin|dy|floatsx|select) lhs ws? !dot rhs
+juxt       = !(advin|dy|floatsx|select|update) lhs ws? !dot rhs
 (* juxt       = floatsx ws? !dot rhs / !(advin|dy|select!floatsx) lhs ws? !dot rhs *)
-ljuxt      = !(advin|dy|floatsx|select) llhs ws? !dot lrhs
+ljuxt      = !(advin|dy|floatsx|select|update) llhs ws? !dot lrhs
 keycols    = <'['> col? (<';'> col)* <']'>
 keyword    = 'by'|'delete'|'from'|'select'|'update'|'where'
 lambda     = <'{'> formals? exprs <'}'>
@@ -98,6 +98,7 @@ symbols    = symbolsx
 <symbolsx> = #'`[\.:a-zA-Z0-9_]*(`[\.:a-zA-Z0-9_]*)+'
 table      = <'('> keycols <';'>? cols <')'>
 target     = lhsx|op
+update     = <'update'> ws? aggs? ws? (by ws)? from ws? where?
 verb       = adverbed | at | dot | id | lambda | op | parexpr
 lverb      = ladverbed | lat | ldot | lid | lambda | lop | parexpr
 where      = <'where'> ws lexprx (<','> lexprx)*

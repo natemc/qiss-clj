@@ -74,7 +74,7 @@
 (defn make-dict [k v] {:k k :v v})
 (defn make-keyed-table [k v] {:k k :v v :kt true})
 (defn make-table [c d] {:k c :v d :t true})
-(defn dict? [x] (and (map? x) (not (:t x)))) ;; disqualify keyed tables, too?
+(defn dict? [x] (and (map? x) (not (:t x)) (not (:kt x))))
 (defn keyed-table? [x] (and (map? x) (:kt x)))
 (defn table? [x] (and (map? x) (:t x)))
 (defn add-to-dict [d k v] (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
@@ -390,14 +390,30 @@
 (defn deltas [x]
   (vec (cons (first x) (map - (next x) (drop-last x)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn cut [x y] ;; y x+!'1_0-':x,#y
+  (let [i (mapv range (next (deltas (conj x (count y)))))]
+    (index y (mapv (fn [p q] (mapv #(+ p %) q)) x i))))
+(defn kdrop [x y]
+  (let [o (if (<= 0 x) (partial drop x) (partial drop-last (- x)))]
+    (cond (vector? y)      (vec (o y))
+          (dict? y)        (apply make-dict (map o [(:k y) (:v y)]))
+          (table? y)       (make-table (:k y) (mapv o (:v y)))
+          (keyed-table? y) (make-keyed-table (kdrop x (:k y)) (kdrop x (:v y)))
+          :else (err "nyi: _ (drop) on" x y))))
+(defn kremove [x y]
+  (cond (vector? x) (removev x y)
+        (dict? x)   (apply make-dict
+                           (map #(removev % (findv (:k x) y))
+                                [(:k x) (:v x)]))
+        (table? x)  (if (keyword? y)
+                      (t-from-d (kremove (d-from-t x) y))
+                      (make-table (:k x) (mapv #(removev % y) (:v x))))
+        :else (err "nyi: _ (remove) for" x y)))
 (defn under
   ([x] (long x))
-  ([x y] (if (vector? x) ; y x+!'1_0-':x,#y
-           (let [i (mapv range (next (deltas (conj x (count y)))))]
-             (index y (mapv (fn [p q] (mapv #(+ p %) q)) x i)))
-           (vec (if (<= 0 x)
-                  (drop x y)
-                  (drop-last (- x) y))))))
+  ([x y] (if (coll? y)
+           (if (vector? x) (cut x y) (kdrop x y))
+           (kremove x y))))
 
 (defn parse-double [x]
   (if (coll? x) (mapv parse-double x) (Double/parseDouble x)))
@@ -524,19 +540,13 @@
                                       (:v i)))]
     (let [r (index-table (:v t) j)]
       r)))
-      ;; (if (not (table? i))
-      ;;   (let [d (d-from-t r)]
-      ;;     (make-dict (:k d) (mapv first (:v d))))
-      ;;   r))))
-(defn ikth-foo [t i]
-  (let [d (d-from-t (index-keyed-table-helper t i [:op "="]))]
-    (make-dict (:k d) (mapv first (:v d)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn index-keyed-table [t i]
   (cond (dict? i)
         (if (not= (keycols t) (:k i))
           (err "mismatch" t i)
-          (ikth-foo t i))
+          (let [d (d-from-t (index-keyed-table-helper t i [:op "="]))]
+            (make-dict (:k d) (mapv first (:v d)))))
         (table? i)
         (if (not= (keycols t) (cols i))
           (err "mismatch" t i)
@@ -753,6 +763,9 @@
         [e3 (assoc (make-dict k t) :kt true)])
       [e2 t])))
 
+(defn resolve-update [tu e x]
+  )
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn kresolve [tu e x] ; translation unit, env, parse tree
   (let [t (if (coll? x) (first x) x)
@@ -797,6 +810,7 @@
           (= t :symbol  ) [e (keyword v)]
           (= t :symbols ) [e (mapv keyword (next (str/split v #"`")))]
           (= t :table   ) (resolve-table tu e v)
+          (= t :update  ) (resolve-update tu e v)
           :else           [e x])))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn resolve-full-expr [tu e x]
@@ -852,7 +866,7 @@
         ks (mapv stringify (take n (:k x)))
         kw (apply max (map count ks))
         f  (str "%" kw "s| %s")]
-    (doseq [[k v] (map list ks (take n (map  stringify (:v x))))]
+    (doseq [[k v] (mapv vector ks (take n (map stringify (:v x))))]
       (println (substr (format f k v) 0 w)))))
 
 (defn show-lambda [x]
@@ -867,7 +881,13 @@
     (println (str/join "\n" (map (fn [& r] (str/join "| " r)) k v)))))
 
 (defn show-vector [x] ;; TODO - distinguish uniform vs mixed (use meta?)
-  (println x))
+  (let [s (fn self [x]
+            (if (< 0 (count x))
+              (cond (char? (first x))   (str "\"" (str/join x) "\"")
+                    (vector? (first x)) (mapv self x)
+                    :else               x)
+              "[]"))]
+    (println (s x))))
 
 (defn show [x]
   (cond (vector? x) (show-vector x)
@@ -905,41 +925,58 @@
               r (index-table (:v y) j)]
           (make-table (catv (:k x) (:k r)) (catv (:v x) (:v r))))))
 
-(def builtin (kload {:cols  {:f cols :rank [1]}
-                     :div   {:f div :rank [2]}
-                     :exit  {:f exit :rank [0 1]}
-                     :keys  {:f keycols :rank [1]}
-                     :last  {:f klast :rank [1]}
-                     :lj    {:f lj :rank [2]}
-                     :mod   {:f kmod :rank [2]}
-                     :rcsv  {:f rcsv :rank [2]}
-                     :rcsvh {:f rcsvh :rank [2]}
-                     :read  {:f read-lines :rank [1]}
-                     :sv    {:f sv :rank [2]}
-                     :vs    {:f vs :rank [2]}
-                     :wcsv  {:f wcsv :rank [2]}}
+(defn sort-table [x y o] ; cols table op
+  (let [c (if (coll? x) x [x])
+        t (unkey-table y)]
+    (if (not (every? #(some #{%} (cols t)) c))
+      (err "mismatch: xasc" c y)
+      (let [r (index-table t (o (apply mapv vector (index-table t c))))]
+        (if (keyed-table? y)
+          (key-table (keycols y) r)
+          r)))))
+(defn xasc [x y] (sort-table x y less))
+(defn xdesc [x y] (sort-table x y greater))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def builtin (kload {:cols   {:f cols :rank [1]}
+                     :div    {:f div :rank [2]}
+                     :exit   {:f exit :rank [0 1]}
+                     :keys   {:f keycols :rank [1]}
+                     :last   {:f klast :rank [1]}
+                     :lj     {:f lj :rank [2]}
+                     :mod    {:f kmod :rank [2]}
+                     :rcsv   {:f rcsv :rank [2]}
+                     :rcsvh  {:f rcsvh :rank [2]}
+                     :read   {:f read-lines :rank [1]}
+                     :sv     {:f sv :rank [2]}
+                     :vs     {:f vs :rank [2]}
+                     :wcsv   {:f wcsv :rank [2]}
+                     :xasc   {:f xasc :rank [2]}
+                     :xdesc  {:f xdesc :rank [2]}}
                     "src/qiss/qiss.qiss"))
 
-(defn repl [e] ; env
-  (println "Welcome to qiss.  qiss is short and simple.")
-  (loop [e e]
-    (do ; (print "e ") (println e)
-                                        ;        (print "\u00b3)") (flush))
-      (print "\u00a7)") (flush))
-    (if-let [line (read-line)]
-      (if (or (empty? line) (= \/ (first line))) ; skip comments
-        (recur e)
-        (if (and (not= "\\\\" line) (not= "exit" line))
-          (let [e2 (try
-                     (let [x (second (parse line))
-                           [ne r] (resolve-full-expr line e x)]
-                       (if (not= :assign (first x))
-                         (show r))
-                       ne)
-                     (catch Exception ex
-                       (println ex)
-                       e))]
-            (recur e2)))))))
+(defn repl
+  ([] (repl builtin))
+  ([e] ;; env
+   (println "Welcome to qiss.  qiss is short and simple.")
+   (loop [e e]
+     (do ;; (print "e ") (println e)
+       ;;        (print "\u00b3)") (flush))
+       (print "\u00a7)") (flush))
+     (if-let [line (read-line)]
+       (if (or (empty? line) (= \/ (first line))) ; skip comments
+         (recur e)
+         (if (and (not= "\\\\" line) (not= "exit" line))
+           (let [e2 (try
+                      (let [x (second (parse line))
+                            [ne r] (resolve-full-expr line e x)]
+                        (if (not= :assign (first x))
+                          (show r))
+                        ne)
+                      (catch Exception ex
+                        (println ex)
+                        e))]
+             (recur e2))))))))
 
 (defn keval [x] (last (kresolve x builtin (second (parse x)))))
 (defn krun [x]  (show (keval x)))
@@ -1027,6 +1064,25 @@
 (facts "about right-to-left"
        (fact "no operator precedence"
              (keval "10*2+3") => 50))
+(facts "about _"
+       (fact "n _ container => drop 1st n"
+             (keval "2_!5") => [2 3 4]
+             (keval "2_`a`b`c`d!1 2 3 4") => (keval "`c`d!3 4")
+             (keval "2_([]a:`a`b`c`d;b:1 2 3 4)") =>
+             (keval "([]a:`c`d;b:3 4)")
+             (keval "2_([]a:`a`b`c;b:1 2 3)") => (keval "([]a:,`c;b:,3)"))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+       (fact "(-n) _ container => drop last n"
+             (keval "-2_!5") => [0 1 2]
+             (keval "-2_`a`b`c`d!1 2 3 4") => (keval "`a`b!1 2")
+             (keval "-1_([]a:`a`b`c;b:1 2 3)") => (keval "([]a:`a`b;b:1 2)")
+             (keval "2_([a:`a`b`c]b:1 2 3)") => (keval "([a:,`c]b:,3)"))
+       (fact "container _ index => remove at"
+             (keval "(!5)_2") => [0 1 3 4]
+             (keval "(`a`b`c!1 2 3)_`c") => (keval "`a`b!1 2")
+             (keval "(`a`b`c!1 2 3)_`b") => (keval "`a`c!1 3")
+             (keval "([]a:`a`b`c;b:1 2 3)_`a") => (keval "([]b:1 2 3)")
+             (keval "([]a:`a`b`c;b:1 2 3)_1") => (keval "([]a:`a`c;b:1 3)")))
 (facts "about adverbs"
        (fact "they can be monadic"
              (keval "+/1 2 3") => 6)
@@ -1102,10 +1158,21 @@
              (keval "&0 1 2 3") => [1 2 2 3 3 3]))
 (facts "about lj"
        (fact "uses rhs key col"
-             (keval "([]a:`a`b`c)lj([a:`a`b`c]b:1 2 3)") => (keval "([]a:`a`b`c;b:1 2 3)"))
+             (keval "([]a:`a`b`c)lj([a:`a`b`c]b:1 2 3)") =>
+             (keval "([]a:`a`b`c;b:1 2 3)"))
        (fact "two key cols"
              (keval "([]a:`a`b`c;b:1 2 3)lj([a:`a`b`c;b:1 2 3]c:10 20 30)") =>
              (keval "([]a:`a`b`c;b:1 2 3;c:10 20 30)")))
+(facts "about xasc"
+       (fact "sort on one col"
+             (keval "`a xasc([]a:`c`b`a;b:1 2 3)") =>
+             (keval "([]a:`a`b`c;b:3 2 1)"))
+       (fact "sort on two cols"
+             (keval "`a`b xasc([]a:`c`b`a`a`b`c;b:3 10 3 20 30 2)") =>
+             (keval "([]a:`a`a`b`b`c`c;b:3 20 10 30 2 3)"))
+       (fact "works on keyed tables"
+             (keval "`a`b xasc([a:`c`b`a`a`b`c]b:3 10 3 20 30 2)") =>
+             (keval "([a:`a`a`b`b`c`c];b:3 20 10 30 2 3)")))
 (facts "about parsing non-ambiguity"
        (fact adverbed
              (count (parses "f/")) => 1
