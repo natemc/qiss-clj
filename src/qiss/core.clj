@@ -391,7 +391,7 @@
   (vec (cons (first x) (map - (next x) (drop-last x)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn cut [x y] ;; y x+!'1_0-':x,#y
-  (let [i (mapv range (next (deltas (conj x (count y)))))]
+  (let [i (mapv range (next (deltas (conj x (kcount y)))))]
     (index y (mapv (fn [p q] (mapv #(+ p %) q)) x i))))
 (defn kdrop [x y]
   (let [o (if (<= 0 x) (partial drop x) (partial drop-last (- x)))]
@@ -517,14 +517,17 @@
             (let [[e4 rr] (resolve-full-expr tu e3 (first p))]
               (recur e4 (next p) rr))))))))
 (defn index-table [t i]
-  (if (or (and (vector? i) (keyword? (first i)))
-          (keyword? i))
-    (index (d-from-t t) i)
-    (let [d (d-from-t t)
-          r {:k (:k d) :v (mapv #(index % i) (:v d))}]
-      (if (vector? i)
-        (t-from-d r)
-        r))))
+  (cond (or (and (vector? i) (keyword? (first i)))
+            (keyword? i))
+        (index (d-from-t t) i)
+        (or (and (vector? i) (number? (first i)))
+            (number? i))
+        (let [d (d-from-t t)
+              r {:k (:k d) :v (mapv #(index % i) (:v d))}]
+          (if (vector? i)
+            (t-from-d r)
+            r))
+        :else (mapv (partial index-table t) i)))
 (declare apply-constraints)
 (declare builtin)
 (defn index-keyed-table-helper [t i o]
@@ -565,9 +568,9 @@
         (keyed-table? x) (index-keyed-table x i)
         (map? i)         (make-dict (:k i) (index x (:v i)))
         (vector? i)      (mapv (partial index x) i)
-        (coll? i)        (reduce index x i)
+        (coll? i)        (reduce index x i) ;; wrong
         (vector? x)      (x i)
-        :else ((:v x) (index-of (:k x) i))))
+        :else            ((:v x) (index-of (:k x) i))))
 (defn invoke [e f a]
   (let [p (if (:pass-global-env f) (partial (:f f) e) (:f f))]
     (if (and (= 1 (count a))
@@ -1077,6 +1080,8 @@
              (keval "-2_`a`b`c`d!1 2 3 4") => (keval "`a`b!1 2")
              (keval "-1_([]a:`a`b`c;b:1 2 3)") => (keval "([]a:`a`b;b:1 2)")
              (keval "2_([a:`a`b`c]b:1 2 3)") => (keval "([a:,`c]b:,3)"))
+       (fact "[n0...] _ vector => cut"
+             (keval "0 2 5_\"0123456\"") => (keval "(\"01\";\"234\";\"56\")"))
        (fact "container _ index => remove at"
              (keval "(!5)_2") => [0 1 3 4]
              (keval "(`a`b`c!1 2 3)_`c") => (keval "`a`b!1 2")
