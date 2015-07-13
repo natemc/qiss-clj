@@ -94,7 +94,9 @@
         :else       (err "can't apply last to" x)))
 
 (declare apply-monadic)
+(declare findv)
 (declare index)
+(declare invoke)
 (defn simple-xform [e x i f test]
   (mapv (fn [j p] (if (test j i)
                     (last (invoke e f [p]))
