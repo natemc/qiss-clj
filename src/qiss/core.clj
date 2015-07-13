@@ -67,7 +67,6 @@
   (let [p (if (coll? y) #(some #{%} y) #(= % y))]
     (vec (remove p x))))
 (defn null! [& x] (do (apply println x) (last x)))
-;; (defn null! [x] (do (println x) x))
 (defn raze [x] (vec (mapcat #(if (coll? %) % [%]) x)))
 (defn removev [v i] (catv (subvec v 0 i) (subvec v (+ 1 i) (count v))))
 (defn til-count [x] (vec (range (count x))))
@@ -96,6 +95,42 @@
 
 (declare apply-monadic)
 (declare index)
+(defn simple-xform [e x i f test]
+  (mapv (fn [j p] (if (test j i)
+                    (last (invoke e f [p]))
+                    p))
+        (iterate inc 0)
+        x))
+(defn at-xform
+  ([e x i f]
+   (cond (vector? x)
+         (cond (not (coll? i))   (simple-xform e x i f =)
+               (empty? i)        x
+               (vector? i)       (if (number? (first i))
+                                   (mapv (fn [j p] (if (some #{j} i)
+                                                     (last (invoke e f [p]))
+                                                     p))
+                                         (iterate inc 0)
+                                         x)
+                                   (reduce #(at-xform e %1 %2 f) x i))
+               :else             (err "nyi at-xform" x i))
+         (dict? x)
+         (make-dict (:k x)
+                    (at-xform e (:v x) (findv (:k x) i) f))
+         (table? x)        (err "nyi")
+         (keyed-table? x)  (err "nyi")
+         :else             (err "internal error at-xform" x i))))
+   ;; (loop [x x i i]
+   ;;   (if (empty? i)
+   ;;     x
+   ;;     (recur (mapv (fn [j p] (if (some #{j} i) (f p) p)) (iterate inc 0) x)
+   ;;            (next i)))))
+  ;; ([x i f y]
+  ;;  (loop [x x i i]
+  ;;    (if (empty? i)
+  ;;      x
+  ;;      (recur (mapv (fn [j p] (if (some #{j} i) (f p) p)) (iterate inc 0) x)
+  ;;             (next i))))))
 (defn at
   ([e x] (condp #(= (type %1) %2) x ; type
            java.lang.Boolean -1
@@ -105,7 +140,8 @@
            java.lang.String 10
            clojure.lang.Keyword -11
            0))
-  ([e x y] (last (apply-monadic e x y))))
+  ([e x y] (last (apply-monadic e x y)))
+  ([e x y z] (at-xform e x y z)))
 
 (defn dot
   ([e x] (cond (dict? x)        (:v x)
@@ -124,16 +160,29 @@
                                           (make-dict (:k y) (mapv self x (:v y)))
                                           (err "length" f x y))
                             :else       (mapv #(self % y) x))
-          (map? x)    (cond (vector? y) (if (= (count (:k x)) (count y))
+          (dict? x)   (cond (vector? y) (if (= (count (:k x)) (count y))
                                           {:k (:k x) :v (mapv self (:v x) y)}
                                           (err "length" f x y))
                             ;; TODO: for key elements in common, call self
                             ;; for the rest, leave them alone / copy them
-                            (map? y)    (err "nyi" f x y)
-                            :else       (make-dict (:k x) (mapv #(self % y) (:v x))))
-          ;; x is atom cases
+                            ;; (dict? y)   (let [k (vec (distinct (concat (:k x)
+                            ;;                                            (:k y))))
+                            ;;                   i (findv k (:k y))]
+                            ;;               (loop []
+                                            
+                            ;;                   n (where (eq i (count (:v x)))) ;;new
+                            ;;                   o (where (less i (count (:v x)))) ;;old
+                            ;;                   v (concat (:v x) (index (:v y) n))
+                                              
+                            ;;               ))
+                            :else       (make-dict (:k x)
+                                                   (mapv #(self % y) (:v x))))
+          (table? x)  (t-from-d (self (d-from-t x) y)) ;; TODO more cases
+          (coll? x)   (err "nyi" f x y)
+          ;; x is atom
           (vector? y) (mapv #(self x %) y)
-          (map? y)    (make-dict (:k y) (mapv #(self x %) (:v y)))
+          (dict? y)   (make-dict (:k y) (mapv #(self x %) (:v y)))
+          (table? y)  (make-table (:k y) (mapv #(self x %) (:v y)))
           :else       (f x y))))
 
 (defmacro promote-bools [bf of x y]
@@ -372,15 +421,29 @@
   ([x y] ((atomize *) x y)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(declare index)
-(declare first-index)
-(defn findv [x y] (if (vector? y) (mapv #(index-of x %) y) (index-of x y)))
+(defn msome [p & c] ;; like some but p takes multiple args
+  (when (not (any (map empty? c)))
+    (or (apply p (map first c))
+        (recur p (map next c)))))
+
+(defn index-of-colwise [c & r] ;; c is vector of cols, r is row to find
+  (if-let [k (apply msome
+                    (fn [i & q] (when (= r q) i))
+                    (iterate inc 0)
+                    c)]
+    k
+    (count (first c))))
+(defn findv [x y]
+  (if (vector? y)
+    (mapv #(findv x %) y)
+    (index-of x y)))
 (defn find-table [x y]
   (if (and (or (dict? y) (table? y))
            (every? #(some #{%} (cols x)) (:k y)))
-    (let [f (partial first-index (:v x))]
+    (let [f (partial index-of-colwise (:v x))]
       (if (dict? y) (apply f (:v y)) (apply mapv f (:v y))))
     (err "mismatch: ?" x y)))
+(declare index)
 (defn ques
   ([x] (vec (distinct x)))
   ([x y] (cond (vector? x) (findv x y)
@@ -448,7 +511,7 @@
 (def ops {
           (keyword "~") {:op true :f tilde  :text "~" :rank [1 2]}
           :! {:op true :f bang :text "!" :rank [1 2]}
-          :at {:f at :pass-global-env true :text "@" :rank [1 2]} ;[1 2 3 4]}
+          :at {:f at :pass-global-env true :text "@" :rank [1 2 3]} ;[1 2 3 4]}
           :dot {:f dot :pass-global-env true :text "." :rank [1 2]} ;[1 2 3 4]}
           :+ {:op true :f plus :text "+" :rank [1 2]}
           :- {:op true :f minus :text "-" :rank [1 2]}
@@ -551,7 +614,7 @@
 (defn index [x i]
   (cond (table? x)       (index-table x i)
         (keyed-table? x) (index-keyed-table x i)
-        (map? i)         (make-dict (:k i) (index x (:v i)))
+        (dict? i)        (make-dict (:k i) (index x (:v i)))
         (vector? i)      (mapv (partial index x) i)
         (coll? i)        (reduce index x i) ;; wrong
         (vector? x)      (x i)
@@ -568,7 +631,6 @@
 (defn can-be-monadic [x] (some #{1} (:rank x)))
 (defn can-be-dyadic [x] (some #{2} (:rank x)))
 (defn apply-monadic [e f x]
-  ;; (println "apply-monadic" f "\t" x)
   (if (or (vector? f) (:k f) (table? f))
     [e (index f x)]
     [e (if (:pass-global-env f) ((:f f) e x) ((:f f) x))]))
@@ -893,25 +955,13 @@
             e
             (rest (parse f :start :exprs)))))
 
-(defn msome [p & c] ;; like some but p takes multiple args
-  (when (not (any (mapv empty? c)))
-    (or (apply p (mapv first c))
-        (recur p (mapv next c)))))
-
-(defn first-index [data & p] ;; data is vector of vectors
-  (if-let [k (apply msome
-                    (fn [i & q] (when (= p q) i))
-                    (iterate inc 0)
-                    data)]
-    k
-    (count (first data))))
 (defn lj [x y]
   (cond (not (keyed-table? y)) (err "rhs of lj must be a keyed table")
         (not (every? #(some #{%} (cols x)) (keycols y))) (err "mismatch: lj" x y)
         ;; for every row in x, find the index of the first matching row in y
         :else
         (let [j (apply mapv
-                       (partial first-index (:v (:k y)))
+                       (partial index-of-colwise (:v (:k y)))
                        (index (:v x) (findv (cols x) (keycols y))))
               r (index-table (:v y) j)]
           (make-table (catv (:k x) (:k r)) (catv (:v x) (:v r))))))
@@ -1125,6 +1175,13 @@
              (keval "{x 0 2}1 2 3 4") => [1 3])
        (fact "repeated"
              (keval "1 2 3 4@(0 2;1 3)") => [[1 3] [2 4]]))
+(facts "about 3-arg @"
+       (fact "vector indexed with long"
+             (keval "@[!4;1;{x*2}]") => [0 2 2 3])
+       (fact "vector indexed with vector"
+             (keval "@[!4;1 3;{x+1}]") => [0 2 2 4])
+       (fact "vector repeatedly indexed with vector"
+             (keval "@[!4;(0 1;1 2);{x+1}]") => [1 3 3 3]))
 (facts "about join"
        (fact "monadic envectors"
              (keval ",1") => [1]
