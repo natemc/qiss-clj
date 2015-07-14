@@ -97,24 +97,44 @@
 (declare findv)
 (declare index)
 (declare invoke)
-(defn simple-xform [e x i f test]
+(defn monadic-xform [e x i f test]
   ;; TODO switch to loop to preserve env modifications?
   (mapv (fn [j p] (if (test j i)
                     (last (invoke e f [p]))
                     p))
         (iterate inc 0)
         x))
+(defn dyadic-xform [e x i f y test]
+  ;; TODO switch to loop to preserve env modifications?
+  (mapv (fn [j p q] (if (test j i)
+                    (last (invoke e f [p q]))
+                    p))
+        (iterate inc 0)
+        x
+        y))
 (defn at-xform
   ([e x i f]
+   ;; check that f is monadic here?
    (cond (vector? x)
-         (cond (not (coll? i))   (simple-xform e x i f =)
+         (cond (not (coll? i))   (monadic-xform e x i f =)
                (empty? i)        x
                (vector? i)       (if (number? (first i))
-                                   (mapv (fn [j p] (if (some #{j} i)
-                                                     (last (invoke e f [p]))
-                                                     p))
-                                         (iterate inc 0)
-                                         x)
+                                   (monadic-xform e x i f #(some #{%1} %2))
+                                   (reduce #(at-xform e %1 %2 f) x i))
+               :else             (err "nyi at-xform" x i))
+         (dict? x)
+         (make-dict (:k x)
+                    (at-xform e (:v x) (findv (:k x) i) f))
+         (table? x)        (err "nyi")
+         (keyed-table? x)  (err "nyi")
+         :else             (err "internal error at-xform" x i)))
+  ([e x i f y] ;; this is no good. y conforms to i, not x
+   ;; check that f is monadic here?
+   (cond (vector? x)
+         (cond (not (coll? i))   (dyadic-xform e x i f y =)
+               (empty? i)        x
+               (vector? i)       (if (number? (first i))
+                                   (dyadic-xform e x i f y #(some #{%1} %2))
                                    (reduce #(at-xform e %1 %2 f) x i))
                :else             (err "nyi at-xform" x i))
          (dict? x)
@@ -123,17 +143,6 @@
          (table? x)        (err "nyi")
          (keyed-table? x)  (err "nyi")
          :else             (err "internal error at-xform" x i))))
-   ;; (loop [x x i i]
-   ;;   (if (empty? i)
-   ;;     x
-   ;;     (recur (mapv (fn [j p] (if (some #{j} i) (f p) p)) (iterate inc 0) x)
-   ;;            (next i)))))
-  ;; ([x i f y]
-  ;;  (loop [x x i i]
-  ;;    (if (empty? i)
-  ;;      x
-  ;;      (recur (mapv (fn [j p] (if (some #{j} i) (f p) p)) (iterate inc 0) x)
-  ;;             (next i))))))
 (defn at
   ([e x] (condp #(= (type %1) %2) x ; type
            java.lang.Boolean -1
@@ -144,7 +153,8 @@
            clojure.lang.Keyword -11
            0))
   ([e x y] (last (apply-monadic e x y)))
-  ([e x y z] (at-xform e x y z)))
+  ([e x y z] (at-xform e x y z))
+  ([e x y z a] (at-xform e x y z a)))
 
 (defn dot
   ([e x] (cond (dict? x)        (:v x)
@@ -154,7 +164,10 @@
   ([e x y] (err "nyi: .")))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn atomize [f]
+(defn atomize
+  "From a dyadic function that takes atoms, create a dyadic function
+  that automatically vectorizes"
+  [f]
   (fn self[x y]
     (cond (vector? x) (cond (vector? y) (if (= (count x) (count y))
                                           (mapv self x y)
@@ -514,7 +527,7 @@
 (def ops {
           (keyword "~") {:op true :f tilde  :text "~" :rank [1 2]}
           :! {:op true :f bang :text "!" :rank [1 2]}
-          :at {:f at :pass-global-env true :text "@" :rank [1 2 3]} ;[1 2 3 4]}
+          :at {:f at :pass-global-env true :text "@" :rank [1 2 3 4]}
           :dot {:f dot :pass-global-env true :text "." :rank [1 2]} ;[1 2 3 4]}
           :+ {:op true :f plus :text "+" :rank [1 2]}
           :- {:op true :f minus :text "-" :rank [1 2]}
