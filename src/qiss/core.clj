@@ -97,33 +97,31 @@
 (declare findv)
 (declare index)
 (declare invoke)
-(defn monadic-xform [e x i f test]
-  ;; TODO switch to loop to preserve env modifications?
-  (mapv (fn [j p] (if (test j i)
-                    (last (invoke e f [p]))
-                    p))
-        (iterate inc 0)
-        x))
-(defn dyadic-xform [e x i f y test]
-  ;; TODO switch to loop to preserve env modifications?
-  (println x)
-  (loop [e e x x y y r [] j (range (count x))]
-    (cond (empty? x) r
-          (test (first j) i)
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-          (do (let [[g h] (if (vector? y) [(first y) (next y)] [y y])
-                    [ne rr] (invoke e f [(first x) g])]
-                (recur ne (next x) h (conj r rr) (next j))))
-          :else (recur e (next x) y (conj r (first x)) (next j)))))
+(defn monadic-xform [e x i f]
+  ;; TODO: preserve env modifications by passing them back?
+  ;; Is that necessary?  All of @'s args have been eval'd already.
+  (let [h (fn self [r j]
+            (if (coll? j)
+              (reduce self r j)
+              (let [[ne rr] (invoke e f [(r j)])]
+                (assoc! r j rr))))]
+    (persistent! (h (transient x) i))))
+(defn dyadic-xform [e x i f y]
+  (let [h (fn self [r [j b]]
+            (if (coll? j)
+              (reduce self r (if (coll? b)
+                               (map vector j b)
+                               (map #(vector % b) j)))
+              (let [[ne rr] (invoke e f [(r j) b])]
+                (assoc! r j rr))))]
+    (persistent! (h (transient x) [i y]))))
 (defn at-xform
   ([e x i f]
    ;; check that f is monadic here?
    (cond (vector? x)
-         (cond (not (coll? i))   (monadic-xform e x i f =)
+         (cond (not (coll? i))   (monadic-xform e x i f)
                (empty? i)        x
-               (vector? i)       (if (number? (first i))
-                                   (monadic-xform e x i f #(some #{%1} %2))
-                                   (reduce #(at-xform e %1 %2 f) x i))
+               (vector? i)       (monadic-xform e x i f)
                :else             (err "nyi at-xform" x i))
          (dict? x)
          (make-dict (:k x)
@@ -131,17 +129,12 @@
          (table? x)        (err "nyi")
          (keyed-table? x)  (err "nyi")
          :else             (err "internal error at-xform" x i)))
-  ([e x i f y] ;; this is no good. y conforms to i, not x
-   ;; check that f is monadic here?
-   (println i)
+  ([e x i f y] ;; y conforms to i, not x
+   ;; check that f is dyadic here?
    (cond (vector? x)
-         (cond (not (coll? i))   (dyadic-xform e x i f y =)
+         (cond (not (coll? i))   (dyadic-xform e x i f y)
                (empty? i)        x
-               (vector? i)       (if (number? (first i))
-                                   (dyadic-xform e x i f y #(some #{%1} %2))
-                                   (reduce #(at-xform e %1 (first %2) f (second %2))
-                                           x
-                                           (map vector i y)))
+               (vector? i)       (dyadic-xform e x i f y)
                :else             (err "nyi at-xform" x i))
          (dict? x)
          (make-dict (:k x)
@@ -1211,6 +1204,19 @@
        (fact "dict indexed repeatedly with vector"
              (keval "@[`a`b`c!1 2 3;(`a`b;`a`c);{x+1}]") =>
              (keval "`a`b`c!3 3 4")))
+(facts "about 4-arg @"
+       (fact "vector indexed with long"
+             (keval "@[!4;1;*;2]") => [0 2 2 3])
+       (fact "vector indexed with vector paired with atom"
+             (keval "@[!4;1 3;*;2]") => [0 2 2 6])
+       (fact "vector indexed with matrix paired with atom"
+             (keval "@[!4;(1 3;2 0);*;2]") => [0 2 4 6])
+       (fact "vector indexed with matrix paired with vector"
+             (keval "@[!4;(1 3;2 0);*;2 4]") => [0 2 8 6])
+       (fact "vector indexed with matrix paired with matrix"
+             (keval "@[!4;(1 3;2 0);*;(2 4;6 8)]") => [0 2 12 12])
+       (fact "dict indexed with ragged paired with atom"
+             (keval "@[`a`b`c!1 2 3;(`a`c;`b);*;2]") => (keval "`a`b`c!2 4 6")))
 (facts "about join"
        (fact "monadic envectors"
              (keval ",1") => [1]
