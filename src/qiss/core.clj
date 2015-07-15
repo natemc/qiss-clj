@@ -106,12 +106,15 @@
         x))
 (defn dyadic-xform [e x i f y test]
   ;; TODO switch to loop to preserve env modifications?
-  (mapv (fn [j p q] (if (test j i)
-                    (last (invoke e f [p q]))
-                    p))
-        (iterate inc 0)
-        x
-        y))
+  (println x)
+  (loop [e e x x y y r [] j (range (count x))]
+    (cond (empty? x) r
+          (test (first j) i)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+          (do (let [[g h] (if (vector? y) [(first y) (next y)] [y y])
+                    [ne rr] (invoke e f [(first x) g])]
+                (recur ne (next x) h (conj r rr) (next j))))
+          :else (recur e (next x) y (conj r (first x)) (next j)))))
 (defn at-xform
   ([e x i f]
    ;; check that f is monadic here?
@@ -130,16 +133,19 @@
          :else             (err "internal error at-xform" x i)))
   ([e x i f y] ;; this is no good. y conforms to i, not x
    ;; check that f is monadic here?
+   (println i)
    (cond (vector? x)
          (cond (not (coll? i))   (dyadic-xform e x i f y =)
                (empty? i)        x
                (vector? i)       (if (number? (first i))
                                    (dyadic-xform e x i f y #(some #{%1} %2))
-                                   (reduce #(at-xform e %1 %2 f) x i))
+                                   (reduce #(at-xform e %1 (first %2) f (second %2))
+                                           x
+                                           (map vector i y)))
                :else             (err "nyi at-xform" x i))
          (dict? x)
          (make-dict (:k x)
-                    (at-xform e (:v x) (findv (:k x) i) f))
+                    (at-xform e (:v x) (findv (:k x) i) f y))
          (table? x)        (err "nyi")
          (keyed-table? x)  (err "nyi")
          :else             (err "internal error at-xform" x i))))
