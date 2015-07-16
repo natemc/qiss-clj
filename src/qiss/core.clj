@@ -41,6 +41,7 @@
         :else        (str/join x))) ;; vector of char
 (defn read-lines [x]
   (with-open [r (io/reader (string x))] (vec (line-seq r))))
+
 (def grammar (clojure.java.io/resource "qiss/grammar"))
 (def xform   {:ladverbed (fn [& x] (vec (cons :adverbed x)))
               :lassign   (fn [& x] (vec (cons :assign x)))
@@ -60,16 +61,32 @@
 (def parses  #(mapv (partial insta/transform xform) (insta/parses parser %)))
 (def vis     (comp insta/visualize parse))
 
+(defn to-long [x]
+  (cond (coll? x) (if (= 0 (count x)) [] (mapv to-long x))
+        (bool? x) (if x 1 0)
+        :else x))
+
 (defn all [x] (every? (fn [x] x) x))
 (defn any [x] (some (fn [x] x) x))
 (defn catv [x y] (vec (concat x y)))
+(declare eq)
 (defn except [x y]
   (let [p (if (coll? y) #(some #{%} y) #(= % y))]
     (vec (remove p x))))
+(defn in [x y]
+  (if (coll? x)
+    (mapv #(in % y) x)
+    (if (some #{x} y) true false)))
+(defn inter [x y] (vec (filter #(some #{%} x) y)))
+(declare less)
 (defn null! [& x] (do (apply println x) (last x)))
 (defn raze [x] (vec (mapcat #(if (coll? %) % [%]) x)))
 (defn removev [v i] (catv (subvec v 0 i) (subvec v (+ 1 i) (count v))))
 (defn til-count [x] (vec (range (count x))))
+(defn union [x y] (vec (distinct (concat x y))))
+(defn where
+  ([x] (vec (flatten (map-indexed #(repeat %2 %1) (to-long x)))))
+  ([e x] [e (where x)]))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn make-dict [k v] {:k k :v v})
 (defn make-keyed-table [k v] {:k k :v v :kt true})
@@ -180,16 +197,18 @@
                                           (err "length" f x y))
                             ;; TODO: for key elements in common, call self
                             ;; for the rest, leave them alone / copy them
-                            ;; (dict? y)   (let [k (vec (distinct (concat (:k x)
-                            ;;                                            (:k y))))
-                            ;;                   i (findv k (:k y))]
-                            ;;               (loop []
-                                            
-                            ;;                   n (where (eq i (count (:v x)))) ;;new
-                            ;;                   o (where (less i (count (:v x)))) ;;old
-                            ;;                   v (concat (:v x) (index (:v y) n))
-                                              
-                            ;;               ))
+                            (dict? y)
+                            (let [p (findv (:k x) (:k y)) ;; pos of y in x
+                                  n (where (eq p (count (:k x)))) ;; new
+                                  o (where (less p (count (:k x))))] ;; overlap
+                              (make-dict (union (:k x) (:k y))
+                                         (reduce (fn [g [a b]]
+                                                   (assoc g a (f (g a) b)))
+                                                 (vec (concat (:v x)
+                                                              (index (:v y) n)))
+                                                 (map vector
+                                                      (index p o)
+                                                      (index (:v y) o)))))
                             :else       (make-dict (:k x)
                                                    (mapv #(self % y) (:v x))))
           (table? x)  (t-from-d (self (d-from-t x) y)) ;; TODO more cases
@@ -211,14 +230,6 @@
                  (~of a# b#))))]
     ((atomize f#) ~x ~y)))
 
-(defn to-long [x]
-  (cond (coll? x) (if (= 0 (count x)) [] (mapv to-long x))
-        (bool? x) (if x 1 0)
-        :else x))
-
-(defn where
-  ([x] (vec (flatten (map-indexed #(repeat %2 %1) (to-long x)))))
-  ([e x] [e (where x)]))
 (defn amp
   ([x] (where x))
   ([x y] (promote-bools and min x y)))
@@ -634,7 +645,9 @@
         (coll? i)        (reduce index x i) ;; wrong
         (vector? x)      (x i)
         :else            ((:v x) (index-of (:k x) i))))
+(def shit false)
 (defn invoke [e f a]
+  (when shit (println f))
   (let [p (if (:pass-global-env f) (partial (:f f) e) (:f f))]
     (if (and (= 1 (count a))
              (= :hole (first a))
