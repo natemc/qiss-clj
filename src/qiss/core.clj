@@ -34,7 +34,10 @@
 (defn exit
   ([] (exit 0))
   ([x] (System/exit x)))
-(defn index-of [x i] (let [j (.indexOf x i)] (if (< j 0) (count x) j)))
+(defn index-of
+  "The first index in x where i appears, or (count x) if i does not
+  exist in x"
+  [x i] (let [j (.indexOf x i)] (if (< j 0) (count x) j)))
 (defn string [x]
   (cond (string? x)  x
         (keyword? x) (name x)
@@ -43,6 +46,9 @@
   (with-open [r (io/reader (string x))] (vec (line-seq r))))
 
 (def grammar (clojure.java.io/resource "qiss/grammar"))
+;; Used by the parse and parse functions to replace all limited
+;; non-terminals with their regular (not limited) versions, as the
+;; limits apply only for parsing and are not relevant to evaluation.
 (def xform   {:ladverbed (fn [& x] (vec (cons :adverbed x)))
               :lassign   (fn [& x] (vec (cons :assign x)))
               :lat       (fn [& x] (vec (cons :at x)))
@@ -66,8 +72,8 @@
         (bool? x) (if x 1 0)
         :else x))
 
-(defn all [x] (every? (fn [x] x) x))
-(defn any [x] (some (fn [x] x) x))
+(defn all [x] (if (every? (fn [x] x) x) true false))
+(defn any [x] (if (some (fn [x] x) x) true false))
 (defn catv [x y] (vec (concat x y)))
 (declare eq)
 (defn except [x y]
@@ -77,15 +83,24 @@
   (if (coll? x)
     (mapv #(in % y) x)
     (if (some #{x} y) true false)))
-(defn inter [x y] (vec (filter #(some #{%} x) y)))
+(defn inter
+  "Intersection of 2 vectors.  Preserves the order per x"
+  [x y] (vec (filter #(some #{%} y) x)))
 (declare less)
 (defn null! [& x] (do (apply println x) (last x)))
 (defn raze [x] (vec (mapcat #(if (coll? %) % [%]) x)))
 (defn removev [v i] (catv (subvec v 0 i) (subvec v (+ 1 i) (count v))))
 (defn til-count [x] (vec (range (count x))))
-(defn union [x y] (vec (distinct (concat x y))))
+(defn union
+  "Union of 2 vectors.  Preserves the order of x and the items added
+  from y retain their relative order as well"
+  [x y] (vec (distinct (concat x y))))
 (defn where
-  ([x] (vec (flatten (map-indexed #(repeat %2 %1) (to-long x)))))
+  "All elements of x must be integers.  For each element of x (vector
+  or dict), concat that many copies of that element's index"
+  ([x] (vec (flatten (if (vector? x)
+                       (map-indexed #(repeat %2 %1) (to-long x))
+                       (map #(repeat %2 %1) (:k x) (:v x))))))
   ([e x] [e (where x)]))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn make-dict [k v] {:k k :v v})
@@ -99,7 +114,10 @@
   (cond (table? x)       (:k x)
         (keyed-table? x) (catv (:k (:k x)) (:k (:v x)))
         :else            (err "cols cannot be applied to" x)))
-(defn keycols [x] (cols (:k x)))
+(defn keycols [x]
+  (if (keyed-table? x)
+    (cols (:k x))
+    (err "keycols cannot be applied to " x)))
 (defn d-from-t [x] (dissoc x :t))
 (defn t-from-d [x] (assoc x :t true))
 
@@ -460,9 +478,10 @@
     k
     (count (first c))))
 (defn findv [x y]
-  (if (vector? y)
-    (mapv #(findv x %) y)
-    (index-of x y)))
+  "Find the position(s) of y in vector x"
+  (cond (not (coll? y)) (index-of x y)
+        (vector? y)     (mapv #(findv x %) y)
+        :else           (err "findv" x y)))
 (defn find-table [x y]
   (if (and (or (dict? y) (table? y))
            (every? #(some #{%} (cols x)) (:k y)))
@@ -645,9 +664,8 @@
         (coll? i)        (reduce index x i) ;; wrong
         (vector? x)      (x i)
         :else            ((:v x) (index-of (:k x) i))))
-(def shit false)
+
 (defn invoke [e f a]
-  (when shit (println f))
   (let [p (if (:pass-global-env f) (partial (:f f) e) (:f f))]
     (if (and (= 1 (count a))
              (= :hole (first a))
