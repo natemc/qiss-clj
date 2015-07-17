@@ -479,9 +479,12 @@
     (count (first c))))
 (defn findv [x y]
   "Find the position(s) of y in vector x"
-  (cond (not (coll? y)) (index-of x y)
-        (vector? y)     (mapv #(findv x %) y)
-        :else           (err "findv" x y)))
+  (cond (not (coll? y))  (index-of x y)
+        (vector? y)      (mapv #(findv x %) y)
+        (dict?   y)      (make-dict (:k y) (findv x (:v y)))
+        (table?  y)      (make-table (:k y) (findv x (:v y)))
+        (keyed-table? y) (make-keyed-table (findv x (:k y)) (findv x (:v y)))
+        :else            (err "findv" x y)))
 (defn find-table [x y]
   (if (and (or (dict? y) (table? y))
            (every? #(some #{%} (cols x)) (:k y)))
