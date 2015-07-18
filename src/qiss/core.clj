@@ -216,38 +216,39 @@
 (defn atomize
   "From a dyadic function that takes atoms, create a dyadic function
   that automatically vectorizes"
-  [f]
+  [f] ;; not the full structure but just the code - is this a problem?
   (fn self[x y]
     (cond (vector? x) (cond (vector? y) (if (= (count x) (count y))
                                           (mapv self x y)
                                           (err "length" f x y))
-                            (map? y)    (if (= (count x) (count (dict-key y)))
+                            (dict? y)   (if (= (count x) (count (dict-key y)))
                                           (make-dict (dict-key y)
                                                      (mapv self x (dict-val y)))
                                           (err "length" f x y))
+                            (coll? y)   (err "nyi" f x y)
                             :else       (mapv #(self % y) x))
           (dict? x)   (cond (vector? y) (if (= (count (dict-key x)) (count y))
                                           (make-dict (dict-key x)
                                                      (mapv self (dict-val x) y))
                                           (err "length" f x y))
-                            ;; TODO: for key elements in common, call self
-                            ;; for the rest, leave them alone / copy them
-                            (dict? y)
+                            (dict? y) ;; is this really so complicated?
                             (let [p (findv (dict-key x) (dict-key y)) ;; pos y in x
-                                  n (where (eq p (count (dict-key x)))) ;; new
+                                  n (index (dict-val y) ;; new items from y
+                                           (where (eq p (count (dict-key x)))))
                                   o (where (less p (count (dict-key x))))] ;; overlap
                               (make-dict (union (dict-key x) (dict-key y))
                                          (reduce
-                                          (fn [g [a b]]
-                                            (assoc g a (f (g a) b)))
-                                          (vec (concat (dict-val x)
-                                                       (index (dict-val y) n)))
+                                          (fn [v [i b]]
+                                            (assoc v i (f (v i) b)))
+                                          (vec (concat (dict-val x) n))
                                           (map vector
                                                (index p o)
                                                (index (dict-val y) o)))))
+                            (coll? y)   (err "nyi" f x y)
                             :else       (make-dict (dict-key x)
                                                    (mapv #(self % y) (dict-val x))))
-          (table? x)  (t-from-d (self (d-from-t x) y)) ;; TODO more cases
+          (table? x)  (t-from-d (self (d-from-t x) y)) ;; TODO more cases?
+          (keyed-table? x) (make-keyed-table (dict-key x) (self (dict-val x) y))
           (coll? x)   (err "nyi" f x y)
           ;; x is atom
           (vector? y) (mapv #(self x %) y)
@@ -358,7 +359,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn key-table [x y]
   (cond (table? x)   (if (= (kcount x) (kcount y))
-                       (assoc (make-dict x y) :kt true)
+                       (make-keyed-table x y)
                        (err "length" x y))
         (vector? x)  (key-table-by-colnames x y)
         (number? x)  (key-table-by-long x y)
@@ -384,9 +385,11 @@
 (defn div [x y] ((atomize quot) x y))
 (defn kmod [x y] ((atomize mod) x y))
 (defn sv [x y]
- (vec (str/join (if (vector? x) (str/join x) x)
-                (mapv str/join y))))
+  "string from vector"
+  (vec (str/join (if (vector? x) (str/join x) x)
+                 (mapv str/join y))))
 (defn vs [x y]
+  "vector from string"
   (mapv vec (str/split (str/join y)
                        (re-pattern (if (vector? x) (str/join x) (str x))))))
 
@@ -394,16 +397,18 @@
   ([x] (if (coll? x) (mapv #(double (/ %)) x)
            (double (/ x))))
   ([x y] ((atomize #(double (/ %1 %2))) x y)))
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn join
   ([x] [x])
-  ([x y] (if (vector? x)
-           (if (vector? y)
-             (vec (concat x y))
-             (conj x y))
-           (if (vector? y)
-             (vec (cons x y))
-             [x y]))))
+  ([x y] (cond (vector? x)             (if (vector? y)
+                                         (vec (concat x y))
+                                         (conj x y))
+               (vector? y)              (vec (cons x y))
+               (dict? x)                (if (dict? y)
+                                          ((atomize (fn [x y] y)) x y)
+                                          (err "can't join" x y))
+               (or (coll? x) (coll? y)) (err "can't join" x y)
+               :else       [x y])))
 
 (declare findv)
 (declare ktake)
@@ -1343,7 +1348,10 @@
              (keval ",1") => [1]
              (keval ",1 2 3") => [[1 2 3]])
        (fact "dyadic joins"
-             (keval "1 2,3 4") => [1 2 3 4]))
+             (keval "1 2,3 4") => [1 2 3 4])
+       (fact "joining dicts is a merge where rhs wins"
+             (keval "(`a`b`c`e!1 2 3 5),`b`c`d!10 20 30") =>
+             (keval "`a`b`c`e`d!1 10 20 5 30")))
 (facts "about select"
        (fact "no agg required"
              (keval "select from([]a:1 2 3)") => (keval "([]a:1 2 3)"))
