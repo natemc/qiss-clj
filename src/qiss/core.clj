@@ -141,7 +141,6 @@
         (map? x)    (klast (dict-val x))
         :else       (err "can't apply last to" x)))
 
-(declare apply-monadic)
 (declare findv)
 (declare index)
 (declare invoke)
@@ -227,7 +226,7 @@
            java.lang.String 10
            clojure.lang.Keyword -11
            0))
-  ([e x y] (last (apply-monadic e x y)))
+  ([e x y] (last (invoke e x [y])))
   ([e x y z] (at-xform e x y z))
   ([e x y z a] (at-xform e x y z a)))
 
@@ -745,8 +744,7 @@
         (index-keyed-table t (make-dict (keycols t) [i]))
         :else (err "nyi: index keyed table" t i)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; TODO: unify apply-monadic, index, invoke,
-;; resolve-at, resolve-call, and resolve-juxt
+;; TODO: unify index, invoke, resolve-at, resolve-call, and resolve-juxt
 (defn index [x i]
   (cond (table? x)       (index-table x i)
         (keyed-table? x) (index-keyed-table x i)
@@ -757,22 +755,19 @@
         :else            ((dict-val x) (index-of (dict-key x) i))))
 
 (defn invoke [e f a]
-  (let [c (lambda-code f)
-        p (if (:pass-global-env f) (partial c e) c)]
-    (if (and (= 1 (count a))
-             (= :hole (first a))
-             (some #{0} (lambda-rank f)))
-      [e (p)]
-      [e (apply p a)])))
+  (if (not (lambda? f))
+    [e (index f (first a))] ;; TODO generalize
+    (let [c (lambda-code f)
+          p (if (:pass-global-env f) (partial c e) c)]
+      (if (and (= 1 (count a))
+               (= :hole (first a))
+               (some #{0} (lambda-rank f)))
+        [e (p)]
+        [e (apply p a)]))))
 (defn is-callable [x] (instance? clojure.lang.IFn x))
 (defn can-only-be-monadic [x] false)
 (defn can-be-monadic [x] (some #{1} (lambda-rank x)))
 (defn can-be-dyadic [x] (some #{2} (lambda-rank x)))
-(defn apply-monadic [e f x]
-  (if (not (lambda? f))
-    [e (index f x)]
-    (let [c (lambda-code f)]
-      [e (if (:pass-global-env f) (c e x) (c x))])))
 
 
 
@@ -803,7 +798,7 @@
     (let [[e2 rhs] (kresolve tu e (:rhs x))]
       (if (:lhs x)
         (let [[e3 lhs] (kresolve tu e2 (:lhs x))]
-          (apply-monadic e3 lhs rhs))
+          (invoke e3 lhs [rhs]))
         (at e2 rhs)))
     (if (:lhs x)
       (err "nyi: partially bound @ from lhs")
@@ -845,7 +840,7 @@
       (invoke e3 rhs [o (:second rhs)])
       (if (can-be-dyadic o)
         [e3 (merge o {:second rhs})]
-        (apply-monadic e3 o rhs)))))
+        (invoke e3 o [rhs])))))
 
 (defn resolve-lambda [tu t e x]
   (let [a (args x)
@@ -867,7 +862,7 @@
 (defn resolve-monop [tu e x]
   (let [o (ops (keyword (:op x)))
         [e2 a] (kresolve tu e (:rhs x))]
-    (apply-monadic e2 o a)))
+    (invoke e2 o [a])))
 
 (defn sub-table [t i]
   (if i
@@ -1005,7 +1000,7 @@
 (defn resolve-full-expr [tu e x]
   (let [[e2 r] (kresolve tu e x)]
     (if (and (= :juxt (first x)) (:second r))
-      (apply-monadic e2 r (:second r))
+      (invoke e2 r [(:second r)])
       [e2 r])))
 
 (def viewport {:rows 25 :cols 80})
@@ -1159,8 +1154,8 @@
                         e))]
              (recur e2))))))))
 
-(defn keval [x] (last (kresolve x builtin (second (parse x)))))
-(defn krun [x]  (show (keval x)))
+(defn keval [x] (last (resolve-full-expr x builtin (second (parse x)))))
+(defn krun [x]  (show (resolve-full-expr x)))
 
 (defn -main
   "qiss repl"
@@ -1338,6 +1333,10 @@
        (fact "dict"
              (keval "=`a`b`c`d`e`f`g`h`i`j!0 1 2 0 1 2 0 1 2 0") =>
              (keval "0 1 2!(`a`d`g`j;`b`e`h;`c`f`i)")))
+(facts "about @"
+       (fact "call it like a function"
+             (keval "@[1 2 3 4;0 2]") => [1 3]
+             (keval "@[{x+x};4]") => 8))
 (facts "about 3-arg @"
        (fact "vector indexed with long"
              (keval "@[!4;1;{x*2}]") => [0 2 2 3])
