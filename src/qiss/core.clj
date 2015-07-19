@@ -10,7 +10,7 @@
 ;; Backlog
 ;;   indexing at depth
 ;;   dict+dict
-;;   @ 3&4 args
+;;   @ 3&4 args on keyed tables
 ;;   .
 ;;   builtins
 ;;   update, insert, delete
@@ -745,7 +745,7 @@
         (index-keyed-table t (make-dict (keycols t) [i]))
         :else (err "nyi: index keyed table" t i)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; TODO: unify apply-dyadic, apply-monadic, index, invoke,
+;; TODO: unify apply-monadic, index, invoke,
 ;; resolve-at, resolve-call, and resolve-juxt
 (defn index [x i]
   (cond (table? x)       (index-table x i)
@@ -773,9 +773,6 @@
     [e (index f x)]
     (let [c (lambda-code f)]
       [e (if (:pass-global-env f) (c e x) (c x))])))
-(defn apply-dyadic [e f x y]
-  (let [c (lambda-code f)]
-    [e (if (:pass-global-env f) (c e x y) (c x y))]))
 
 
 
@@ -817,7 +814,7 @@
     (let [[e2 rhs] (kresolve tu e (:rhs x))]
       (if (:lhs x)
         (let [[e3 lhs] (kresolve tu e2 (:lhs x))]
-          (apply apply-dyadic e3 lhs rhs)) ;; TODO: generalize
+          (apply invoke e3 [lhs rhs])) ;; TODO: generalize
         [e2 (dot e2 rhs)]))
     (if (:lhs x)
       (err "nyi: partially bound . from lhs")
@@ -839,7 +836,7 @@
   (let [o        (ops (keyword (:op x)))
         [e2 rhs] (kresolve tu e (:rhs x))
         [e3 lhs] (kresolve tu e2 (:lhs x))]
-    (apply-dyadic e3 o lhs rhs)))
+    (invoke e3 o [lhs rhs])))
 
 (defn resolve-juxt [tu e x]
   (let [[e2 rhs] (kresolve tu e (:rhs x))
