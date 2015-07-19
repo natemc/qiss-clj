@@ -753,10 +753,17 @@
         (coll? i)        (reduce index x i) ;; wrong
         (vector? x)      (x i)
         :else            ((dict-val x) (index-of (dict-key x) i))))
-
+(defn index-deep [x i]
+  (if (empty? i)
+    x
+    (let [j (first i)
+          p (index x j)]
+      (if (and (vector? j) (< 1 (count j)))
+        (mapv #(index-deep %1 (next i)) p)
+        (index-deep p (next i))))))
 (defn invoke [e f a]
   (if (not (lambda? f))
-    [e (index f (first a))] ;; TODO generalize
+    [e (index-deep f a)]
     (let [c (lambda-code f)
           p (if (:pass-global-env f) (partial c e) c)]
       (if (and (= 1 (count a))
@@ -809,7 +816,7 @@
     (let [[e2 rhs] (kresolve tu e (:rhs x))]
       (if (:lhs x)
         (let [[e3 lhs] (kresolve tu e2 (:lhs x))]
-          (apply invoke e3 [lhs rhs])) ;; TODO: generalize
+          (invoke e3 lhs rhs))
         [e2 (dot e2 rhs)]))
     (if (:lhs x)
       (err "nyi: partially bound . from lhs")
@@ -1380,6 +1387,29 @@
        (fact "tables"
              (keval "@[([]a:1 2 3;b:10 20 30;c:100 200 300);(`a`b;0);*;(5 10;100)]") =>
              (keval "([]a:500 10 15;b:10000 200 300;c:10000 200 300)")))
+(facts "about 2-arg dot"
+       (fact "indexing vectors with vectors"
+             (keval "(1 2 3 4) .,1") => 2 ;; TODO fix grammar
+             (keval "(1 2 3 4) .,1 2") => [2 3]
+             (keval "(0 1 2;3 4 5;6 7 8).,0 2") => [[0 1 2] [6 7 8]]
+             (keval "(0 1 2;3 4 5;6 7 8). 1 1") => 4
+             (keval "(0 1 2;3 4 5;6 7 8).(0 1;1)") => [1 4]
+             (keval "(0 1 2;3 4 5;6 7 8).(0 2;0 2)") => [[0 2] [6 8]])
+       (fact "indexing dicts of vectors"
+             (keval "(`a`b`c!(0 1 2;3 4 5;6 7 8)).(`b;1)") => 4
+             (keval "(`a`b`c!(0 1 2;3 4 5;6 7 8)).(`a`b;1)") => [1 4]
+             (keval "(`a`b`c!(0 1 2;3 4 5;6 7 8)).(`b;0 2)") => [3 5])
+       (fact "indexing tables"
+             (keval "([]a:1 2 3;b:4 5 6).(`b;1)") => 5
+             (keval "([]a:1 2 3;b:4 5 6).(1;`b)") => 5
+             (keval "([]a:1 2 3;b:4 5 6).(`a`b;1)") => [2 5]
+             (keval "([]a:1 2 3;b:4 5 6).(`a`b;0 2)") => [[1 3] [4 6]])
+       (fact "applying functions"
+             (keval "{2}.()") => 2
+             (keval "{x}.,2") => 2
+             (keval "{x+y}. 1 2") => 3
+             (keval "(+). 1 2") => 3 ;; TODO fix grammar
+             (keval "{x+z}. 1 2 3") => 4))
 (facts "about join"
        (fact "monadic envectors"
              (keval ",1") => [1]
