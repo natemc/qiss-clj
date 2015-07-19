@@ -154,6 +154,24 @@
               (let [[ne rr] (invoke e f [(r j)])]
                 (assoc! r j rr))))]
     (persistent! (h (transient x) i))))
+(defn at-xform-update-table [t i c] ;; table index content
+  (if (keyword? i)
+    (assoc t :v (assoc (:v t) (findv (:k t) i) c))
+    (let [a (if (dict? c) c (make-dict (cols t)
+                                       (vec (repeat (count (cols t)) c))))]
+      (reduce (fn [t [k v]]
+                (let [p (findv (:k t) k)]
+                  (assoc t :v (assoc (:v t) p (assoc ((:v t) p) i v)))))
+              t
+              (map vector (dict-key a) (dict-val a))))))
+(defn at-xform-monadic-table [e x i f]
+  (let [h (fn self [r j]
+            (if (coll? j)
+              (reduce self r j)
+              (let [[ne rr] (invoke e f [(index r j)])]
+                (at-xform-update-table r j rr))))]
+    (h x i)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn at-xform-dyadic [e x i f y]
   (let [h (fn self [r [j b]]
             (if (coll? j)
@@ -163,6 +181,15 @@
               (let [[ne rr] (invoke e f [(r j) b])]
                 (assoc! r j rr))))]
     (persistent! (h (transient x) [i y]))))
+(defn at-xform-dyadic-table [e x i f y]
+  (let [h (fn self [r [j b]]
+            (if (coll? j)
+              (reduce self r (if (coll? b)
+                               (map vector j b)
+                               (map #(vector % b) j)))
+              (let [[ne rr] (invoke e f [(index r j) b])]
+                (at-xform-update-table r j rr))))]
+    (h x [i y])))
 (defn at-xform
   ([e x i f]
    ;; check that f is monadic here?
@@ -174,7 +201,7 @@
                                       (at-xform e
                                                 (dict-val x)
                                                 (findv (dict-key x) i) f))
-         (table? x)        (err "nyi")
+         (table? x)        (at-xform-monadic-table e x i f)
          (keyed-table? x)  (err "nyi")
          :else             (err "internal error at-xform" x i)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -188,7 +215,7 @@
                                       (at-xform e
                                                 (dict-val x)
                                                 (findv (dict-key x) i) f y))
-         (table? x)        (err "nyi")
+         (table? x)        (at-xform-dyadic-table e x i f y)
          (keyed-table? x)  (err "nyi")
          :else             (err "internal error at-xform" x i))))
 (defn at
@@ -1327,9 +1354,20 @@
              (keval "@[`a`b`c!1 2 3;`a`c;{x+1}]") => (keval "`a`b`c!2 2 4"))
        (fact "dict indexed repeatedly with vector"
              (keval "@[`a`b`c!1 2 3;(`a`b;`a`c);{x+1}]") =>
-             (keval "`a`b`c!3 3 4")))
-       ;; (fact "table indexed with long"
-       ;;       (keval "@[([]a:1 2 3);0;{4}]")))
+             (keval "`a`b`c!3 3 4"))
+       (fact "table indexed with long"
+             (keval "@[([]a:1 2 3);0;{2*x}]") => (keval "([]a:2 2 3)"))
+       (fact "table indexed with longs"
+             (keval "@[([]a:1 2 3);0 2;{2*x}]") => (keval "([]a:2 2 6)"))
+       (fact "table indexed with symbol"
+             (keval "@[([]a:1 2 3;b:10 20 30);`a;{2*x}]") =>
+             (keval "([]a:2 4 6;b:10 20 30)"))
+       (fact "table indexed with symbols"
+             (keval "@[([]a:1 2 3;b:10 20 30;c:100 200 300);`a`c;{2*x}]") =>
+             (keval "([]a:2 4 6;b:10 20 30;c:200 400 600)"))
+       (fact "table complex indexing"
+             (keval "@[([]a:1 2 3;b:10 20 30;c:100 200 300);(`a;0);{2*x}]") =>
+             (keval "([]a:4 4 6;b:20 20 30;c:200 200 300)")))
 (facts "about 4-arg @"
        (fact "vector indexed with long"
              (keval "@[!4;1;*;2]") => [0 2 2 3])
@@ -1342,7 +1380,10 @@
        (fact "vector indexed with matrix paired with matrix"
              (keval "@[!4;(1 3;2 0);*;(2 4;6 8)]") => [0 2 12 12])
        (fact "dict indexed with ragged paired with atom"
-             (keval "@[`a`b`c!1 2 3;(`a`c;`b);*;2]") => (keval "`a`b`c!2 4 6")))
+             (keval "@[`a`b`c!1 2 3;(`a`c;`b);*;2]") => (keval "`a`b`c!2 4 6"))
+       (fact "tables"
+             (keval "@[([]a:1 2 3;b:10 20 30;c:100 200 300);(`a`b;0);*;(5 10;100)]") =>
+             (keval "([]a:500 10 15;b:10000 200 300;c:10000 200 300)")))
 (facts "about join"
        (fact "monadic envectors"
              (keval ",1") => [1]

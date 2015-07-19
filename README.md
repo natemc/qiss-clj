@@ -354,7 +354,7 @@ pressing issues:
 * . (value and 2-arg version)
 * destructuring for function arguments (and assignments?)
 (a;b):0 1 / same as a:0;b:1
-(){[a;(b;c)a+b*c]/(0 1;2 3;4 5)
+(){[a;(b;c)]a+b*c]/(0 1;2 3;4 5)
 * dict op dict
 * insert
 * delete
