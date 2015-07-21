@@ -229,14 +229,71 @@
   ([e x y] (last (invoke e x [y])))
   ([e x y z] (at-xform e x y z))
   ([e x y z a] (at-xform e x y z a)))
-
+(defn massoc [x i c] ;; multi assoc
+  (reduce (fn [a [b c]] (assoc a b c)) x (mapv vector i c)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn dot-xform-monadic [e x i f]
+  (if (empty? i)
+    (last (invoke e f [x]))
+    (let [j (first i)]
+      (if (not (coll? j))
+        (assoc x j (dot-xform-monadic e (x j) (next i) f))
+        (massoc x j
+                (mapv #(dot-xform-monadic e %1 (next i) f)
+                      (index x j)))))))
+(defn dot-xform-dyadic [e x i f y]
+  (if (empty? i)
+    (last (invoke e f [x y]))
+    (let [j (first i)]
+      (if (not (coll? j))
+        (assoc x j (dot-xform-dyadic e (x j) (next i) f y))
+        (massoc x j
+                (mapv #(dot-xform-dyadic e %1 (next i) f %2)
+                      (index x j)
+                      y))))))
+(defn dot-xform
+  ([e x i f]
+   (cond (vector? x)       (cond (not (coll? i))
+                                 (err "index for . must be a container")
+                                 (empty? i)        x
+                                 (vector? i)       (dot-xform-monadic e x i f)
+                                 :else             (err "nyi dot-xform" x i))
+         (dict? x)         (make-dict (dict-key x)
+                                      (dot-xform e
+                                                (dict-val x)
+                                                (vec (cons (findv (dict-key x)
+                                                                  (first i))
+                                                           (next i)))
+                                                f))
+         (table? x)        (err "nyi")
+         (keyed-table? x)  (err "nyi")
+         :else             (err "internal error dot-xform" x i)))
+  ([e x i f y]
+   (cond (vector? x)       (cond (not (coll? i))
+                                 (err "index for . must be a container")
+                                 (empty? i)        x
+                                 (vector? i)       (dot-xform-dyadic e x i f y)
+                                 :else             (err "nyi dot-xform" x i))
+         (dict? x)         (make-dict (dict-key x)
+                                      (dot-xform e
+                                                (dict-val x)
+                                                (vec (cons (findv (dict-key x)
+                                                                  (first i))
+                                                           (next i)))
+                                                f
+                                                y))
+         (table? x)        (err "nyi")
+         (keyed-table? x)  (err "nyi")
+         :else             (err "internal error dot-xform" x i))))
 (defn dot
   ([e x] (cond (vector? x)      x
                (dict? x)        (dict-val x)
                (keyed-table? x) (dict-val x)
                (keyword? x)     (if-let [u (e x)] u (err x "not found"))
                :else            (err "nyi: . on" x)))
-  ([e x y] (err "nyi: .")))
+  ([e x y] (last (invoke e x y)))
+  ([e x y z] (dot-xform e x y z))
+  ([e x y z a] (dot-xform e x y z a)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn atomize
@@ -1162,7 +1219,7 @@
              (recur e2))))))))
 
 (defn keval [x] (last (resolve-full-expr x builtin (second (parse x)))))
-(defn krun [x]  (show (resolve-full-expr x)))
+(defn krun [x]  (show (keval x)))
 
 (defn -main
   "qiss repl"
