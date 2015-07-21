@@ -29,9 +29,12 @@
 ;;   something like functional query but easier to use
 
 ;; functions that will differ btwn JVM and JS
-(def bool? (partial instance? java.lang.Boolean))
-(def err (fn [& x] (throw (Exception. (str/join ["'" (str/join " " x)])))))
+(defn bool? "is x a boolean?" [x]
+  (instance? java.lang.Boolean x))
+(defn err "throw x" [& x]
+  (throw (Exception. (str/join ["'" (str/join " " x)]))))
 (defn exit
+  "exit this process"
   ([] (exit 0))
   ([x] (System/exit x)))
 (defn index-of
@@ -39,10 +42,11 @@
   exist in x"
   [x i] (let [j (.indexOf x i)] (if (< j 0) (count x) j)))
 (defn string [x]
+  "make a string from one of string, keyword, vector<char>"
   (cond (string? x)  x
         (keyword? x) (name x)
         :else        (str/join x))) ;; vector of char
-(defn read-lines [x]
+(defn read-lines "read file x as a vector of strings, one string per line" [x]
   (with-open [r (io/reader (string x))] (vec (line-seq r))))
 
 (def grammar (clojure.java.io/resource "qiss/grammar"))
@@ -67,19 +71,19 @@
 (def parses  #(mapv (partial insta/transform xform) (insta/parses parser %)))
 (def vis     (comp insta/visualize parse))
 
-(defn to-long [x]
-  (cond (coll? x) (if (= 0 (count x)) [] (mapv to-long x))
+(defn bool-to-long "convert x, if boolean, to long" [x]
+  (cond (coll? x) (if (= 0 (count x)) [] (mapv bool-to-long x))
         (bool? x) (if x 1 0)
         :else x))
 
-(defn all [x] (if (every? (fn [x] x) x) true false))
-(defn any [x] (if (some (fn [x] x) x) true false))
-(defn catv [x y] (vec (concat x y)))
+(defn all "is every x truthy?" [x] (if (every? (fn [x] x) x) true false))
+(defn any "is any x truthy?" [x] (if (some (fn [x] x) x) true false))
+(defn catv "concat x and y into a vector" [x y] (vec (concat x y)))
 (declare eq)
-(defn except [x y]
+(defn except "the elements in x not in y" [x y]
   (let [p (if (coll? y) #(some #{%} y) #(= % y))]
     (vec (remove p x))))
-(defn in [x y]
+(defn in "true for those elements of x that exist in y" [x y]
   (if (coll? x)
     (mapv #(in % y) x)
     (if (some #{x} y) true false)))
@@ -90,10 +94,11 @@
 (defn null!
   "Like 0N! but variadic, e.g., (null! msg thing) => thing"
   [& x] (do (apply println x) (last x)))
-(defn raze [x] (vec (mapcat #(if (coll? %) % [%]) x)))
-(defn removev [v i] (catv (subvec v 0 i) (subvec v (+ 1 i) (count v))))
+(defn raze "flatten one level" [x] (vec (mapcat #(if (coll? %) % [%]) x)))
+(defn removev "remove the ith element of v" [v i]
+  (catv (subvec v 0 i) (subvec v (+ 1 i) (count v))))
 (declare kcount)
-(defn til-count [x] (vec (range (kcount x))))
+(defn til-count "0..count[x]-1" [x] (vec (range (kcount x))))
 (defn union
   "Union of 2 vectors.  Preserves the order of x and the items added
   from y retain their relative order as well"
@@ -103,7 +108,7 @@
   "All elements of x must be integers.  For each element of x (vector
   or dict), concat that many copies of that element's index"
   ([x] (vec (flatten (if (vector? x)
-                       (map-indexed #(repeat %2 %1) (to-long x))
+                       (map-indexed #(repeat %2 %1) (bool-to-long x))
                        (map #(repeat %2 %1) (dict-key x) (:v x))))))
   ([e x] [e (where x)]))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -123,19 +128,19 @@
 (defn lambda-text [x] (:text x))
 (defn table? [x] (and (map? x) (:k x) (:v x) (:t x)))
 (defn add-to-dict [d k v] (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
-(defn cols [x]
+(defn cols "the names of the columns of table (or keyed table) x" [x]
   (cond (table? x)       (dict-key x)
         (keyed-table? x) (catv (cols (dict-key x)) (cols (dict-val x)))
         :else            (err "cols cannot be applied to" x)))
-(defn keycols [x]
+(defn keycols "the names of the columns of keyed table x" [x]
   (if (keyed-table? x)
     (cols (dict-key x))
     (err "keycols cannot be applied to " x)))
-(defn d-from-t [x] (dissoc x :t))
-(defn t-from-d [x] (assoc x :t true))
+(defn d-from-t "dict from table" [x] (dissoc x :t))
+(defn t-from-d "table from dict" [x] (assoc x :t true))
 
 (declare index)
-(defn klast [x]
+(defn klast "the last element of x" [x]
   (cond (vector? x) (last x)
         (table? x)  (index x (- (count x) 1))
         (map? x)    (klast (dict-val x))
@@ -144,7 +149,10 @@
 (declare findv)
 (declare index)
 (declare invoke)
-(defn at-xform-monadic [e x i f]
+(defn at-xform-monadic
+  "x is a vector.  Replace the elements of x at positions i with the
+  results of applying f to those elements"
+  [e x i f]
   ;; TODO: preserve env modifications by passing them back?
   ;; Is that necessary?  All of @'s args have been eval'd already.
   (let [h (fn self [r j]
@@ -190,6 +198,8 @@
                 (at-xform-update-table r j rr))))]
     (h x [i y])))
 (defn at-xform
+  "Replace the elements of x at positions i with the results of
+  applying f to those elements"
   ([e x i f]
    ;; check that f is monadic here?
    (cond (vector? x)       (cond (not (coll? i))   (at-xform-monadic e x i f)
@@ -204,6 +214,9 @@
          (keyed-table? x)  (err "nyi")
          :else             (err "internal error at-xform" x i)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ;; "Replace the elements of x at positions i with the results of
+  ;; applying f (which must be dyadic) to those elements and (the
+  ;; corresponding elements of) y"
   ([e x i f y] ;; y conforms to i, not x
    ;; check that f is dyadic here?
    (cond (vector? x)       (cond (not (coll? i))   (at-xform-dyadic e x i f y)
@@ -218,6 +231,7 @@
          (keyed-table? x)  (err "nyi")
          :else             (err "internal error at-xform" x i))))
 (defn at
+  "type"
   ([e x] (condp #(= (type %1) %2) x ; type
            java.lang.Boolean -1
            java.lang.Long -7
@@ -226,11 +240,19 @@
            java.lang.String 10
            clojure.lang.Keyword -11
            0))
+;;  "index at top level"
   ([e x y] (last (invoke e x [y])))
+;;  "selectively transform at top level"
   ([e x y z] (at-xform e x y z))
+;;  "selectively transform at top level with rhs for xform function"
   ([e x y z a] (at-xform e x y z a)))
-(defn massoc [x i c] ;; multi assoc
-  (reduce (fn [a [b c]] (assoc a b c)) x (mapv vector i c)))
+(defn massoc
+  "multi-assoc: replace the elements of x at positions i with the
+  corresponding elements of c"
+  [x i c]
+  (persistent! (reduce (fn [a [b c]] (assoc! a b c))
+                       (transient x)
+                       (mapv vector i c))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn dot-xform-monadic [e x i f]
   (if (empty? i)
@@ -586,7 +608,7 @@
         :else       (err "nyi: flip" x)))
 (defn plus
   ([x] (flip x))
-  ([x y] (promote-bools #(+ (map to-long [%1 %2])) + x y)))
+  ([x y] (promote-bools #(+ (map bool-to-long [%1 %2])) + x y)))
 
 (defn scan [f]
   (fn [e & x]
@@ -1467,8 +1489,21 @@
              (keval "{x+y}. 1 2") => 3
              (keval "(+). 1 2") => 3 ;; TODO fix grammar
              (keval "{x+z}. 1 2 3") => 4))
+(facts "about 3-arg dot"
+       (fact "cross-product index"
+             (keval ".[(0 1 2;3 4 5;6 7 8);(0 1;0 1);{x+100}]") =>
+             (keval "(100 101 2;103 104 5;6 7 8)")
+             (keval ".[(0 1 2;3 4 5;6 7 8);(1;0 1 2);{x+100}]") =>
+             (keval "(0 1 2;103 104 105;6 7 8)"))
+       (fact "3d matrix"
+             (keval ".[((0 1;2 3);(4 5;6 7);(8 9;10 11));1 1 1;{x*x}]") =>
+             (keval "((0 1;2 3);(4 5;6 49);(8 9;10 11))")))
+(facts "about 4-arg dot"
+       (fact "dict"
+             (keval ".[`a`b`c!(0 1 2;3 4 5;6 7 8);(`b;0 2);*;10 100]") =>
+             (keval "`a`b`c!(0 1 2;30 4 500;6 7 8)")))
 (facts "about join"
-       (fact "monadic envectors"
+       (fact "monadic , envectors"
              (keval ",1") => [1]
              (keval ",1 2 3") => [[1 2 3]])
        (fact "dyadic joins"
