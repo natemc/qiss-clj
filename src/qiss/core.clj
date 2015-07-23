@@ -255,6 +255,7 @@
                        (mapv vector i c))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn dot-xform-monadic [e x i f]
+  "Implements .[x;i;f] where x is a vector"
   (if (empty? i)
     (last (invoke e f [x]))
     (let [j (first i)]
@@ -264,6 +265,7 @@
                 (mapv #(dot-xform-monadic e %1 (next i) f)
                       (index x j)))))))
 (defn dot-xform-dyadic [e x i f y]
+  "Implements .[x;i;f;y] where x is a vector"
   (if (empty? i)
     (last (invoke e f [x y]))
     (let [j (first i)]
@@ -274,6 +276,7 @@
                       (index x j)
                       y))))))
 (defn dot-xform
+  "Implements .[x;i;f] where x is a vector or dict"
   ([e x i f]
    (cond (vector? x)       (cond (not (coll? i))
                                  (err "index for . must be a container")
@@ -290,6 +293,7 @@
          (table? x)        (err "nyi")
          (keyed-table? x)  (err "nyi")
          :else             (err "internal error dot-xform" x i)))
+;;  "Implements .[x;i;f;y] where x is a vector or dict"
   ([e x i f y]
    (cond (vector? x)       (cond (not (coll? i))
                                  (err "index for . must be a container")
@@ -308,6 +312,10 @@
          (keyed-table? x)  (err "nyi")
          :else             (err "internal error dot-xform" x i))))
 (defn dot
+  ". x        (value)
+   x . i      (index at depth)
+   .[x;i;f]   (selective transformation)
+   .[x;i;f;y] (selective transformation w/rhs)"
   ([e x] (cond (vector? x)      x
                (dict? x)        (dict-val x)
                (keyed-table? x) (dict-val x)
@@ -376,6 +384,7 @@
     ((atomize f#) ~x ~y)))
 
 (defn amp
+  "&x (where)      and    x&y (atomic min)"
   ([x] (where x))
   ([x y] (promote-bools and min x y)))
 (defn group [x]
@@ -390,13 +399,16 @@
         (dict? x)   (index (dict-key x) (group (dict-val x)))
         :else       (err "can't group " x)))
 (defn eq
+  "=x (group)      and    x=y (atomic equals)"
   ([x] (group x))
   ([x y] ((atomize =) x y)))
 
 (defn neq
+  "x<>y (atomic not-equals)"
   ([x y] ((atomize not=) x y)))
 
 (defn greater
+  ">x (idesc)      and    x>y (atomic >)"
   ([x] ;; idesc
    (cond (vector? x)      (vec (sort-by x (comp - compare) (til-count x)))
          (dict?   x)      (index (dict-key x) (greater (dict-val x)))
@@ -407,6 +419,7 @@
   ([x y] ((atomize >) x y)))
 
 (defn less
+  "<x (iasc)      and    x<y (atomic <)"
   ([x] ;; iasc
    (cond (vector? x)      (vec (sort-by x (til-count x)))
          (dict?   x)      (index (dict-key x) (less (dict-val x)))
@@ -415,14 +428,16 @@
          :else            (err "can't <" x)))
   ([x y] ((atomize <) x y)))
 
-(defn ge [x y] ((atomize >=) x y))
-(defn le [x y] ((atomize <=) x y))
+(defn ge "atomic >=" [x y] ((atomize >=) x y))
+(defn le "atomic <=" [x y] ((atomize <=) x y))
 
 (defn pipe
+  "|x (reverse) and x|y (atomic max)"
   ([x] (vec (reverse x)))
   ([x y] (promote-bools or max x y)))
 
 (defn tilde
+  "~x (not) and x~y (match, i.e., non-atomic equals)"
   ([x] ;; not
    (cond (vector? x)      (mapv tilde x)
          (dict? x)        (make-dict (dict-key x) (tilde (dict-val x)))
@@ -432,12 +447,14 @@
   ([x y] (= x y))) ;; match
 
 (defn unkey-table [x]
+  "The unkeyed form of x (x must be a table or keyed table)"
   (if (table? x)
     x
     (let [k (dict-key x) v (dict-val x)]
       (make-table (catv (dict-key k) (dict-key v))
                   (catv (dict-val k) (dict-val v))))))
 (defn key-table-by-colname [x y]
+  "Key the table (or keyed table) y using the column named by x"
   (let [i (index-of (dict-key y) x)]
     (if (= i (count (dict-key y)))
       (err "mismatch: key col" x y)
@@ -445,6 +462,7 @@
                         (make-table (removev (dict-key y) i)
                                     (removev (dict-val y) i))))))
 (defn key-table-by-colnames [x y]
+  "Key the table (or keyed table) y using the columns named by x"
   (let [i (mapv #(index-of (dict-key y) %) x)]
     (if (any (mapv (partial = (count (dict-key y))) i))
       (err "mismatch: key cols" x y)
@@ -454,6 +472,7 @@
                    (index (dict-val y)
                           (except (til-count (dict-key y)) i)))))))
 (defn key-table-by-long [x y]
+  "Key the table (or keyed table) y using the first x columns"
   (cond (= x 0) y
         (< x 0) (err "lhs of ! must be >=0 when keying a table")
         (<= (count (dict-key y)) x) (err "can't key" x "cols from" y)
@@ -463,6 +482,7 @@
                                             (vec (drop x (dict-val y)))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn key-table [x y]
+  "Key table y with the columns indicated by x"
   (cond (table? x)   (if (= (kcount x) (kcount y))
                        (make-keyed-table x y)
                        (err "length" x y))
@@ -472,6 +492,7 @@
         :else        (err "nyi" x "!" y)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn bang
+  "!x (the key of x) and x!y (key y using x)"
   ([x] (cond (number? x)      (vec (range x))
              (vector? x)      (til-count x)
              (dict? x)        (dict-key x)
@@ -487,8 +508,8 @@
                (or (coll? x) (coll? y)) (err "type" x y)
                :else                    (make-dict [x] [y]))))
 
-(defn div [x y] ((atomize quot) x y))
-(defn kmod [x y] ((atomize mod) x y))
+(defn div "atomic integer division" [x y] ((atomize quot) x y))
+(defn kmod "atomic mod" [x y] ((atomize mod) x y))
 (defn sv [x y]
   "string from vector"
   (vec (str/join (if (vector? x) (str/join x) x)
@@ -499,11 +520,13 @@
                        (re-pattern (if (vector? x) (str/join x) (str x))))))
 
 (defn fdiv
+  "%x (reciprocal) and x%y (atomic floating-point division)"
   ([x] (if (coll? x) (mapv #(double (/ %)) x)
            (double (/ x))))
   ([x y] ((atomize #(double (/ %1 %2))) x y)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn join
+  ",x (enlist) and x,y (join)"
   ([x] [x])
   ([x y] (cond (vector? x)             (if (vector? y)
                                          (vec (concat x y))
@@ -518,32 +541,39 @@
 (declare findv)
 (declare ktake)
 (defn take-from-vec [n x]
+  "n#x where n is an integer and x is a vector"
   (if (<= 0 n)
     (mapv #(x (mod % (count x))) (range n))
     (vec (take-last (- n) x)))) ; TODO neg overtake
 (defn take-from-dict [n x]
+  "n#x where n is an integer, keyword, or vector of keywords, and x is a dict"
   (cond (number? n) (make-dict (ktake n (dict-key x)) (ktake n (dict-val x)))
         (keyword? n) (take-from-dict [n] x)
         ;; TODO: introduce nulls like q does in this case?
         (not (every? #(some #{%} (dict-key x)) n)) (err "mismatch: #" n x)
         :else (make-dict n (index (dict-val x) (findv (dict-key x) n)))))
 (defn take-from-table [n x]
+  "n#x where n is an integer, keyword, or vector of keywords, and x is a table"
   (cond (number? n) (make-table (cols x)
                                 (mapv (partial ktake n) (dict-val x)))
         (keyword? n) (take-from-table [n] x)
         (not (every? #(some #{%} (cols x)) n)) (err "mismatch: #" n x)
         :else (make-table n (index (dict-val x) (findv (cols x) n)))))
 (defn take-from-keyed-table [n x]
+  "n#x where n is an integer, keyword, or vector of keywords, and x is
+  a keyed table"
   (if (number? n)
     (make-keyed-table (ktake n (dict-key x)) (ktake n (dict-val x)))
     (take-from-table n (unkey-table x))))
 (defn kcount [x]
+  "#x (count)  returns 1 for atoms"
   (cond (vector? x)      (count x)
         (dict? x)        (count (dict-val x))
         (table? x)       (count (first (dict-val x)))
         (keyed-table? x) (count (first (dict-val (dict-key x))))
         :else            1))
 (defn ktake [x y]
+  "x#y take from y the elements specified by x"
   (if (and (coll? x) (not (empty? x)) (number? (first x)))
     (err "nyi: reshape") ;; TODO: take a box
     (let [n (if (bool? x) (if x 1 0) x)]
@@ -554,26 +584,35 @@
             (keyed-table? y) (take-from-keyed-table n y)
             :else           (err "nyi: # on " y)))))
 (defn pound
+  "#x (count) and x#y (take)"
   ([x] (kcount x))
   ([x y] (ktake x y)))
 
 (defn minus
+  "-x (unary negation) and x-y (atomic minus)"
   ([x] (- x))
   ([x y] ((atomize -) x y)))
 
 (defn each [f] ; TODO: atomize when f is dyadic? e.g., 3+'1 2 3
+  "Create a function from f that loops over all arguments (like
+  clojure's map).  The valence/arity of the created function matches
+  the arity of f."
   (fn [e & x]
     (let [c (lambda-code f)
           p (if (:pass-global-env f) (partial c e) c)]
       (apply (partial mapv (fn [& a] (apply p a))) x))))
 
 (defn each-left [f]
+  "Create a dyadic function from f (which must be dyadic) that loops
+  over its lhs argument"
   (fn [e x y]
     (let [c (lambda-code f)
           p (if (:pass-global-env f) (partial c e) c)]
       (mapv #(p % y) x))))
 
 (defn each-prior [f]
+  "Create a dyadic function from f (which must be dyadic) that loops
+  over a list passing each element and its prior, e.g., deltas is 0-':x"
   (fn [e & x]
     (let [c (lambda-code f)
           p (if (:pass-global-env f) (partial c e) c)]
@@ -584,12 +623,16 @@
           (vec (map p q (cons (first x) (drop-last q)))))))))
 
 (defn each-right [f]
+  "Create a dyadic function from f (which must be dyadic) that loops
+  over its rhs argument"
   (fn [e x y]
     (let [c (lambda-code f)
           p (if (:pass-global-env f) (partial c e) c)]
       (mapv (partial p x) y))))
 
 (defn over [f]
+  "Create a dyadic function from f (which must be dyadic) that
+  performs a reduce (aka fold left) over its rhs argument"
   (fn [e & x]
     (let [c (lambda-code f)
           p (if (:pass-global-env f) (partial c e) c)]
@@ -598,6 +641,8 @@
         (reduce p (first x) (second x))))))
 
 (defn flip [x]
+  "For a vector of vectors, switch the rows and columns.  For a dict,
+  make a table; from a table, make a dict."
   (cond (vector? x) (apply mapv vector x)
         (table? x)  (d-from-t x)
         (dict? x)   (if (and (all (mapv keyword? (dict-key x)))
@@ -607,10 +652,14 @@
                       (err "can only flip column dicts"))
         :else       (err "nyi: flip" x)))
 (defn plus
+  "+x (flip) and x+y (atomic addition)"
   ([x] (flip x))
   ([x y] (promote-bools #(+ (map bool-to-long [%1 %2])) + x y)))
 
 (defn scan [f]
+  "Create a dyadic function from f (which must be dyadic) that
+  performs reductions (a fold left but returning all intermediate
+  results) over its rhs argument"
   (fn [e & x]
     (let [c (lambda-code f)
           p (if (:pass-global-env f) (partial c e) c)]
@@ -619,16 +668,22 @@
                      (reductions p (first x) (second x))))))))
 
 (defn times
+  "*x (first) and x*y (atomic multiplication)"
   ([x] (first x))
   ([x y] ((atomize *) x y)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn msome [p & c] ;; like some but p takes multiple args
+(defn msome [p & c]
+  "like some but the predicate p takes multiple args"
   (when (not (any (map empty? c)))
     (or (apply p (map first c))
         (recur p (map next c)))))
 
 (defn index-of-colwise [c & r] ;; c is vector of cols, r is row to find
+  "Search c, a collection of columns (i.e., equal-length vectors), for
+  a row matching r.  Return the index in (each column of) c where r
+  was matched or, if no match was found, the length of (each column
+  of) c."
   (if-let [k (apply msome
                     (fn [i & q] (when (= r q) i))
                     (iterate inc 0)
@@ -644,6 +699,7 @@
         (keyed-table? y) (make-keyed-table (dict-key y) (findv x (dict-val y)))
         :else            (err "findv" x y)))
 (defn find-table [x y]
+  "Find the row number(s) of y in x"
   (if (and (or (dict? y) (table? y))
            (every? #(some #{%} (cols x)) (dict-key y)))
     (let [f (partial index-of-colwise (dict-val x))
@@ -652,6 +708,10 @@
     (err "mismatch: ?" x y)))
 (declare index)
 (defn krand [x y]
+  "If y is a vector, return x random elements from y.  If y is an
+  integer, return x random integers from 0 (inclusive) to
+  y (exclusive).  If y is floating point, return x random floating
+  point numbers from 0 (inclusive) to y (exclusive)."
   ;; TODO: x < 0 => take without replacement
   (if (vector? y)
     (index y (vec (repeatedly x #(rand-int (count y)))))
@@ -659,6 +719,7 @@
            (repeatedly x #(rand y))
            (repeatedly x #(rand-int y))))))
 (defn ques
+  "?x (distinct) and x?y (find or rand depending on the arguments)"
   ([x] (vec (distinct x)))
   ([x y] (cond (vector? x)      (findv x y)
                (dict? x)        (index (dict-key x) (ques (dict-val x) y))
@@ -668,12 +729,15 @@
   ([x y z] nil)) ; TODO: vector cond
 
 (defn deltas [x]
+  "0-':x"
   (vec (cons (first x) (map - (next x) (drop-last x)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn cut [x y] ;; y x+!'1_0-':x,#y
+(defn cut [x y]
+  "y x+!'1_0-':x,#y"
   (let [i (mapv range (next (deltas (conj x (kcount y)))))]
     (index y (mapv (fn [p q] (mapv #(+ p %) q)) x i))))
 (defn kdrop [x y]
+  "Remove the first x elements from y (negative x => drop from the back)"
   (let [o (if (<= 0 x) (partial drop x) (partial drop-last (- x)))]
     (cond (vector? y)      (vec (o y))
           (dict? y)        (apply make-dict (map o [(dict-key y) (dict-val y)]))
@@ -682,6 +746,7 @@
                                              (kdrop x (dict-val y)))
           :else (err "nyi: _ (drop) on" x y))))
 (defn kremove [x y]
+  "Remove the yth element from x"
   (cond (vector? x) (removev x y)
         (dict? x)   (apply make-dict
                            (map #(removev % (findv (dict-key x) y))
@@ -692,30 +757,41 @@
                                   (mapv #(removev % y) (dict-val x))))
         :else (err "nyi: _ (remove) for" x y)))
 (defn under
+  "_x (floor) and x _y (drop or remove depending on the arguments)"
   ([x] (long x)) ;; floor
   ([x y] (if (coll? y)
            (if (vector? x) (cut x y) (kdrop x y))
            (kremove x y))))
 
-(defn parse-double [x]
+(defn parse-double "parse the string x as a double" [x]
   (if (coll? x) (mapv parse-double x) (Double/parseDouble x)))
-(defn parse-long [x]
+(defn parse-long "parse the string x as a long" [x]
   (if (coll? x) (mapv parse-long x) (Long/parseLong x)))
-(defn parse-symbol [x]
+(defn parse-symbol "parse the string x as a symbol (clojure keyword)" [x]
   (if (coll? x) (mapv keyword x) (keyword x)))
-(defn parse-data [x y]
+(defn parse-data
+  "parse y according to character x:
+  J long
+  F double
+  S symbol
+  * don't parse"
+  [x y]
   (cond (= \J x) (parse-long y)
         (= \F x) (parse-double y)
         (= \S x) (parse-symbol y)
         (= \* x) y
         :else (err "nyi: parse type" (str x))))
 (defn rcsv [c f] ;; col types and file name
+  "Read csv file f with column types specified by c per the parse-data function"
   (let [d (csv/parse-csv (slurp (string f)))] ;; assumes header line
     (mapv parse-data (string c) (flip (vec d)))))
 (defn rcsvh [c f] ;; col types and file name
+  "Read csv file f, whose first line is a header, with column types
+  specified by c per the parse-data function"
   (let [[h & d] (csv/parse-csv (slurp (string f)))] ;; assumes header line
     (make-table (vec h) (mapv parse-data (string c) (flip (vec d))))))
 (defn wcsv [f t] ;; output file and table
+  "Write to csv file f the content of table t"
   (let [make-string (fn [x] (mapv #(if (keyword? %) (name %) (str %)) x))
         d (cons (mapv name (cols t)) (map make-string (flip (dict-val t))))]
     (with-open [w (io/writer (string f))]
@@ -751,9 +827,9 @@
               (keyword "\\") scan})
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Like into but handles tuples not just pairs, because sometimes parse
-;; gives you back tuples.
 (defn map-from-tuples [x]
+  "Like into but handles tuples not just pairs, because sometimes
+  parse gives you back tuples."
   (reduce #(let [p (first %2)
                  q (next %2)]
              (assoc %1 p (if (or (not= 1 (count q))
@@ -764,11 +840,14 @@
           {}
           x))
 (defn strmax [x y]
+  "The maximum of two strings"
   (cond (nil? x)            y
         (nil? y)            x
         (< 0 (compare x y)) x
         :else               y))
 (defn implicit-args [x] ; exprs
+  "Figure out the implicit arguments of x, which is a series of
+  expressions that make up a lambda"
   (let [a ["x" "y" "z"]
         mia (fn self [x] ; max implicit arg
               (cond (or (not (coll? x)) (empty? x) (= :lambda (first x))) nil
@@ -779,6 +858,7 @@
         n (mod (+ 1 (index-of a (mia x))) (+ 1 (count a)))]
     (vec (take n a))))
 (defn args [f]
+  "Determine the formal argument names of lambda f"
   (if-let [a (:formals f)]
     (mapv #(keyword (second %)) a)
     (mapv keyword (implicit-args (:exprs f)))))
@@ -789,6 +869,8 @@
 ;; TODO think through updating closed-over variables
 ;; vs locals vs globals ...
 (defn feval [tu f]
+  "Returns a function for evaluating function f which appears in
+  translation unit tu (tu is for debugging/error messages)"
   (fn [e & x]
     (if (not (some #{(count x)} (lambda-rank f)))
       (err "rank" (lambda-text f) (vec x))
@@ -799,6 +881,7 @@
             (let [[e4 rr] (resolve-full-expr tu e3 (first p))]
               (recur e4 (next p) rr))))))))
 (defn index-table [t i]
+  "Index table t per index i, which may be row number(s) or column name(s)"
   (cond (or (and (vector? i) (keyword? (first i)))
             (keyword? i))
         (index (d-from-t t) i)
