@@ -985,16 +985,13 @@
       [e (ops :dot)])))
 
 (defn resolve-call [tu e x]
-  (loop [e e a (reverse (:actuals x)) r ()]
-    (if (empty? a) ;; TODO: partial
-      (let [[ne f] (kresolve tu e (:target x))]
-        (if (not (lambda? f))
-          (if (= 1 (count r))
-            [ne (index f (first r))]
-            [ne (index f r)])
-          (invoke ne f r)))
-      (let [[ne rr] (kresolve tu e (first a))]
-        (recur ne (next a) (cons rr r))))))
+  (let [[e4 r] (reduce (fn [[e2 r] a]
+                         (let [[e3 rr] (kresolve tu e2 a)]
+                           [e3 (cons rr r)]))
+                       [e ()]
+                       (reverse (:actuals x)))
+        [e5 f] (kresolve tu e4 (:target x))]
+    (invoke e4 f r)))
 
 (defn resolve-dyop [tu e x]
   (let [o        (ops (keyword (:op x)))
