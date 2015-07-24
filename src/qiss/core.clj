@@ -91,9 +91,13 @@
   "Intersection of 2 vectors.  Preserves the order per x"
   [x y] (vec (filter #(some #{%} y) x)))
 (declare less)
+(declare lambda?)
 (defn null!
   "Like 0N! but variadic, e.g., (null! msg thing) => thing"
-  [& x] (do (apply println x) (last x)))
+  [& x]
+  ;; when printing functions, don't print the whole env
+  (apply println (map (fn [p] (if (lambda? p) (dissoc p :env) p)) x))
+  (last x))
 (defn raze "flatten one level" [x] (vec (mapcat #(if (coll? %) % [%]) x)))
 (defn removev "remove the ith element of v" [v i]
   (catv (subvec v 0 i) (subvec v (+ 1 i) (count v))))
@@ -112,7 +116,7 @@
                        (map #(repeat %2 %1) (dict-key x) (:v x))))))
   ([e x] [e (where x)]))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn make-dict [k v] {:k k :v v})
+(defn make-dict ([] (make-dict [] [])) ([k v] {:k k :v v}))
 (defn make-keyed-table [k v] {:k k :v v :kt true})
 (defn make-table [c d] {:k c :v d :t true})
 (defn dict? [x] (and (map? x) (:k x) (:v x) (not (:t x)) (not (:kt x))))
@@ -122,6 +126,9 @@
 (defn lambda? [x] (and (map? x) (:f x)))
 (defn lambda-body [x] (:exprs x))
 (defn lambda-code [x] (:f x))
+(defn lambda-callable [e x]
+  (let [c (lambda-code x)]
+    (if (:pass-global-env x) (partial c e) c)))
 (defn lambda-env [x] (:env x))
 (defn lambda-formals [x] (:formals x))
 (defn lambda-rank [x] (:rank x))
@@ -598,24 +605,18 @@
   clojure's map).  The valence/arity of the created function matches
   the arity of f."
   (fn [e & x]
-    (let [c (lambda-code f)
-          p (if (:pass-global-env f) (partial c e) c)]
-      (apply (partial mapv (fn [& a] (apply p a))) x))))
+    (apply (partial mapv (fn [& a] (apply (lambda-callable e f) a))) x)))
 
 (defn each-left [f]
   "Create a dyadic function from f (which must be dyadic) that loops
   over its lhs argument"
-  (fn [e x y]
-    (let [c (lambda-code f)
-          p (if (:pass-global-env f) (partial c e) c)]
-      (mapv #(p % y) x))))
+  (fn [e x y] (mapv #((lambda-callable e f) % y) x)))
 
 (defn each-prior [f]
   "Create a dyadic function from f (which must be dyadic) that loops
   over a list passing each element and its prior, e.g., deltas is 0-':x"
   (fn [e & x]
-    (let [c (lambda-code f)
-          p (if (:pass-global-env f) (partial c e) c)]
+    (let [p (lambda-callable e f)]
       (if (= 1 (count x))
         (let [q (first x)]
           (vec (cons (first q) (map p (next q) (drop-last q)))))
@@ -625,17 +626,13 @@
 (defn each-right [f]
   "Create a dyadic function from f (which must be dyadic) that loops
   over its rhs argument"
-  (fn [e x y]
-    (let [c (lambda-code f)
-          p (if (:pass-global-env f) (partial c e) c)]
-      (mapv (partial p x) y))))
+  (fn [e x y] (mapv (partial (lambda-callable e f) x) y)))
 
 (defn over [f]
   "Create a dyadic function from f (which must be dyadic) that
   performs a reduce (aka fold left) over its rhs argument"
   (fn [e & x]
-    (let [c (lambda-code f)
-          p (if (:pass-global-env f) (partial c e) c)]
+    (let [p (lambda-callable e f)]
       (if (= 1 (count x))
         (reduce p (first x))
         (reduce p (first x) (second x))))))
@@ -661,8 +658,7 @@
   performs reductions (a fold left but returning all intermediate
   results) over its rhs argument"
   (fn [e & x]
-    (let [c (lambda-code f)
-          p (if (:pass-global-env f) (partial c e) c)]
+    (let [p (lambda-callable e f)]
       (vec (drop 1 (if (= 1 (count x))
                      (reductions f (first x))
                      (reductions p (first x) (second x))))))))
@@ -801,7 +797,7 @@
           (keyword "~") {:op true :f tilde  :text "~" :rank [1 2]}
           :! {:op true :f bang :text "!" :rank [1 2]}
           :at {:f at :pass-global-env true :text "@" :rank [1 2 3 4]}
-          :dot {:f dot :pass-global-env true :text "." :rank [1 2]} ;[1 2 3 4]}
+          :dot {:f dot :pass-global-env true :text "." :rank [1 2 3 4]}
           :+ {:op true :f plus :text "+" :rank [1 2]}
           :- {:op true :f minus :text "-" :rank [1 2]}
           :* {:op true :f times :text "*" :rank [1 2]}
@@ -875,11 +871,9 @@
     (if (not (some #{(count x)} (lambda-rank f)))
       (err "rank" (lambda-text f) (vec x))
       (let [e2 (merge e (merge (lambda-env f) (zipmap (lambda-formals f) x)))]
-        (loop [e3 e2 p (lambda-body f) r nil]
-          (if (empty? p)
-            r
-            (let [[e4 rr] (resolve-full-expr tu e3 (first p))]
-              (recur e4 (next p) rr))))))))
+        (last (reduce (fn [[e3 r] p] (resolve-full-expr tu e3 p))
+                      [e2 nil]
+                      (lambda-body f)))))))
 (defn index-table [t i]
   "Index table t per index i, which may be row number(s) or column name(s)"
   (cond (or (and (vector? i) (keyword? (first i)))
@@ -926,13 +920,13 @@
 (defn invoke [e f a]
   (if (not (lambda? f))
     [e (index-deep f a)]
-    (let [c (lambda-code f)
-          p (if (:pass-global-env f) (partial c e) c)]
+    (let [p (lambda-callable e f)]
       (if (and (= 1 (count a))
                (= :hole (first a))
                (some #{0} (lambda-rank f)))
         [e (p)]
         [e (apply p a)]))))
+;;               :else (err "nyi: partial")))))
 (defn is-callable [x] (instance? clojure.lang.IFn x))
 (defn can-only-be-monadic [x] false)
 (defn can-be-monadic [x] (some #{1} (lambda-rank x)))
@@ -988,8 +982,8 @@
   (let [[e4 r] (reduce (fn [[e2 r] a]
                          (let [[e3 rr] (kresolve tu e2 a)]
                            [e3 (cons rr r)]))
-                       [e ()]
-                       (reverse (:actuals x)))
+                       [e []]
+                       (reverse (:actuals x))) ;; right-to-left!
         [e5 f] (kresolve tu e4 (:target x))]
     (invoke e4 f r)))
 
@@ -1018,15 +1012,15 @@
     [e (assoc w :f (feval tu w))]))
 
 (defn resolve-list [tu e x]
-  (let [p (reverse x)]
-    (loop [e e i p r ()]
-      (if (empty? i)
-        [e (vec r)]
-        (let [[ne nr] (kresolve tu e (first i))]
-          (recur ne (next i) (cons nr r)))))))
+  (let [[e2 r] (reduce (fn [[e r] i]
+                         (let [[ne nr] (kresolve tu e i)]
+                           [ne (cons nr r)]))
+                       ()
+                       (reverse x))]  ;; eval right-to-left!
+    [e2 (vec r)]))
 
 (defn resolve-monop [tu e x]
-  (let [o (ops (keyword (:op x)))
+  (let [o      (ops (keyword (:op x)))
         [e2 a] (kresolve tu e (:rhs x))]
     (invoke e2 o [a])))
 
@@ -1038,33 +1032,34 @@
     {}))
 
 (defn apply-constraints [tu env t w]
-  (if w
-    (loop [[e i] (apply where (kresolve tu env (first w)))
-           c     (next w)]
-      (if (empty? c)
-        [e i]
-        (let [[e2 j] (apply where
-                            (kresolve tu e (insta/transform (sub-table t i)
-                                                            (first c))))]
-          (recur [e2 (index i j)] (next c)))))
-    [env (vec (range (pound t)))]))
+  (if (not w)
+    [env (vec (range (pound t)))]
+    (reduce (fn [[e i] c]
+              (let [[e2 j] (apply where
+                                  (kresolve tu
+                                            e
+                                            (insta/transform (sub-table t i)
+                                                             (first c))))]
+                [e2 (index i j)]))
+            (apply where (kresolve tu env (first w)))
+            (next w))))
 
 (defn guess-col [x]
   (cond (empty? x)        :x
         (= :id (first x)) (keyword (second x))
         :else (last (map guess-col (next x)))))
 
-(defn compute-aggs [tu e t i a]
-  (loop [e e a a r (make-dict [] [])]
-    (if (empty? a)
-      [e r]
-      (let [p      (first a)
-            n      (if (= :assign (first p))
-                     (keyword (second (second p)))
-                     (guess-col p))
-            [e2 d] (kresolve tu e (insta/transform (sub-table t i)
-                                                    p))]
-        (recur e2 (next a) (add-to-dict r n d))))))
+(defn compute-aggs [tu e t i aggs]
+  "Compute the aggregations defined by (expr trees) aggs for the rows
+  of t indexed by i, all within environment e"
+  (reduce (fn [[e r] a]
+            (let [n      (if (= :assign (first a))
+                           (keyword (second (second a)))
+                           (guess-col a))
+                  [e2 d] (kresolve tu e (insta/transform (sub-table t i) a))]
+              [e2 (add-to-dict r n d)]))
+          [e (make-dict)]
+          aggs))
 
 (defn resolve-select [tu e x]
   (let [[e2 t] (kresolve tu e (:from x))
@@ -1097,14 +1092,15 @@
 
 (defn resolve-table-helper [tu e b]
   (let [c (map (comp map-from-tuples next)
-               (if (= :col (first b)) [b] b))]
-    (loop [e e a (reverse (map :rhs c)) r ()]
-      (if (empty? a)
-        (if (apply = (map count r))
-          [e (make-table (mapv #(keyword (:id %)) c) (vec r))]
-          (err "length"))
-        (let [[ne rr] (kresolve tu e (first a))]
-          (recur ne (next a) (cons rr r)))))))
+               (if (= :col (first b)) [b] b))
+        [e r] (reduce (fn [[e r] a]
+                        (let [[ne rr] (kresolve tu e a)]
+                          [ne (cons rr r)]))
+                      [e ()]
+                      (reverse (map :rhs c)))]
+    (if (apply = (map count r))
+      [e (make-table (mapv #(keyword (:id %)) c) (vec r))]
+      (err "length"))))
 
 (defn resolve-table [tu e x]
   (let [[e2 t] (resolve-table-helper tu e (:cols x))]
@@ -1114,7 +1110,31 @@
       [e2 t])))
 
 (defn resolve-update [tu e x]
-  )
+  (let [[e2 t] (kresolve tu e (:from x))
+        ut     (unkey-table t)
+        [e3 i] (apply-constraints tu
+                                  (merge e2 (zipmap (dict-key ut)
+                                                    (dict-val ut)))
+                                  ut
+                                  (:where x))]
+    (if-let [b (:by x)]
+      (let [[e4 g] (compute-aggs tu e3 ut i b)
+            j      (index i (group (flip (dict-val g))))
+            k      (make-table (dict-key g) (flip (dict-key j)))]
+        (if-let [a (:aggs x)]
+          (let [u (mapv #(last (compute-aggs tu e4 ut % a)) (dict-val j))
+                v (make-table (dict-key (first u))
+                              (flip (mapv dict-val u)))]
+            [e4 (make-keyed-table k v)])
+          (let [c (except (cols t) (dict-key g)) ;; cols not in the by clause
+                v (make-table c (mapv #(index % (dict-val j)) (index ut c)))]
+            [e4 (make-keyed-table k v)])))
+      (if-let [a (:aggs x)]
+        (let [[e5 r] (compute-aggs tu e3 ut i a)
+              n      (apply max (mapv kcount (dict-val r)))
+              v      (mapv #(if (= 1 (kcount %)) (ktake n %) %) (dict-val r))]
+          [e5 (make-table (dict-key r) v)])
+        [e3 t]))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn kresolve [tu e x] ; translation unit, env, parse tree

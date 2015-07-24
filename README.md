@@ -350,17 +350,15 @@ pressing issues:
 * nulls: will nil do?
 * update
 * port to ClojureScript
-* indexing at depth: (`a`b`c;`d`e`f)[0 1;0 1] => [[:a :b] [:d :e]]
-* . (value and 2-arg version)
 * destructuring for function arguments (and assignments?)
 (a;b):0 1 / same as a:0;b:1
 (){[a;(b;c)]a+b*c]/(0 1;2 3;4 5)
-* dict op dict
 * insert
 * delete
+* exec
 * reshape (take a box) form of the # operator
 * partial function application
-* 3- and 4-arg versions of @ and .
+* more variations on 3- and 4-arg versions of @ and .
 Allow : as the 3rd arg?  {y} works just as well and doesn't complicate
 things.
 * generic list literal with holes is a list constructor
