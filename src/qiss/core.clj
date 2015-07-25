@@ -1015,7 +1015,7 @@
   (let [[e2 r] (reduce (fn [[e r] i]
                          (let [[ne nr] (kresolve tu e i)]
                            [ne (cons nr r)]))
-                       ()
+                       [e ()]
                        (reverse x))]  ;; eval right-to-left!
     [e2 (vec r)]))
 
@@ -1162,7 +1162,7 @@
           (= t :float   ) [e (parse-double v)]
           (= t :floats  ) [e (parse-double (str/split v #"[ \n\r\t]+"))]
           (= t :hole    ) [e :hole] ;; nil ?
-          (= t :id      ) (if-let [u (e (keyword v))]
+          (= t :id      ) (if-let [u ((keyword v) e)]
                             [e u]
                             (err v "not found in scope"))
           (= t :juxt    ) (resolve-juxt tu e v)
@@ -1310,6 +1310,7 @@
                      :rcsv   {:f rcsv :rank [2]}
                      :rcsvh  {:f rcsvh :rank [2]}
                      :read   {:f read-lines :rank [1]}
+                     :show   {:f show :rank [1]}
                      :sv     {:f sv :rank [2]}
                      :vs     {:f vs :rank [2]}
                      :wcsv   {:f wcsv :rank [2]}
