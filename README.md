@@ -349,6 +349,7 @@ pressing issues:
 * test cases
 * nulls: will nil do?
 * update
+* virtual column i
 * port to ClojureScript
 * destructuring for function arguments (and assignments?)
 (a;b):0 1 / same as a:0;b:1

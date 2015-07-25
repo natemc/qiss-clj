@@ -794,26 +794,26 @@
       (.write w (csv/write-csv d)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (def ops {
-          (keyword "~") {:op true :f tilde  :text "~" :rank [1 2]}
-          :! {:op true :f bang :text "!" :rank [1 2]}
+          (keyword "~") {:f tilde  :text "~" :rank [1 2]}
+          :! {:f bang :text "!" :rank [1 2]}
           :at {:f at :pass-global-env true :text "@" :rank [1 2 3 4]}
           :dot {:f dot :pass-global-env true :text "." :rank [1 2 3 4]}
-          :+ {:op true :f plus :text "+" :rank [1 2]}
-          :- {:op true :f minus :text "-" :rank [1 2]}
-          :* {:op true :f times :text "*" :rank [1 2]}
-          :% {:op true :f fdiv :text "%" :rank [1 2]}
-          :# {:op true :f pound :text "#" :rank [1 2]}
+          :+ {:f plus :text "+" :rank [1 2]}
+          :- {:f minus :text "-" :rank [1 2]}
+          :* {:f times :text "*" :rank [1 2]}
+          :% {:f fdiv :text "%" :rank [1 2]}
+          :# {:f pound :text "#" :rank [1 2]}
           (keyword ",") {:f join :text "," :rank [1 2]}
-          :& {:op true :f amp :text "&" :rank [1 2]}
-          :| {:op true :f pipe :text "|" :rank [1 2]}
-          :_ {:op true :f under :text "_" :rank [1 2]}
-          := {:op true :f eq :text "=" :rank [1 2]}
-          :<> {:op true :f neq :text "<>" :rank [2]}
-          :< {:op true :f less :text "<" :rank [1 2]}
-          :> {:op true :f greater :text ">" :rank [1 2]}
-          :<= {:op true :f le :text "<=" :rank [2]} ; don't know what the monadic form does in k
-          :>= {:op true :f ge :text ">=" :rank [2]}
-          :? {:op true :f ques :text "?" :rank [1 2 3]}
+          :& {:f amp :text "&" :rank [1 2]}
+          :| {:f pipe :text "|" :rank [1 2]}
+          :_ {:f under :text "_" :rank [1 2]}
+          := {:f eq :text "=" :rank [1 2]}
+          :<> {:f neq :text "<>" :rank [2]}
+          :< {:f less :text "<" :rank [1 2]}
+          :> {:f greater :text ">" :rank [1 2]}
+          :<= {:f le :text "<=" :rank [2]} ; don't know what the monadic form does in k
+          :>= {:f ge :text ">=" :rank [2]}
+          :? {:f ques :text "?" :rank [1 2 3]}
           })
 (def adverbs {:' each
               (keyword "\\:") each-left
@@ -891,6 +891,7 @@
 (declare builtin)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn index-keyed-table [t i]
+  "A keyed table containing the rows from t specified by i"
   (cond (or (dict? i) (table? i)) (index-table (dict-val t)
                                                (find-table (dict-key t) i))
         ;; user supplied just the value of a dict we hope conforms
@@ -902,6 +903,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TODO: unify index, invoke, resolve-at, resolve-call, and resolve-juxt
 (defn index [x i]
+  "The elements of x specified by i"
   (cond (table? x)       (index-table x i)
         (keyed-table? x) (index-keyed-table x i)
         (dict? i)        (make-dict (dict-key i) (index x (dict-val i)))
@@ -910,6 +912,8 @@
         (vector? x)      (x i)
         :else            ((dict-val x) (index-of (dict-key x) i))))
 (defn index-deep [x i]
+  "The elements of x specified by i, where x is nested and the
+  dimensions of i create a cross-product index over x's dimensions"
   (if (empty? i)
     x
     (let [j (first i)
@@ -918,6 +922,7 @@
         (mapv #(index-deep %1 (next i)) p)
         (index-deep p (next i))))))
 (defn invoke [e f a]
+  "Call f pass a or, if f is not a lambda, index f at depth using a"
   (if (not (lambda? f))
     [e (index-deep f a)]
     (let [p (lambda-callable e f)]
@@ -927,14 +932,20 @@
         [e (p)]
         [e (apply p a)]))))
 ;;               :else (err "nyi: partial")))))
-(defn is-callable [x] (instance? clojure.lang.IFn x))
-(defn can-only-be-monadic [x] false)
-(defn can-be-monadic [x] (some #{1} (lambda-rank x)))
-(defn can-be-dyadic [x] (some #{2} (lambda-rank x)))
+(defn is-callable "Can x be invoked" [x] (instance? clojure.lang.IFn x))
+(defn can-only-be-monadic
+  "Can x be invoked with 1 argument and no other number of arguments?"
+  [x]
+  (= [1] (:rank x)))
+(defn can-be-monadic "Can x be invoked with 1 argument?"
+  [x] (some #{1} (lambda-rank x)))
+(defn can-be-dyadic "Can x be invoked with 2 arguments?"
+  [x] (some #{2} (lambda-rank x)))
 
 
 
 (defn resolve-adverbed [tu e x]
+  "Find the value of x, and adverbed expr"
   (if (contains? x :lhs) ; eval must be right to left!
     (if (contains? x :rhs)
       (let [[e2 r] (kresolve tu e  (:rhs x))
@@ -953,10 +964,12 @@
         [e2 (merge o {:f (m o) :pass-global-env true})]))))
 
 (defn resolve-assign [tu e x]
+  "Resolve the assignment specified by x"
   (let [[e2 r] (kresolve tu e (:rhs x))]
     [(assoc e2 (keyword (:id x)) r) r]))
 
 (defn resolve-at [tu e x]
+  "Resolve the @ expr specified by x"
   (if (:rhs x)
     (let [[e2 rhs] (kresolve tu e (:rhs x))]
       (if (:lhs x)
@@ -968,6 +981,7 @@
       [e (ops :at)])))
 
 (defn resolve-dot [tu e x]
+  "Resolve the . expr specified by x"
   (if (:rhs x)
     (let [[e2 rhs] (kresolve tu e (:rhs x))]
       (if (:lhs x)
@@ -979,6 +993,7 @@
       [e (ops :dot)])))
 
 (defn resolve-call [tu e x]
+  "Resolve the f[...] expr specified by x"
   (let [[e4 r] (reduce (fn [[e2 r] a]
                          (let [[e3 rr] (kresolve tu e2 a)]
                            [e3 (cons rr r)]))
@@ -988,12 +1003,14 @@
     (invoke e4 f r)))
 
 (defn resolve-dyop [tu e x]
+  "Resolve the pOq expr specified by x"
   (let [o        (ops (keyword (:op x)))
         [e2 rhs] (kresolve tu e (:rhs x))
         [e3 lhs] (kresolve tu e2 (:lhs x))]
     (invoke e3 o [lhs rhs])))
 
 (defn resolve-juxt [tu e x]
+  "Resolve the juxt expr specified by x"
   (let [[e2 rhs] (kresolve tu e (:rhs x))
         [e3 o] (kresolve tu e2 (:lhs x))]
     (if (:second rhs)
@@ -1003,6 +1020,7 @@
         (invoke e3 o [rhs])))))
 
 (defn resolve-lambda [tu t e x]
+  "Resolve the {} specified by x"
   (let [a (args x)
         w (merge x {:formals a ;; TODO: write lambda ctor
                     :env e
@@ -1012,6 +1030,7 @@
     [e (assoc w :f (feval tu w))]))
 
 (defn resolve-list [tu e x]
+  "Resolve the (...;...) expr specified by x"
   (let [[e2 r] (reduce (fn [[e r] i]
                          (let [[ne nr] (kresolve tu e i)]
                            [ne (cons nr r)]))
@@ -1020,11 +1039,14 @@
     [e2 (vec r)]))
 
 (defn resolve-monop [tu e x]
+  "Resolve the Op specified by x"
   (let [o      (ops (keyword (:op x)))
         [e2 a] (kresolve tu e (:rhs x))]
     (invoke e2 o [a])))
 
 (defn sub-table [t i]
+  "Replace references to column names in t with an @ expr that refers
+  to only those elements of t's columns specified by i"
   (if i
     {:id (fn [x] (if (some #{(keyword x)} (cols t))
                    [:at [:lhs [:id x]] [:rhs [:raw i]]]
@@ -1032,8 +1054,9 @@
     {}))
 
 (defn apply-constraints [tu env t w]
+  "The row numbers in t that satisfy w"
   (if (not w)
-    [env (vec (range (pound t)))]
+    [env (til-count t)]
     (reduce (fn [[e i] c]
               (let [[e2 j] (apply where
                                   (kresolve tu
@@ -1045,6 +1068,9 @@
             (next w))))
 
 (defn guess-col [x]
+  "When an aggregation is not assigned a name, use the name of the
+  last variable used in the aggregation expression.  If no variable
+  name appears in the aggregate expression, use x"
   (cond (empty? x)        :x
         (= :id (first x)) (keyword (second x))
         :else (last (map guess-col (next x)))))
@@ -1062,31 +1088,29 @@
           aggs))
 
 (defn resolve-select [tu e x]
+  "Resolve the select expr specified by x"
   (let [[e2 t] (kresolve tu e (:from x))
         ut     (unkey-table t)
-        [e3 i] (apply-constraints tu
-                                  (merge e2 (zipmap (dict-key ut)
-                                                    (dict-val ut)))
-                                  ut
-                                  (:where x))]
+        e3     (merge e2 (zipmap (dict-key ut) (dict-val ut)))
+        [e4 i] (apply-constraints tu e3 ut (:where x))]
     (if-let [b (:by x)]
-      (let [[e4 g] (compute-aggs tu e3 ut i b)
+      (let [[e5 g] (compute-aggs tu e4 ut i b)
             j      (index i (group (flip (dict-val g))))
             k      (make-table (dict-key g) (flip (dict-key j)))]
         (if-let [a (:aggs x)]
-          (let [u (mapv #(last (compute-aggs tu e4 ut % a)) (dict-val j))
+          (let [u (mapv #(last (compute-aggs tu e5 ut % a)) (dict-val j))
                 v (make-table (dict-key (first u))
                               (flip (mapv dict-val u)))]
-            [e4 (make-keyed-table k v)])
+            [e (make-keyed-table k v)])
           (let [c (except (cols t) (dict-key g)) ;; cols not in the by clause
                 v (make-table c (mapv #(index % (dict-val j)) (index ut c)))]
-            [e4 (make-keyed-table k v)])))
+            [e (make-keyed-table k v)])))
       (if-let [a (:aggs x)]
-        (let [[e5 r] (compute-aggs tu e3 ut i a)
+        (let [[e6 r] (compute-aggs tu e4 ut i a)
               n      (apply max (mapv kcount (dict-val r)))
               v      (mapv #(if (= 1 (kcount %)) (ktake n %) %) (dict-val r))]
-          [e5 (make-table (dict-key r) v)])
-        [e3 (if (keyed-table? t)
+          [e (make-table (dict-key r) v)])
+        [e (if (keyed-table? t)
               (key-table-by-colnames (keycols t) (index ut i))
               (index t i))]))))
 
@@ -1103,6 +1127,7 @@
       (err "length"))))
 
 (defn resolve-table [tu e x]
+  "Resolve the ([]...) expr specified by x"
   (let [[e2 t] (resolve-table-helper tu e (:cols x))]
     (if-let [kc (:keycols x)]
       (let [[e3 k] (resolve-table-helper tu e2 kc)]
@@ -1110,6 +1135,7 @@
       [e2 t])))
 
 (defn resolve-update [tu e x]
+  "Resolve the update expr specified by x"
   (let [[e2 t] (kresolve tu e (:from x))
         ut     (unkey-table t)
         [e3 i] (apply-constraints tu
@@ -1138,6 +1164,7 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn kresolve [tu e x] ; translation unit, env, parse tree
+  "Resolve the expr specified by x in the context of environment e"
   (let [t (if (coll? x) (first x) x)
         v (if (coll? x)
             (cond (= :list t)          (next x)
@@ -1184,6 +1211,8 @@
           :else           [e x])))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn resolve-full-expr [tu e x]
+  "Resolve x in the context of e.  If x resolves to an ambivalent
+  expression and one argument is present, execute it"
   (let [[e2 r] (kresolve tu e x)]
     (if (and (= :juxt (first x)) (:second r))
       (invoke e2 r [(:second r)])
@@ -1191,7 +1220,7 @@
 
 (def viewport {:rows 25 :cols 80})
 
-(defn substr [s b e] (subs s b (min e (count s))))
+(defn substr "string begin end" [s b e] (subs s b (min e (count s))))
 
 (declare stringify)
 (defn stringify-dict [x]
@@ -1337,7 +1366,7 @@
                           (show r))
                         ne)
                       (catch Exception ex
-                        (println ex)
+                        (println (.getMessage ex))
                         e))]
              (recur e2))))))))
 
