@@ -136,6 +136,7 @@
 (defn table? [x] (and (map? x) (:k x) (:v x) (:t x)))
 (defn add-to-dict [d k v] (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
 (defn remove-from-dict [d k]
+  "Remove the elements of d's key and value corresponding to key element k"
   (let [i (index-of (:k d) k)]
     (if (= i (count (:k d)))
       d
@@ -885,7 +886,8 @@
   (cond (or (and (vector? i) (keyword? (first i)))
             (keyword? i))
         (index (d-from-t t) i)
-        (or (and (vector? i) (number? (first i)))
+        (or (and (vector? i) (or (empty? i)
+                                 (number? (first i))))
             (number? i))
         (let [d (d-from-t t)
               r (make-dict (dict-key d) (mapv #(index % i) (dict-val d)))]
@@ -1094,6 +1096,7 @@
           aggs))
 
 (defn resolve-delcols [tu e x]
+  "Resolve the delete (columns) expr specified by x"
   (let [[e2 t] (kresolve tu e (:from x))
         t2     (t-from-d (reduce remove-from-dict
                                  (d-from-t (unkey-table t))
@@ -1102,7 +1105,13 @@
          (key-table-by-colnames (keycols t) t2)
          t2)]))
 (defn resolve-delrows [tu e x]
-  (err "nyi"))
+  "Resolve the delete (rows) expr specified by x"
+  (let [[e2 t] (kresolve tu e (:from x))
+        ut     (unkey-table t)
+        e3     (merge e2 (zipmap (dict-key ut) (dict-val ut)))
+        [e4 i] (apply-constraints tu e3 ut (:where x))
+        u      (index-table ut (except (til-count ut) i))]
+    [e (if (not (keyed-table? t)) u (key-table-by-colnames (keycols t) u))]))
 (defn resolve-select [tu e x]
   "Resolve the select expr specified by x"
   (let [[e2 t] (kresolve tu e (:from x))
@@ -1669,11 +1678,19 @@
        (fact "can delete a key column"
              (keval "delete a from ([a:1 2 3]b:1 2 3;c:1 2 3)") =>
              (keval "([]b:1 2 3;c:1 2 3)"))
-       (fact "deleting cols preserves keycols if all keycols remain"
+       (fact "deleting only non-keycols from a keyed table preserves keycols"
              (keval "delete b from ([a:1 2 3]b:1 2 3;c:1 2 3)") =>
              (keval "([a:1 2 3]c:1 2 3)")
              (keval "delete b from ([a:1 2 3;b:1 2 3]c:1 2 3)") =>
              (keval "([]a:1 2 3;c:1 2 3)")))
+(facts "about deleting rows"
+       (fact "can delete all rows"
+             (keval "delete from([]a:1 2 3)") => (keval "([]a:())"))
+       (fact "can delete rows specified by where"
+             (keval "delete from([]a:1 2 3)where a=2") => (keval "([]a:1 3)"))
+       (fact "can delete rows from keyed tables"
+             (keval "delete from ([a:1 2 3]b:1 2 3)where a=2") =>
+             (keval "([a:1 3]b:1 3)")))
 (facts "about select"
        (fact "no agg required"
              (keval "select from([]a:1 2 3)") => (keval "([]a:1 2 3)"))
