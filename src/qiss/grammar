@@ -26,6 +26,9 @@ chars      = <'"'> #'(\\.|[^\"])(\\.|[^\"])+' <'"'>
 col        = lid <':'> rhs
 cols       = col (<';'> col)*
 comment    = ws '/' #'.*'
+<delete>   = <'delete'> (delrows|delcols)
+delcols    =  ws id (ws? ',' ws? id)* ws from
+delrows    =  ws from ws? where?
 dot        = dotcore
            | dotcore ws? rhs
            | !(floatx|floatsx) lhs ws? dotcore ws? rhs
@@ -38,13 +41,13 @@ ldot       = dotcore
 dyop       = lhs ws? op ws? rhs
 ldyop      = llhs ws? lop ws? lrhs
 empty      = '()'
-<exprx>    = (select|update)
+<exprx>    = (delete|select|update)
 	   / dy
 	   / nsvl
 	   / (call|juxt)
 	   / svl
 	   / <comment>
-<lexprx>   = (select|update)
+<lexprx>   = (delete|select|update)
 	   / ldy
 	   / lnsvl
 	   / (call|ljuxt)
@@ -63,9 +66,9 @@ id         = idx
 lid        = lidx
 <idx>      = #'[a-zA-Z][a-zA-Z0-9_]*'
 <lidx>     = !keyword idx
-juxt       = !(advin|dy|floatsx|select|update) lhs ws? !dot rhs
-(* juxt       = floatsx ws? !dot rhs / !(advin|dy|select!floatsx) lhs ws? !dot rhs *)
-ljuxt      = !(advin|dy|floatsx|select|update) llhs ws? !dot lrhs
+juxt       = !(advin|delete|dy|floatsx|select|update) lhs ws? !dot rhs
+(* juxt       = floatsx ws? !dot rhs / !(advin|delete|dy|select!floatsx) lhs ws? !dot rhs *)
+ljuxt      = !(advin|delete|dy|floatsx|select|update) llhs ws? !dot lrhs
 keycols    = <'['> col? (<';'> col)* <']'>
 keyword    = 'by'|'delete'|'from'|'select'|'update'|'where'
 lambda     = <'{'> formals? exprs <'}'>
