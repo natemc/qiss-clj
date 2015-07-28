@@ -791,7 +791,7 @@
   "Read csv file f, whose first line is a header, with column types
   specified by c per the parse-data function"
   (let [[h & d] (csv/parse-csv (slurp (string f)))] ;; assumes header line
-    (make-table (vec h) (mapv parse-data (string c) (flip (vec d))))))
+    (make-table (mapv keyword h) (mapv parse-data (string c) (flip (vec d))))))
 (defn wcsv [f t] ;; output file and table
   "Write to csv file f the content of table t"
   (let [make-string (fn [x] (mapv #(if (keyword? %) (name %) (str %)) x))
