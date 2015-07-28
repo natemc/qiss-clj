@@ -26,9 +26,10 @@ chars      = <'"'> #'(\\.|[^\"])(\\.|[^\"])+' <'"'>
 col        = lid <':'> rhs
 cols       = col (<';'> col)*
 comment    = ws '/' #'.*'
-<delete>   = <'delete'> (delrows|delcols)
-delcols    =  ws id (ws? ',' ws? id)* ws from
-delrows    =  ws from ws? where?
+dcols      = id (ws? <','> ws? id)*
+<delete>   = <'delete'> ws (delrows|delcols)
+delcols    = dcols ws from
+delrows    = from ws? where?
 dot        = dotcore
            | dotcore ws? rhs
            | !(floatx|floatsx) lhs ws? dotcore ws? rhs

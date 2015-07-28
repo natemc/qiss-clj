@@ -135,6 +135,11 @@
 (defn lambda-text [x] (:text x))
 (defn table? [x] (and (map? x) (:k x) (:v x) (:t x)))
 (defn add-to-dict [d k v] (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
+(defn remove-from-dict [d k]
+  (let [i (index-of (:k d) k)]
+    (if (= i (count (:k d)))
+      d
+      (make-dict (removev (:k d) i) (removev (:v d) i)))))
 (defn cols "the names of the columns of table (or keyed table) x" [x]
   (cond (table? x)       (dict-key x)
         (keyed-table? x) (catv (cols (dict-key x)) (cols (dict-val x)))
@@ -830,7 +835,8 @@
                  q (next %2)]
              (assoc %1 p (if (or (not= 1 (count q))
                                  (some #{(first %2)}
-                                       [:actuals :aggs :by :exprs :formals :where]))
+                                       [:actuals :aggs :by :dcols
+                                        :exprs :formals :where]))
                            q
                            (first q))))
           {}
@@ -1087,6 +1093,16 @@
           [e (make-dict)]
           aggs))
 
+(defn resolve-delcols [tu e x]
+  (let [[e2 t] (kresolve tu e (:from x))
+        t2     (t-from-d (reduce remove-from-dict
+                                 (d-from-t (unkey-table t))
+                                 (map #(keyword (second %1)) (:dcols x))))]
+    [e (if (and (keyed-table? t) (all (in (keycols t) (cols t2))))
+         (key-table-by-colnames (keycols t) t2)
+         t2)]))
+(defn resolve-delrows [tu e x]
+  (err "nyi"))
 (defn resolve-select [tu e x]
   "Resolve the select expr specified by x"
   (let [[e2 t] (kresolve tu e (:from x))
@@ -1182,6 +1198,8 @@
           (= t :call    ) (resolve-call tu e v)
           (= t :char    ) [e (char (first v))]
           (= t :chars   ) [e (vec v)]
+          (= t :delcols ) (resolve-delcols tu e v)
+          (= t :delrows ) (resolve-delrows tu e v)
           (= t :dot     ) (resolve-dot tu e v)
           (= t :dyop    ) (resolve-dyop tu e v)
           (= t :empty   ) [e []]
@@ -1641,6 +1659,21 @@
        (fact "joining dicts is a merge where rhs wins"
              (keval "(`a`b`c`e!1 2 3 5),`b`c`d!10 20 30") =>
              (keval "`a`b`c`e`d!1 10 20 5 30")))
+(facts "about deleting columns"
+       (fact "can delete a column"
+             (keval "delete b from ([]a:1 2 3;b:1 2 3)") =>
+             (keval "([]a:1 2 3)"))
+       (fact "can delete multiple columns"
+             (keval "delete a,c from ([]a:1 2 3;b:1 2 3;c:1 2 3)") =>
+             (keval "([]b:1 2 3)"))
+       (fact "can delete a key column"
+             (keval "delete a from ([a:1 2 3]b:1 2 3;c:1 2 3)") =>
+             (keval "([]b:1 2 3;c:1 2 3)"))
+       (fact "deleting cols preserves keycols if all keycols remain"
+             (keval "delete b from ([a:1 2 3]b:1 2 3;c:1 2 3)") =>
+             (keval "([a:1 2 3]c:1 2 3)")
+             (keval "delete b from ([a:1 2 3;b:1 2 3]c:1 2 3)") =>
+             (keval "([]a:1 2 3;c:1 2 3)")))
 (facts "about select"
        (fact "no agg required"
              (keval "select from([]a:1 2 3)") => (keval "([]a:1 2 3)"))
