@@ -912,7 +912,8 @@
 ;; TODO: unify index, invoke, resolve-at, resolve-call, and resolve-juxt
 (defn index [x i]
   "The elements of x specified by i"
-  (cond (table? x)       (index-table x i)
+  (cond (= :hole i)      x
+        (table? x)       (index-table x i)
         (keyed-table? x) (index-keyed-table x i)
         (dict? i)        (make-dict (dict-key i) (index x (dict-val i)))
         (vector? i)      (mapv (partial index x) i)
@@ -926,7 +927,7 @@
     x
     (let [j (first i)
           p (index x j)]
-      (if (and (vector? j) (< 1 (count j)))
+      (if (or (= :hole j) (and (vector? j) (< 1 (count j))))
         (mapv #(index-deep %1 (next i)) p)
         (index-deep p (next i))))))
 (defn invoke [e f a]
@@ -1546,7 +1547,9 @@
 (facts "about indexing at depth"
        (fact "2-d vector"
              (keval "(`a`b`c;1 2 3)[0;1]") => :b
-             (keval "(`a`b`c;1 2 3)[0;0 1]") => [:a :b]))
+             (keval "(`a`b`c;1 2 3)[0;0 1]") => [:a :b])
+       (fact "eliding first dimension yields columns"
+             (keval "(0 1 2;3 4 5;6 7 8)[;0]") => [0 3 6]))
 (facts "about lambdas"
        (fact "implicit args"
              (keval "{x}[3]") => 3
@@ -1631,6 +1634,8 @@
              (keval "(0 1 2;3 4 5;6 7 8). 1 1") => 4
              (keval "(0 1 2;3 4 5;6 7 8).(0 1;1)") => [1 4]
              (keval "(0 1 2;3 4 5;6 7 8).(0 2;0 2)") => [[0 2] [6 8]])
+       (fact "eliding the first index yields columns"
+             (keval "(0 1 2;3 4 5;6 7 8).(;0 2)") => [[0 2] [3 5] [6 8]])
        (fact "indexing dicts of vectors"
              (keval "(`a`b`c!(0 1 2;3 4 5;6 7 8)).(`b;1)") => 4
              (keval "(`a`b`c!(0 1 2;3 4 5;6 7 8)).(`a`b;1)") => [1 4]
