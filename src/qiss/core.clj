@@ -1538,9 +1538,11 @@
        (fact "/: does"
              (keval "1 2 3*/:1 2") => [[1 2 3] [2 4 6]])
        (fact "can be assigned"
-             (keval "{a:+/;a[0;3 4 5]}[]") => 12))
-;;       (fact "they can be compounded"  TODO: fix
-;;             (keval ",//(1 2 3;(4 5 6;7 8 9))") => [1 2 3 4 5 6 7 8 9]))
+             (keval "{a:+/;a[0;3 4 5]}[]") => 12)
+       (fact "they can be stacked"
+             (keval ",//(1 2 3;(4 5 6;7 8 9))") => [1 2 3 4 5 6 7 8 9]
+             (keval "(1 2),/:\\:3 4") => [[[1 3] [1 4]] [[2 3] [2 4]]]
+             (keval "#''((1 2 3;3 4 5);(5 6 7;7 8 9))") => [[3 3] [3 3]]))
 (facts "about calling functions"
        (fact "supplying all arguments causing invocation"
              (keval "div[10;3]") => 3))

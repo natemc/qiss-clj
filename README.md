@@ -355,7 +355,7 @@ pressing issues:
 (a;b):0 1 / same as a:0;b:1
 (){[a;(b;c)]a+b*c]/(0 1;2 3;4 5)
 * insert
-* delete
+* upsert
 * exec
 * reshape (take a box) form of the # operator
 * partial function application
@@ -370,6 +370,10 @@ things.
 * better console output
 * vector conditional form of ?
 * more ascii file I/O options
+* learn APL and J steal ideas
+* over and scan on state transition matrices
+* experiment with make-array etc
+* threads just to see what's possible?
 
 ## License
 
