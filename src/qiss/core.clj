@@ -1537,7 +1537,7 @@
              (keval "0+/1 2 3") => 6)
        (fact "/: does"
              (keval "1 2 3*/:1 2") => [[1 2 3] [2 4 6]])
-       (fact "can be assigned"
+       (fact "adverbed functions can be assigned"
              (keval "{a:+/;a[0;3 4 5]}[]") => 12)
        (fact "they can be stacked"
              (keval ",//(1 2 3;(4 5 6;7 8 9))") => [1 2 3 4 5 6 7 8 9]
