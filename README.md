@@ -349,6 +349,7 @@ pressing issues:
 * test cases
 * nulls: will nil do?
 * update
+* good error messages
 * virtual column i
 * port to ClojureScript
 * destructuring for function arguments (and assignments?)
@@ -364,9 +365,9 @@ Allow : as the 3rd arg?  {y} works just as well and doesn't complicate
 things.
 * generic list literal with holes is a list constructor
 * get rid of :pass-global-env 
-* if special form 
+* if special form
+* date and time types
 * casting and parsing with $ 
-* stacked adverbs e.g. ,//(1 2 3;(4 5 6;7 8 9)) => [1 2 3 4 5 6 7 8 9]
 * better console output
 * vector conditional form of ?
 * more ascii file I/O options
