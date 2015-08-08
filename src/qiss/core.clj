@@ -1541,7 +1541,7 @@
              (keval "{a:+/;a[0;3 4 5]}[]") => 12)
        (fact "they can be stacked"
              (keval ",//(1 2 3;(4 5 6;7 8 9))") => [1 2 3 4 5 6 7 8 9]
-             (keval "(1 2),/:\\:3 4") => [[[1 3] [1 4]] [[2 3] [2 4]]]
+             (keval "1 2,/:\\:3 4") => [[[1 3] [1 4]] [[2 3] [2 4]]]
              (keval "#''((1 2 3;3 4 5);(5 6 7;7 8 9))") => [[3 3] [3 3]]))
 (facts "about calling functions"
        (fact "supplying all arguments causing invocation"
@@ -1630,8 +1630,8 @@
              (keval "([]a:500 10 15;b:10000 200 300;c:10000 200 300)")))
 (facts "about 2-arg dot"
        (fact "indexing vectors with vectors"
-             (keval "(1 2 3 4) .,1") => 2 ;; TODO fix grammar
-             (keval "(1 2 3 4) .,1 2") => [2 3]
+             (keval "1 2 3 4 .,1") => 2
+             (keval "1 2 3 4 .,1 2") => [2 3]
              (keval "(0 1 2;3 4 5;6 7 8).,0 2") => [[0 1 2] [6 7 8]]
              (keval "(0 1 2;3 4 5;6 7 8). 1 1") => 4
              (keval "(0 1 2;3 4 5;6 7 8).(0 1;1)") => [1 4]

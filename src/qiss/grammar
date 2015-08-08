@@ -33,10 +33,12 @@ delrows    = from ws? where?
 dot        = dotcore
            | dotcore ws? rhs
            | !(floatx|floatsx) lhs ws? dotcore ws? rhs
+	   | &floatsx lhs ws dotcore ws? rhs
 ldot       = dotcore
            | dotcore ws? lrhs
-           | !(floatx|floatsx) llhs ws? dotcore ws? lrhs
-<dotcore>  = !floatsx <'.'>
+           | (!floatx|floatsx) llhs ws? dotcore ws? lrhs
+	   | &floatsx llhs ws dotcore ws? lrhs
+<dotcore>  = !(floatx|floatsx) <'.'>
 <dy>       = at | dot | dyop
 <ldy>      = lat | ldot | ldyop
 dyop       = lhs ws? op ws? rhs
@@ -58,8 +60,8 @@ exprs      = exprsx
 <exprsx>   = (exprx|hole) (ws? <';'> ws? (exprx|hole))*
 float      = !floatsx #'-?([0-9]*\.[0-9]+|[0-9]+\.[0-9]*)([eE][-+]?[0-9]+)?'
 floats     = &(floatx | (longx ws)+ floatx) floatsx
-<floatsx>  = #'-?([0-9]*\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?(([ \n\r\t]+)+-?([0-9]*\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?)+'
-<floatx>   = #'-?([0-9]*\.[0-9]+|[0-9]+\.[0-9]*)([eE][-+]?[0-9]+)?'
+<floatsx>  = #'-?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?(([ \n\r\t]+)+-?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?)+'
+<floatx>   = #'-?(\.[0-9]+|[0-9]+\.[0-9]*)([eE][-+]?[0-9]+)?'
 formals    = <'['> id (<';'> id)* <']'>
 from       = <'from'> ws? lexprx  (* lexprx? *)
 hole       = ws?
