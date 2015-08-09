@@ -75,7 +75,7 @@ juxt       = !(advin|delete|dy|floatsx|select|update)
 (* juxt       = floatsx ws? !dot rhs / !(advin|delete|dy|select!floatsx) lhs ws? !dot rhs *)
 ljuxt      = !(advin|delete|dy|floatsx|select|update)
              llhs ws? !dot lrhs
-           | &(floatsx(ws|'{'|'(')) llhs ws !dot lrhs
+           | &(floatsx(ws|'{'|'(')) llhs ws? !dot lrhs
 keycols    = <'['> col? (<';'> col)* <']'>
 keyword    = 'by'|'delete'|'from'|'select'|'update'|'where'
 lambda     = <'{'> formals? exprs <'}'>
