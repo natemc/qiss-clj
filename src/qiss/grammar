@@ -69,9 +69,13 @@ id         = idx
 lid        = lidx
 <idx>      = #'[a-zA-Z][a-zA-Z0-9_]*'
 <lidx>     = !keyword idx
-juxt       = !(advin|delete|dy|floatsx|select|update) lhs ws? !dot rhs
+juxt       = !(advin|delete|dy|floatsx|select|update)
+             lhs ws? !dot rhs
+           | &floatsx lhs ws !dot rhs
 (* juxt       = floatsx ws? !dot rhs / !(advin|delete|dy|select!floatsx) lhs ws? !dot rhs *)
-ljuxt      = !(advin|delete|dy|floatsx|select|update) llhs ws? !dot lrhs
+ljuxt      = !(advin|delete|dy|floatsx|select|update)
+             llhs ws? !dot lrhs
+           | &floatsx llhs ws !dot lrhs
 keycols    = <'['> col? (<';'> col)* <']'>
 keyword    = 'by'|'delete'|'from'|'select'|'update'|'where'
 lambda     = <'{'> formals? exprs <'}'>
@@ -79,7 +83,7 @@ lhs        = lhsx
 llhs       = llhsx
 elhs       = lhsx|op (* at and dot support op on lhs *)
 lelhs      = llhsx|lop
-<lhsx>     = call | id | !svl lit | parexpr | svl
+<lhsx>     = svl / (call | id | lit | parexpr)
 <llhsx>    = call | lid | !svl lit | parexpr | svl
 list       = <'('> ws? (exprx|hole) ws? (<';'> ws? (exprx|hole))+ ws? <')'>
 <lit>      = bool | char | empty | float | lambda | list | long | symbol | table

@@ -1566,7 +1566,8 @@
              (keval "`a`b`c`d`e 1") => :b
              (keval "`a`b`c`d`e 1 2 3") => [:b :c :d])
        (fact "dyadic user-defined functions can be used infix"
-             (keval "`a`b`c`d`e{x y}1 2 3") => [:b :c :d]))
+             (keval "`a`b`c`d`e{x y}1 2 3") => [:b :c :d]
+             (keval "1 2 4 in 1 2 3") => (keval "110b")))
 (facts "about indexing"
        (fact "square brackets no semicolons"
              (keval "1 2 3 4[0 2]") => [1 3])

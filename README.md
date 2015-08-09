@@ -344,7 +344,6 @@ qiss$
 Unbounded!  There is much work to do.  These are some of the most
 pressing issues:
 
-* fix grammar: infix with vector literal on lhs (e.g., 1 2 in 1 2 3)
 * fix grammar so loading/running scripts isn't so fragile
 * test cases
 * nulls: will nil do?
