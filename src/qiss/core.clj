@@ -61,6 +61,8 @@
               :lexpr     (fn [& x] (vec (cons :expr x)))
               :lid       (fn [& x] (vec (cons :id x)))
               :ljuxt     (fn [& x] (vec (cons :juxt x)))
+              :elhs      (fn [& x] (vec (cons :lhs x)))
+              :lelhs     (fn [& x] (vec (cons :lhs x)))
               :llhs      (fn [& x] (vec (cons :lhs x)))
               :lmonop    (fn [& x] (vec (cons :monop x)))
               :lop       (fn [& x] (vec (cons :op x)))
@@ -1651,7 +1653,7 @@
              (keval "{2}.()") => 2
              (keval "{x}.,2") => 2
              (keval "{x+y}. 1 2") => 3
-             (keval "(+). 1 2") => 3 ;; TODO fix grammar
+             (keval "+. 1 2") => 3
              (keval "{x+z}. 1 2 3") => 4))
 (facts "about 3-arg dot"
        (fact "cross-product index"
