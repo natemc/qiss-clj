@@ -370,7 +370,9 @@ things.
 * better console output
 * vector conditional form of ?
 * more ascii file I/O options
-* learn APL and J steal ideas
+* learn APL and J to steal ideas
+* promote longs to doubles for =
+* fuzzy comparison of doubles
 * over and scan on state transition matrices
 * experiment with make-array etc
 * threads just to see what's possible?

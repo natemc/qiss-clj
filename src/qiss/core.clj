@@ -416,11 +416,11 @@
 (defn eq
   "=x (group)      and    x=y (atomic equals)"
   ([x] (group x))
-  ([x y] ((atomize =) x y)))
+  ([x y] ((atomize =) x y))) ;; TODO: promote long => double, fuzzy doubles
 
 (defn neq
   "x<>y (atomic not-equals)"
-  ([x y] ((atomize not=) x y)))
+  ([x y] ((atomize not=) x y))) ;; TODO: promote long => double, fuzzy doubles
 
 (defn greater
   ">x (idesc)      and    x>y (atomic >)"
@@ -1567,7 +1567,10 @@
              (keval "`a`b`c`d`e 1 2 3") => [:b :c :d])
        (fact "dyadic user-defined functions can be used infix"
              (keval "`a`b`c`d`e{x y}1 2 3") => [:b :c :d]
-             (keval "1 2 4 in 1 2 3") => (keval "110b")))
+             (keval "1 2 4 in 1 2 3") => (keval "110b"))
+       (fact "float vector literals are valid lhs"
+             (keval "1 2.{x+y}3 4") => (keval "4 6.")
+             (keval "1 2. in 2 4. 6") => (keval "01b")))
 (facts "about indexing"
        (fact "square brackets no semicolons"
              (keval "1 2 3 4[0 2]") => [1 3])
