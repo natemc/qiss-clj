@@ -100,6 +100,9 @@
   ;; when printing functions, don't print the whole env
   (apply println (map lose-env x))
   (last x))
+(defn push [x v]
+  "Prepend x to v"
+  (vec (cons x (map identity v))))
 (defn raze "flatten one level" [x] (vec (mapcat #(if (coll? %) % [%]) x)))
 (defn removev "remove the ith element of v" [v i]
   (catv (subvec v 0 i) (subvec v (+ 1 i) (count v))))
@@ -933,9 +936,36 @@
       (if (or (= :hole j) (and (vector? j) (< 1 (count j))))
         (mapv #(index-deep %1 (next i)) p)
         (index-deep p (next i))))))
-(defn push [x v]
-  "Prepend x to v"
-  (vec (cons x (map identity v))))
+(defn invoke-partial [e f a]
+  ;; We could introduce a new partial type, but that means lots of
+  ;; places need to handle it.  Instead, we synthesize a lambda that
+  ;; wraps the original function.  That means for variadics (ie
+  ;; operators especially . and @) we select the arity based on the
+  ;; arguments present when the partial is bound, not when the partial
+  ;; is completed later.  This appears to be the behavior of k anyhow.
+  (let [max-rank (apply max (lambda-rank f))
+        min-rank (apply min (lambda-rank f))
+        args     (cond (> (count a) max-rank) (err "rank")
+                       (< (count a) min-rank)
+                       ;; add holes if needed
+                       (concat a (repeat (- min-rank (count a)) :hole))
+                       :else a)
+        formals (mapv #(keyword (str/join ["a" (str %)]))
+                      (til (count (filter #{:hole} args))))
+        passing (loop [x args y formals r []]
+                  (cond (empty? x) r
+                        (= :hole (first x)) (recur (rest x)
+                                                   (rest y)
+                                                   (conj r [:id (name (first y))]))
+                        :else (recur (next x) y (conj r [:raw (first x)]))))
+        w {:formals formals
+           :exprs [[:call [:target [:raw f]] (push :actuals passing)]]
+           :pass-global-env true
+           :rank [(count formals)]
+           :text (:text f)
+           :env e}]
+    [e (assoc w :f (feval "<synthesized partial>" w))]))
+
 (defn invoke [e f a]
   "Apply f to a. If f is not a lambda, index f at depth using a"
   (if (not (lambda? f))
@@ -944,37 +974,7 @@
       (if (and (not (some #{:hole} a))
                (some #{(count a)} (lambda-rank f)))
         [e (apply p a)]
-        (let [max-rank (apply max (lambda-rank f))
-              min-rank (apply min (lambda-rank f))
-              h        (cond (> (count a) max-rank) (err "rank")
-                             (< (count a) min-rank)
-                             ;; add holes if needed
-                             (concat a (repeat (- min-rank (count a)) :hole))
-                             :else a)
-              formals (mapv #(keyword (str/join ["a" (str %)]))
-                            (til (count (filter #{:hole} h))))
-              passing (loop [x h y formals r []]
-                        (cond (empty? x) r
-                              (= :hole (first x)) (recur (rest x)
-                                                         (rest y)
-                                                         (conj r [:id (name (first y))]))
-                              :else (recur (next x) y (conj r [:raw (first x)]))))
-              w {:formals formals
-                 :exprs [[:call [:target [:raw f]] (push :actuals passing)]]
-                 :pass-global-env true
-                 :rank [(count formals)]
-                 :text (:text f)
-                 :env e}]
-          [e (assoc w :f (feval "<synthesized partial>" w))])))))
-;; We could introduce a new partial type, but that means lots of
-;; places need to handle it.  Alternatively, we could wrap f in
-;; a synthesized lambda, but that doesn't work for . and @ because
-;; they're variadic.  Meanwhile, consistency means that we have
-;; a problem with ambivalence.  I think all of this is OK, because
-;; the context will make it clear.  IOW the interpreter will
-;; select the arity of @ or . based on the arguments present when
-;; the partial is bound, not when the partial is completed later.
-;; This appears to be the behavior of k anyhow.
+        (invoke-partial e f a)))))
 (defn is-callable "Can x be invoked" [x] (instance? clojure.lang.IFn x))
 (defn can-only-be-monadic
   "Can x be invoked with 1 argument and no other number of arguments?"
