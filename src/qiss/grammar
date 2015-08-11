@@ -99,7 +99,7 @@ nlong      = #'-[0-9]+'
 <lnsvl>    = ladverbed | lassign | lid | lit | lmonop | lop | parexpr
 op         = '!' | '#' | '+' | '-' | '*' | '%' | ',' | '&' | '_' | '|' | '?' | relop
 lop        = '!' | '#' | '+' | '-' | '*' | '%' | '&' | '_' | '|' | '?' | relop
-<parexpr>  = <'('> exprx <')'>
+parexpr    = <'('> exprx <')'>
 <relop>    = '~' | (!'<=' '<') | '<=' | '>=' | (!'>=') '>' | '=' | '<>'
 rhs        = exprx
 lrhs       = lexprx

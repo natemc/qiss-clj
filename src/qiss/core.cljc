@@ -1051,16 +1051,20 @@
         [e2 rhs] (kresolve tu e (:rhs x))
         [e3 lhs] (kresolve tu e2 (:lhs x))]
     (invoke e3 o [lhs rhs])))
-
+(defn force-dyadic [x]
+  "Create a dyadic-only function from x which may be variadic"
+  ;; assert (can-be-dyadic x)
+  (assoc x :rank [2]))
 (defn resolve-juxt [tu e x]
   "Resolve the juxt expr specified by x"
   (let [[e2 rhs] (kresolve tu e (:rhs x))
-        [e3 o] (kresolve tu e2 (:lhs x))]
-    (if (:second rhs)
-      (invoke e3 rhs [o (:second rhs)])
-      (if (can-be-dyadic o)
-        [e3 (merge o {:second rhs})]
-        (invoke e3 o [rhs])))))
+        [e3 lhs] (kresolve tu e2 (:lhs x))]
+    (cond
+      (:second rhs)       (invoke e3 rhs [lhs (:second rhs)])  ; 1 in 1 2 3
+      (can-be-dyadic rhs) (invoke e3 (force-dyadic rhs) [lhs]) ; 1+
+      (:second lhs)       (invoke e3 lhs [(:second lhs) rhs])  ; (in 1 2 3)1 2
+      (can-be-dyadic lhs) [e3 (merge lhs {:second rhs})]       ; {x+y}3
+      :else               (invoke e3 lhs [rhs]))))             ; {x}3
 
 (defn resolve-lambda [tu t e x]
   "Resolve the {} specified by x"
@@ -1229,6 +1233,7 @@
         v (if (coll? x)
             (cond (= :list t)          (next x)
                   (= :expr t)          (second x)
+                  (= :parexpr t)       (second x)
                   (= :raw t)           (second x)
                   (vector? (second x)) (map-from-tuples (next x))
                   (= 2 (count x))      (second x)
@@ -1264,6 +1269,7 @@
           (= t :longs   ) [e (parse-long (str/split v #"[ \n\r\t]+"))]
           (= t :monop   ) (resolve-monop tu e v)
           (= t :op      ) [e (ops (keyword v))]
+          (= t :parexpr ) (resolve-full-expr tu e v)
           (= t :raw     ) [e v]
           (= t :select  ) (resolve-select tu e v)
           (= t :symbol  ) [e (keyword v)]
@@ -1277,7 +1283,7 @@
   expression and one argument is present, execute it"
   (let [[e2 r] (kresolve tu e x)]
     (if (and (= :juxt (first x)) (:second r)
-             (can-be-monadic (null! r)))
+             (can-be-monadic r))
       (invoke e2 r [(:second r)])
       [e2 r])))
 
@@ -1590,7 +1596,12 @@
              (keval "{z}[3][4][5]") => 5)
        (fact "works with [;]"
              (keval "{z;y}[;10;][3;4]") => 10
-             (keval "{z;y}[;10][3;4]") => 10))
+             (keval "{z;y}[;10][3;4]") => 10)
+       (fact "works with juxt"
+             (keval "{y}[3]5") => 5
+             (keval "(1+)3") => 4
+             (keval "@[!10;2*!5;3*]") => [0 1 6 3 12 5 18 7 24 9]
+             (keval "(in 1 2 3)1 2") => (keval "110b")))
 (facts "about indexing at depth"
        (fact "2-d vector"
              (keval "(`a`b`c;1 2 3)[0;1]") => :b
