@@ -8,10 +8,8 @@
   (:gen-class))
 
 ;; Backlog
-;;   indexing at depth
-;;   dict+dict
 ;;   @ 3&4 args on keyed tables
-;;   .
+;;   More .
 ;;   builtins
 ;;   update, insert, delete
 ;;   conditional $
@@ -31,8 +29,9 @@
 ;; functions that will differ btwn JVM and JS
 (defn bool? "is x a boolean?" [x]
   (instance? java.lang.Boolean x))
+(declare lose-env)
 (defn err "throw x" [& x]
-  (throw (Exception. (str/join ["'" (str/join " " x)]))))
+  (throw (Exception. (str/join ["'" (str/join " " (map lose-env x))]))))
 (defn exit
   "exit this process"
   ([] (exit 0))
@@ -94,16 +93,18 @@
   [x y] (vec (filter #(some #{%} y) x)))
 (declare less)
 (declare lambda?)
+(defn lose-env [x] (if (lambda? x) (dissoc x :env) x))
 (defn null!
   "Like 0N! but variadic, e.g., (null! msg thing) => thing"
   [& x]
   ;; when printing functions, don't print the whole env
-  (apply println (map (fn [p] (if (lambda? p) (dissoc p :env) p)) x))
+  (apply println (map lose-env x))
   (last x))
 (defn raze "flatten one level" [x] (vec (mapcat #(if (coll? %) % [%]) x)))
 (defn removev "remove the ith element of v" [v i]
   (catv (subvec v 0 i) (subvec v (+ 1 i) (count v))))
 (declare kcount)
+(defn til [x] (vec (range x)))
 (defn til-count "0..count[x]-1" [x] (vec (range (kcount x))))
 (defn union
   "Union of 2 vectors.  Preserves the order of x and the items added
@@ -932,17 +933,48 @@
       (if (or (= :hole j) (and (vector? j) (< 1 (count j))))
         (mapv #(index-deep %1 (next i)) p)
         (index-deep p (next i))))))
+(defn push [x v]
+  "Prepend x to v"
+  (vec (cons x (map identity v))))
 (defn invoke [e f a]
-  "Call f pass a or, if f is not a lambda, index f at depth using a"
+  "Apply f to a. If f is not a lambda, index f at depth using a"
   (if (not (lambda? f))
     [e (index-deep f a)]
     (let [p (lambda-callable e f)]
-      (if (and (= 1 (count a))
-               (= :hole (first a))
-               (some #{0} (lambda-rank f)))
-        [e (p)]
-        [e (apply p a)]))))
-;;               :else (err "nyi: partial")))))
+      (if (and (not (some #{:hole} a))
+               (some #{(count a)} (lambda-rank f)))
+        [e (apply p a)]
+        (let [max-rank (apply max (lambda-rank f))
+              min-rank (apply min (lambda-rank f))
+              h        (cond (> (count a) max-rank) (err "rank")
+                             (< (count a) min-rank)
+                             ;; add holes if needed
+                             (concat a (repeat (- min-rank (count a)) :hole))
+                             :else a)
+              formals (mapv #(keyword (str/join ["a" (str %)]))
+                            (til (count (filter #{:hole} h))))
+              passing (loop [x h y formals r []]
+                        (cond (empty? x) r
+                              (= :hole (first x)) (recur (rest x)
+                                                         (rest y)
+                                                         (conj r [:id (name (first y))]))
+                              :else (recur (next x) y (conj r [:raw (first x)]))))
+              w {:formals formals
+                 :exprs [[:call [:target [:raw f]] (push :actuals passing)]]
+                 :pass-global-env true
+                 :rank [(count formals)]
+                 :text (:text f)
+                 :env e}]
+          [e (assoc w :f (feval "<synthesized partial>" w))])))))
+;; We could introduce a new partial type, but that means lots of
+;; places need to handle it.  Alternatively, we could wrap f in
+;; a synthesized lambda, but that doesn't work for . and @ because
+;; they're variadic.  Meanwhile, consistency means that we have
+;; a problem with ambivalence.  I think all of this is OK, because
+;; the context will make it clear.  IOW the interpreter will
+;; select the arity of @ or . based on the arguments present when
+;; the partial is bound, not when the partial is completed later.
+;; This appears to be the behavior of k anyhow.
 (defn is-callable "Can x be invoked" [x] (instance? clojure.lang.IFn x))
 (defn can-only-be-monadic
   "Can x be invoked with 1 argument and no other number of arguments?"
@@ -1011,7 +1043,7 @@
                        [e []]
                        (reverse (:actuals x))) ;; right-to-left!
         [e5 f] (kresolve tu e4 (:target x))]
-    (invoke e4 f r)))
+      (invoke e4 f r)))
 
 (defn resolve-dyop [tu e x]
   "Resolve the pOq expr specified by x"
@@ -1244,7 +1276,8 @@
   "Resolve x in the context of e.  If x resolves to an ambivalent
   expression and one argument is present, execute it"
   (let [[e2 r] (kresolve tu e x)]
-    (if (and (= :juxt (first x)) (:second r))
+    (if (and (= :juxt (first x)) (:second r)
+             (can-be-monadic (null! r)))
       (invoke e2 r [(:second r)])
       [e2 r])))
 
@@ -1400,8 +1433,12 @@
                         e))]
              (recur e2))))))))
 
-(defn keval [x] (last (resolve-full-expr x builtin (second (parse x)))))
-(defn krun [x]  (show (keval x)))
+(defn keval
+  ([x] (keval builtin x))
+  ([e x] (last (resolve-full-expr x e (second (parse x))))))
+(defn krun
+  ([x] (show (keval x)))
+  ([e x] (show (keval e x))))
 
 (defn -main
   "qiss repl"
@@ -1548,6 +1585,12 @@
 (facts "about calling functions"
        (fact "supplying all arguments causing invocation"
              (keval "div[10;3]") => 3))
+(facts "about partials"
+       (fact "works with []"
+             (keval "{z}[3][4][5]") => 5)
+       (fact "works with [;]"
+             (keval "{z;y}[;10;][3;4]") => 10
+             (keval "{z;y}[;10][3;4]") => 10))
 (facts "about indexing at depth"
        (fact "2-d vector"
              (keval "(`a`b`c;1 2 3)[0;1]") => :b

@@ -1,7 +1,7 @@
 expr       = exprx
 lexpr      = lexprx   (* limited expression: , is not join *)
 
-actuals    = <'['> exprsx <']'>
+actuals    = <'[]'> | !'[]' <'['> exprsx <']'>
 adverb     = '/' | '\\' | '/:' | '\\:' | '\'' | '\':'
 <advcore>  = verb adverb
 <ladvcore> = lverb adverb
