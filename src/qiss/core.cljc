@@ -11,19 +11,20 @@
 ;;   @ 3&4 args on keyed tables
 ;;   More .
 ;;   builtins
-;;   update, insert, delete
+;;   update, insert
 ;;   conditional $
+;;   error messages
 ;;   nulls
-;;   mixed-type lists with holes as factories
 ;;   k-ish console output
 ;;   java interop
 ;;   attributes
-;;   lj
+;;   ij, ej
 ;;   enable UDFs to modify the global env
-;;   dot notation for dictionaries
+;;   dot notation for dictionaries incl locals
 ;;   time types
 ;;   \t and do (see clojure's time and dotimes functions)
 ;;   system
+;;   aj
 ;;   something like functional query but easier to use
 
 ;; functions that will differ btwn JVM and JS
@@ -937,6 +938,9 @@
         (mapv #(index-deep %1 (next i)) p)
         (index-deep p (next i))))))
 (defn invoke-partial [e f a]
+  "Partially apply f to a (which must have fewer elements than f's
+  formals or contain holes), creating a new function that will invoke
+  f when the remaining arguments are supplied"
   ;; We could introduce a new partial type, but that means lots of
   ;; places need to handle it.  Instead, we synthesize a lambda that
   ;; wraps the original function.  That means for variadics (ie
@@ -954,6 +958,7 @@
                       (til (count (filter #{:hole} args))))
         passing (loop [x args y formals r []]
                   (cond (empty? x) r
+                        (empty? y) (catv r x)
                         (= :hole (first x)) (recur (rest x)
                                                    (rest y)
                                                    (conj r [:id (name (first y))]))
@@ -965,11 +970,18 @@
            :text (:text f)
            :env e}]
     [e (assoc w :f (feval "<synthesized partial>" w))]))
-
+(defn fill-vector-holes [v a]
+  (loop [x v y a r []]
+    (cond (empty? x)          r
+          (empty? y)          (catv r x)
+          (= :hole (first x)) (recur (rest x) (rest y) (conj r (first y)))
+          :else               (recur (next x) y (conj r (first x))))))
 (defn invoke [e f a]
   "Apply f to a. If f is not a lambda, index f at depth using a"
   (if (not (lambda? f))
-    [e (index-deep f a)]
+    (if (and (vector? f) (some #{:hole} f))
+      [e (fill-vector-holes f a)]
+      [e (index-deep f a)])
     (let [p (lambda-callable e f)]
       (if (and (not (some #{:hole} a))
                (some #{(count a)} (lambda-rank f)))
@@ -1076,13 +1088,15 @@
                     :text t})]
     [e (assoc w :f (feval tu w))]))
 
-(defn resolve-list [tu e x]
+(defn resolve-vec [tu e x]
   "Resolve the (...;...) expr specified by x"
   (let [[e2 r] (reduce (fn [[e r] i]
                          (let [[ne nr] (kresolve tu e i)]
                            [ne (cons nr r)]))
                        [e ()]
                        (reverse x))]  ;; eval right-to-left!
+    ;; Cannot turn vector with holes into lambda here, because .
+    ;; uses vectors with holes for index elision
     [e2 (vec r)]))
 
 (defn resolve-monop [tu e x]
@@ -1231,7 +1245,7 @@
   "Resolve the expr specified by x in the context of environment e"
   (let [t (if (coll? x) (first x) x)
         v (if (coll? x)
-            (cond (= :list t)          (next x)
+            (cond (= :vec t)           (next x)
                   (= :expr t)          (second x)
                   (= :parexpr t)       (second x)
                   (= :raw t)           (second x)
@@ -1264,7 +1278,6 @@
                                           (apply (partial subs tu) (insta/span x))
                                           e
                                           v)
-          (= t :list    ) (resolve-list tu e v)
           (= t :long    ) [e (parse-long v)]
           (= t :longs   ) [e (parse-long (str/split v #"[ \n\r\t]+"))]
           (= t :monop   ) (resolve-monop tu e v)
@@ -1276,6 +1289,7 @@
           (= t :symbols ) [e (mapv keyword (next (str/split v #"`")))]
           (= t :table   ) (resolve-table tu e v)
           (= t :update  ) (resolve-update tu e v)
+          (= t :vec     ) (resolve-vec tu e v)
           :else           [e x])))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn resolve-full-expr [tu e x]
@@ -1511,6 +1525,17 @@
 (facts "about mixed vectors"
        (fact "top-level indexing"
              (keval "(`a`b`c;1)0") => [:a :b :c]))
+(facts "about vectors with holes"
+       (fact "holes are maintained"
+             (keval "(3;)") => [3 :hole])
+       (fact "holes can be filled via []"
+             (keval "(3;)[4]") => [3 4]
+             (keval "(;3;)[4;5]") => [4 3 5])
+       (fact "holes can be filled via juxt"
+             (keval "(3;)4") => [3 4])
+       (fact "holes can be filled in stages"
+             (keval "(;3;)4") => [4 3 :hole]
+             (keval "(;3;)[4]5") => [4 3 5]))
 (facts "about !"
        (fact "monadic ! on a long is til"
              (keval "!3") => [0 1 2])
