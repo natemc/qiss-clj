@@ -18,11 +18,7 @@
 ;;   k-ish console output
 ;;   java interop
 ;;   attributes
-<<<<<<< HEAD
 ;;   ej, ij
-=======
-;;   ij, ej
->>>>>>> 7f9222ddf2f2eff22f1b909a6d4df8780f5d5f94
 ;;   enable UDFs to modify the global env
 ;;   dot notation for dictionaries incl locals
 ;;   time types
@@ -83,8 +79,8 @@
         (bool? x) (if x 1 0)
         :else x))
 
-(defn all "is every x truthy?" [x] (if (every? (fn [x] x) x) true false))
-(defn any "is any x truthy?" [x] (if (some (fn [x] x) x) true false))
+(defn all? "is every x truthy?" [x] (if (every? (fn [x] x) x) true false))
+(defn any? "is any x truthy?" [x] (if (some (fn [x] x) x) true false))
 (defn catv "concat x and y into a vector" [x y] (vec (concat x y)))
 (declare eq)
 (defn except "the elements in x not in y" [x y]
@@ -489,7 +485,7 @@
 (defn key-table-by-colnames [x y]
   "Key the table (or keyed table) y using the columns named by x"
   (let [i (mapv #(index-of (dict-key y) %) x)]
-    (if (any (mapv (partial = (count (dict-key y))) i))
+    (if (any? (mapv (partial = (count (dict-key y))) i))
       (err "mismatch: key cols" x y)
       (make-keyed-table
        (make-table x (index (dict-val y) i))
@@ -660,8 +656,8 @@
   make a table; from a table, make a dict."
   (cond (vector? x) (apply mapv vector x)
         (table? x)  (d-from-t x)
-        (dict? x)   (if (and (all (mapv keyword? (dict-key x)))
-                             (all (mapv vector? (dict-val x)))
+        (dict? x)   (if (and (all? (mapv keyword? (dict-key x)))
+                             (all? (mapv vector? (dict-val x)))
                              (apply = (mapv count (dict-val x))))
                       (t-from-d x)
                       (err "can only flip column dicts"))
@@ -689,7 +685,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn msome [p & c]
   "like some but the predicate p takes multiple args"
-  (when (not (any (map empty? c)))
+  (when (not (any? (map empty? c)))
     (or (apply p (map first c))
         (recur p (map next c)))))
 
@@ -872,11 +868,21 @@
                     :else (reduce strmax (mapv self x))))
         n (mod (+ 1 (index-of a (mia x))) (+ 1 (count a)))]
     (vec (take n a))))
-(defn args [f]
-  "Determine the formal argument names of lambda f"
+(defn kdestructure [a x]
+  (reduce (fn [e [p q]] (let [t (first p)]
+                          (cond (= :id t)   (assoc e (keyword (second p)) q)
+                                (= :varg t) (merge e (kdestructure (next p) q))
+                                :else (err "nyi: destrucuring" a x))))
+          {}
+          (zipmap a x)))
+(defn args [f] ;; f is parse tree
+  "Create a function that will assign f's formals"
+  (def simple (fn [a] {:formals a :rank [(count a)]}))
   (if-let [a (:formals f)]
-    (mapv #(keyword (second %)) a)
-    (mapv keyword (implicit-args (:exprs f)))))
+    (if (all? (map #(= :id first %) a))
+      (simple (mapv #(keyword (second %)) a))
+      {:formals (partial kdestructure a) :rank [(count a)]})
+    (simple (mapv keyword (implicit-args (:exprs f))))))
 
 (declare kresolve)
 (declare resolve-full-expr)
@@ -889,7 +895,11 @@
   (fn [e & x]
     (if (not (some #{(count x)} (lambda-rank f)))
       (err "rank" (lambda-text f) (vec x))
-      (let [e2 (merge e (merge (lambda-env f) (zipmap (lambda-formals f) x)))]
+      (let [e2 (merge e
+                      (lambda-env f)
+                      (if (coll? (lambda-formals f))
+                        (zipmap (lambda-formals f) x)
+                        ((lambda-formals f) x)))] ;; formals is destructuring func
         (last (reduce (fn [[e3 r] p] (resolve-full-expr tu e3 p))
                       [e2 nil]
                       (lambda-body f)))))))
@@ -996,7 +1006,7 @@
 (defn can-only-be-monadic
   "Can x be invoked with 1 argument and no other number of arguments?"
   [x]
-  (= [1] (:rank x)))
+  (= [1] (lambda-rank x)))
 (defn can-be-monadic "Can x be invoked with 1 argument?"
   [x] (some #{1} (lambda-rank x)))
 (defn can-be-dyadic "Can x be invoked with 2 arguments?"
@@ -1086,11 +1096,11 @@
 (defn resolve-lambda [tu t e x]
   "Resolve the {} specified by x"
   (let [a (args x)
-        w (merge x {:formals a ;; TODO: write lambda ctor
-                    :env e
-                    :pass-global-env true
-                    :rank [(count a)]
-                    :text t})]
+        w (merge x   ;; TODO: write lambda ctor
+                 a
+                 {:env e
+                  :pass-global-env true
+                  :text t})]
     [e (assoc w :f (feval tu w))]))
 
 (defn resolve-vec [tu e x]
@@ -1159,7 +1169,7 @@
         t2     (t-from-d (reduce remove-from-dict
                                  (d-from-t (unkey-table t))
                                  (map #(keyword (second %1)) (:dcols x))))]
-    [e (if (and (keyed-table? t) (all (in (keycols t) (cols t2))))
+    [e (if (and (keyed-table? t) (all? (in (keycols t) (cols t2))))
          (key-table-by-colnames (keycols t) t2)
          t2)]))
 (defn resolve-delrows [tu e x]
@@ -1905,6 +1915,11 @@
              (count (parses "`a")) => 1)
        (fact "symbol vector literals"
              (count (parses "`a`b`c`d`e")) => 1))
+(facts "about destructuring"
+       (fact "vector destructuring uses whitespace"
+             (keval "{[x y]y}1 2") => 2
+             (keval "{[x y;z]z}[1 2;3]") => 3
+             (keval "{[x;y z]z}[1;2 3]") => 3))
 ;; gave up on this one: couldn't fix the <exprx> rule
 ;; (fact "select"
 ;;       (count
