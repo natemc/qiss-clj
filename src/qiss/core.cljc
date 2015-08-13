@@ -872,6 +872,11 @@
   (reduce (fn [e [p q]] (let [t (first p)]
                           (cond (= :id t)   (assoc e (keyword (second p)) q)
                                 (= :varg t) (merge e (kdestructure (next p) q))
+                                (= :darg t) (merge e
+                                                   (kdestructure [(second p)]
+                                                                 [(dict-key q)])
+                                                   (kdestructure [(second (next p))]
+                                                                 [(dict-val q)]))
                                 :else (err "nyi: destrucuring" a x))))
           {}
           (zipmap a x)))
