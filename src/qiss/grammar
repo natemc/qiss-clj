@@ -1,7 +1,7 @@
 expr       = exprx
 lexpr      = lexprx   (* limited expression: , is not join *)
 
-actuals    = <'['> exprsx <']'>
+actuals    = <'[]'> | !'[]' <'['> exprsx <']'>
 adverb     = '/' | '\\' | '/:' | '\\:' | '\'' | '\':'
 <advcore>  = verb adverb
 <ladvcore> = lverb adverb
@@ -88,8 +88,7 @@ elhs       = lhsx|op (* at and dot support op on lhs *)
 lelhs      = llhsx|lop
 <lhsx>     = svl / (call | id | lit | parexpr)
 <llhsx>    = call | lid | !svl lit | parexpr | svl
-list       = <'('> ws? (exprx|hole) ws? (<';'> ws? (exprx|hole))+ ws? <')'>
-<lit>      = bool | char | empty | float | lambda | list | long | symbol | table
+<lit>      = bool | char | empty | float | lambda | long | symbol | table | vec
 long       = !(bool|bools|longsx) longx
 longs      = longsx
 <longx>    = #'-?[0-9]+'
@@ -102,7 +101,7 @@ nlong      = #'-[0-9]+'
 <lnsvl>    = ladverbed | lassign | lid | lit | lmonop | lop | parexpr
 op         = '!' | '#' | '+' | '-' | '*' | '%' | ',' | '&' | '_' | '|' | '?' | relop
 lop        = '!' | '#' | '+' | '-' | '*' | '%' | '&' | '_' | '|' | '?' | relop
-<parexpr>  = <'('> exprx <')'>
+parexpr    = <'('> exprx <')'>
 <relop>    = '~' | (!'<=' '<') | '<=' | '>=' | (!'>=') '>' | '=' | '<>'
 rhs        = exprx
 lrhs       = lexprx
@@ -114,6 +113,7 @@ symbols    = symbolsx
 table      = <'('> keycols <';'>? cols <')'>
 target     = at|dot|lhsx|op
 update     = <'update'> ws? aggs? ws? (by ws)? from ws? where?
+vec        = <'('> ws? (exprx|hole) ws? (<';'> ws? (exprx|hole))+ ws? <')'>
 verb       = adverbed | at | call | dot | id | lambda | op | parexpr
 lverb      = ladverbed | lat | call | ldot | lid | lambda | lop | parexpr
 where      = <'where'> ws lexprx (<','> lexprx)*

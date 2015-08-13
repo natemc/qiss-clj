@@ -358,11 +358,9 @@ pressing issues:
 * upsert
 * exec
 * reshape (take a box) form of the # operator
-* partial function application
 * more variations on 3- and 4-arg versions of @ and .
 Allow : as the 3rd arg?  {y} works just as well and doesn't complicate
 things.
-* generic list literal with holes is a list constructor
 * get rid of :pass-global-env 
 * if special form
 * date and time types

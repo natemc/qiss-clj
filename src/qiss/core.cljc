@@ -11,27 +11,33 @@
 ;;   @ 3&4 args on keyed tables
 ;;   More .
 ;;   builtins
-;;   update, insert, delete
+;;   update, insert
 ;;   conditional $
+;;   error messages
 ;;   nulls
-;;   mixed-type lists with holes as factories
 ;;   k-ish console output
 ;;   java interop
 ;;   attributes
+<<<<<<< HEAD
 ;;   ej, ij
+=======
+;;   ij, ej
+>>>>>>> 7f9222ddf2f2eff22f1b909a6d4df8780f5d5f94
 ;;   enable UDFs to modify the global env
-;;   dot notation for dictionaries
+;;   dot notation for dictionaries incl locals
 ;;   time types
 ;;   aj
 ;;   \t and do (see clojure's time and dotimes functions)
 ;;   system
+;;   aj
 ;;   something like functional query but easier to use
 
 ;; functions that will differ btwn JVM and JS
 (defn bool? "is x a boolean?" [x]
   (instance? java.lang.Boolean x))
+(declare lose-env)
 (defn err "throw x" [& x]
-  (throw (Exception. (str/join ["'" (str/join " " x)]))))
+  (throw (Exception. (str/join ["'" (str/join " " (map lose-env x))]))))
 (defn exit
   "exit this process"
   ([] (exit 0))
@@ -93,16 +99,21 @@
   [x y] (vec (filter #(some #{%} y) x)))
 (declare less)
 (declare lambda?)
+(defn lose-env [x] (if (lambda? x) (dissoc x :env) x))
 (defn null!
   "Like 0N! but variadic, e.g., (null! msg thing) => thing"
   [& x]
   ;; when printing functions, don't print the whole env
-  (apply println (map (fn [p] (if (lambda? p) (dissoc p :env) p)) x))
+  (apply println (map lose-env x))
   (last x))
+(defn push [x v]
+  "Prepend x to v"
+  (vec (cons x (map identity v))))
 (defn raze "flatten one level" [x] (vec (mapcat #(if (coll? %) % [%]) x)))
 (defn removev "remove the ith element of v" [v i]
   (catv (subvec v 0 i) (subvec v (+ 1 i) (count v))))
 (declare kcount)
+(defn til [x] (vec (range x)))
 (defn til-count "0..count[x]-1" [x] (vec (range (kcount x))))
 (defn union
   "Union of 2 vectors.  Preserves the order of x and the items added
@@ -931,17 +942,56 @@
       (if (or (= :hole j) (and (vector? j) (< 1 (count j))))
         (mapv #(index-deep %1 (next i)) p)
         (index-deep p (next i))))))
+(defn invoke-partial [e f a]
+  "Partially apply f to a (which must have fewer elements than f's
+  formals or contain holes), creating a new function that will invoke
+  f when the remaining arguments are supplied"
+  ;; We could introduce a new partial type, but that means lots of
+  ;; places need to handle it.  Instead, we synthesize a lambda that
+  ;; wraps the original function.  That means for variadics (ie
+  ;; operators especially . and @) we select the arity based on the
+  ;; arguments present when the partial is bound, not when the partial
+  ;; is completed later.  This appears to be the behavior of k anyhow.
+  (let [max-rank (apply max (lambda-rank f))
+        min-rank (apply min (lambda-rank f))
+        args     (cond (> (count a) max-rank) (err "rank")
+                       (< (count a) min-rank)
+                       ;; add holes if needed
+                       (concat a (repeat (- min-rank (count a)) :hole))
+                       :else a)
+        formals (mapv #(keyword (str/join ["a" (str %)]))
+                      (til (count (filter #{:hole} args))))
+        passing (loop [x args y formals r []]
+                  (cond (empty? x) r
+                        (empty? y) (catv r x)
+                        (= :hole (first x)) (recur (rest x)
+                                                   (rest y)
+                                                   (conj r [:id (name (first y))]))
+                        :else (recur (next x) y (conj r [:raw (first x)]))))
+        w {:formals formals
+           :exprs [[:call [:target [:raw f]] (push :actuals passing)]]
+           :pass-global-env true
+           :rank [(count formals)]
+           :text (:text f)
+           :env e}]
+    [e (assoc w :f (feval "<synthesized partial>" w))]))
+(defn fill-vector-holes [v a]
+  (loop [x v y a r []]
+    (cond (empty? x)          r
+          (empty? y)          (catv r x)
+          (= :hole (first x)) (recur (rest x) (rest y) (conj r (first y)))
+          :else               (recur (next x) y (conj r (first x))))))
 (defn invoke [e f a]
-  "Call f pass a or, if f is not a lambda, index f at depth using a"
+  "Apply f to a. If f is not a lambda, index f at depth using a"
   (if (not (lambda? f))
-    [e (index-deep f a)]
+    (if (and (vector? f) (some #{:hole} f))
+      [e (fill-vector-holes f a)]
+      [e (index-deep f a)])
     (let [p (lambda-callable e f)]
-      (if (and (= 1 (count a))
-               (= :hole (first a))
-               (some #{0} (lambda-rank f)))
-        [e (p)]
-        [e (apply p a)]))))
-;;               :else (err "nyi: partial")))))
+      (if (and (not (some #{:hole} a))
+               (some #{(count a)} (lambda-rank f)))
+        [e (apply p a)]
+        (invoke-partial e f a)))))
 (defn is-callable "Can x be invoked" [x] (instance? clojure.lang.IFn x))
 (defn can-only-be-monadic
   "Can x be invoked with 1 argument and no other number of arguments?"
@@ -1010,7 +1060,7 @@
                        [e []]
                        (reverse (:actuals x))) ;; right-to-left!
         [e5 f] (kresolve tu e4 (:target x))]
-    (invoke e4 f r)))
+      (invoke e4 f r)))
 
 (defn resolve-dyop [tu e x]
   "Resolve the pOq expr specified by x"
@@ -1018,16 +1068,20 @@
         [e2 rhs] (kresolve tu e (:rhs x))
         [e3 lhs] (kresolve tu e2 (:lhs x))]
     (invoke e3 o [lhs rhs])))
-
+(defn force-dyadic [x]
+  "Create a dyadic-only function from x which may be variadic"
+  ;; assert (can-be-dyadic x)
+  (assoc x :rank [2]))
 (defn resolve-juxt [tu e x]
   "Resolve the juxt expr specified by x"
   (let [[e2 rhs] (kresolve tu e (:rhs x))
-        [e3 o] (kresolve tu e2 (:lhs x))]
-    (if (:second rhs)
-      (invoke e3 rhs [o (:second rhs)])
-      (if (can-be-dyadic o)
-        [e3 (merge o {:second rhs})]
-        (invoke e3 o [rhs])))))
+        [e3 lhs] (kresolve tu e2 (:lhs x))]
+    (cond
+      (:second rhs)       (invoke e3 rhs [lhs (:second rhs)])  ; 1 in 1 2 3
+      (can-be-dyadic rhs) (invoke e3 (force-dyadic rhs) [lhs]) ; 1+
+      (:second lhs)       (invoke e3 lhs [(:second lhs) rhs])  ; (in 1 2 3)1 2
+      (can-be-dyadic lhs) [e3 (merge lhs {:second rhs})]       ; {x+y}3
+      :else               (invoke e3 lhs [rhs]))))             ; {x}3
 
 (defn resolve-lambda [tu t e x]
   "Resolve the {} specified by x"
@@ -1039,13 +1093,15 @@
                     :text t})]
     [e (assoc w :f (feval tu w))]))
 
-(defn resolve-list [tu e x]
+(defn resolve-vec [tu e x]
   "Resolve the (...;...) expr specified by x"
   (let [[e2 r] (reduce (fn [[e r] i]
                          (let [[ne nr] (kresolve tu e i)]
                            [ne (cons nr r)]))
                        [e ()]
                        (reverse x))]  ;; eval right-to-left!
+    ;; Cannot turn vector with holes into lambda here, because .
+    ;; uses vectors with holes for index elision
     [e2 (vec r)]))
 
 (defn resolve-monop [tu e x]
@@ -1194,8 +1250,9 @@
   "Resolve the expr specified by x in the context of environment e"
   (let [t (if (coll? x) (first x) x)
         v (if (coll? x)
-            (cond (= :list t)          (next x)
+            (cond (= :vec t)           (next x)
                   (= :expr t)          (second x)
+                  (= :parexpr t)       (second x)
                   (= :raw t)           (second x)
                   (vector? (second x)) (map-from-tuples (next x))
                   (= 2 (count x))      (second x)
@@ -1227,24 +1284,26 @@
                                           (apply (partial subs tu) (insta/span x))
                                           e
                                           v)
-          (= t :list    ) (resolve-list tu e v)
           (= t :long    ) [e (parse-long v)]
           (= t :longs   ) [e (parse-long (str/split v #"[ \n\r\t]+"))]
           (= t :monop   ) (resolve-monop tu e v)
           (= t :op      ) [e (ops (keyword v))]
+          (= t :parexpr ) (resolve-full-expr tu e v)
           (= t :raw     ) [e v]
           (= t :select  ) (resolve-select tu e v)
           (= t :symbol  ) [e (keyword v)]
           (= t :symbols ) [e (mapv keyword (next (str/split v #"`")))]
           (= t :table   ) (resolve-table tu e v)
           (= t :update  ) (resolve-update tu e v)
+          (= t :vec     ) (resolve-vec tu e v)
           :else           [e x])))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn resolve-full-expr [tu e x]
   "Resolve x in the context of e.  If x resolves to an ambivalent
   expression and one argument is present, execute it"
   (let [[e2 r] (kresolve tu e x)]
-    (if (and (= :juxt (first x)) (:second r))
+    (if (and (= :juxt (first x)) (:second r)
+             (can-be-monadic r))
       (invoke e2 r [(:second r)])
       [e2 r])))
 
@@ -1400,8 +1459,12 @@
                         e))]
              (recur e2))))))))
 
-(defn keval [x] (last (resolve-full-expr x builtin (second (parse x)))))
-(defn krun [x]  (show (keval x)))
+(defn keval
+  ([x] (keval builtin x))
+  ([e x] (last (resolve-full-expr x e (second (parse x))))))
+(defn krun
+  ([x] (show (keval x)))
+  ([e x] (show (keval e x))))
 
 (defn -main
   "qiss repl"
@@ -1468,6 +1531,17 @@
 (facts "about mixed vectors"
        (fact "top-level indexing"
              (keval "(`a`b`c;1)0") => [:a :b :c]))
+(facts "about vectors with holes"
+       (fact "holes are maintained"
+             (keval "(3;)") => [3 :hole])
+       (fact "holes can be filled via []"
+             (keval "(3;)[4]") => [3 4]
+             (keval "(;3;)[4;5]") => [4 3 5])
+       (fact "holes can be filled via juxt"
+             (keval "(3;)4") => [3 4])
+       (fact "holes can be filled in stages"
+             (keval "(;3;)4") => [4 3 :hole]
+             (keval "(;3;)[4]5") => [4 3 5]))
 (facts "about !"
        (fact "monadic ! on a long is til"
              (keval "!3") => [0 1 2])
@@ -1548,6 +1622,17 @@
 (facts "about calling functions"
        (fact "supplying all arguments causing invocation"
              (keval "div[10;3]") => 3))
+(facts "about partials"
+       (fact "works with []"
+             (keval "{z}[3][4][5]") => 5)
+       (fact "works with [;]"
+             (keval "{z;y}[;10;][3;4]") => 10
+             (keval "{z;y}[;10][3;4]") => 10)
+       (fact "works with juxt"
+             (keval "{y}[3]5") => 5
+             (keval "(1+)3") => 4
+             (keval "@[!10;2*!5;3*]") => [0 1 6 3 12 5 18 7 24 9]
+             (keval "(in 1 2 3)1 2") => (keval "110b")))
 (facts "about indexing at depth"
        (fact "2-d vector"
              (keval "(`a`b`c;1 2 3)[0;1]") => :b
