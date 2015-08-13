@@ -8,10 +8,8 @@
   (:gen-class))
 
 ;; Backlog
-;;   indexing at depth
-;;   dict+dict
 ;;   @ 3&4 args on keyed tables
-;;   .
+;;   More .
 ;;   builtins
 ;;   update, insert, delete
 ;;   conditional $
@@ -20,10 +18,11 @@
 ;;   k-ish console output
 ;;   java interop
 ;;   attributes
-;;   lj
+;;   ej, ij
 ;;   enable UDFs to modify the global env
 ;;   dot notation for dictionaries
 ;;   time types
+;;   aj
 ;;   \t and do (see clojure's time and dotimes functions)
 ;;   system
 ;;   something like functional query but easier to use
@@ -1203,6 +1202,7 @@
                   :else                (next x))
             nil)]
     (cond (= t :adverbed) (resolve-adverbed tu e v)
+          (= t :arg)      (kresolve tu e v)
           (= t :assign  ) (resolve-assign tu e v)
           (= t :at      ) (resolve-at tu e v)
           (= t :bool    ) [e (= "1" v)]

@@ -366,7 +366,7 @@ things.
 * get rid of :pass-global-env 
 * if special form
 * date and time types
-* casting and parsing with $ 
+* string, casting and parsing with $ 
 * better console output
 * vector conditional form of ?
 * more ascii file I/O options
