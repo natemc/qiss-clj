@@ -874,17 +874,21 @@
 (defn kdestructure [a x]
   (if (< (count x) (count a))
     (err "destructuring mismatch" a x)
-    (reduce (fn [e [p q]] (let [t (first p)]
-                            (cond (= :id t)   (assoc e (keyword (second p)) q)
-                                  (= :varg t) (merge e (kdestructure (next p) q))
-                                  (= :darg t) (merge e
-                                                     (kdestructure [(second p)]
-                                                                   [(dict-key q)])
-                                                     (kdestructure [(second (next p))]
-                                                                   [(dict-val q)]))
-                                  :else (err "nyi: destrucuring" a x))))
+    (reduce (fn [e [p q]]
+              (let [t (first p)]
+                (cond (= :id t)   (assoc e (keyword (second p)) q)
+                      (= :varg t) (merge e (kdestructure (next p) q))
+                      (= :targ t) (merge e (kdestructure (next p)
+                                                         (dict-val (flip q))))
+                      (= :darg t) (merge e
+                                         (kdestructure [(second p)]
+                                                       [(dict-key q)])
+                                         (kdestructure [(second (next p))]
+                                                       [(dict-val q)]))
+                      :else (err "nyi: destrucuring" a x))))
             {}
             (zipmap a x))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn args [f] ;; f is parse tree
   "Create a function that will assign f's formals"
   (def simple (fn [a] {:formals a :rank [(count a)]}))
