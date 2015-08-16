@@ -13,7 +13,11 @@ ladverbed  = ladvin | !ladvin ladvpre |(!ladvin|ladvpre) ladvcore
 <ladvpre>  = ladvcore ws? lrhs
 aggs       = aggsx
 <aggsx>    = lexprx (<','> lexprx)*
-assign     = id <':'> rhs
+alhs       = dalhs | id | valhs
+dalhs      = <'('> ws? arg ws? <'!'> ws? arg ws? <')'>
+valhs      = !dalhs <'('> ws? arg (ws? <';'> ws? arg)* ws? <')'>
+	   | <'('> ws? id (ws id)+ ws? <')'>
+assign     = alhs <':'> rhs
 lassign    = lid <':'> lrhs
 at         = <'@'> | <'@'> ws? rhs | elhs ws? <'@'> ws? rhs
 lat        = <'@'> | <'@'> ws? lrhs | lelhs ws? <'@'> ws? lrhs
@@ -63,7 +67,8 @@ floats     = &(floatx | (longx ws)+ floatx) floatsx
 <floatsx>  = #'-?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?(([ \n\r\t]+)+-?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?)+'
 <floatx>   = #'-?(\.[0-9]+|[0-9]+\.[0-9]*)([eE][-+]?[0-9]+)?'
 <arg>      = darg | !varg id | varg
-varg       = id (ws id)+
+varg       = <'('> ws? arg (ws? <';'> ws? arg)* <')'>
+	   | id (ws id)+
 darg       = arg ws? <'!'> ws? arg
 formals    = <'['> ws? arg (ws? <';'> ws? arg)* ws? <']'>
 from       = <'from'> ws? lexprx  (* lexprx? *)

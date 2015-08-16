@@ -56,6 +56,9 @@
 ;; limits apply only for parsing and are not relevant to evaluation.
 (def xform   {:ladverbed (fn [& x] (vec (cons :adverbed x)))
               :lassign   (fn [& x] (vec (cons :assign x)))
+              :alhs      (fn [& x] (vec (cons :lhs x)))
+              :dalhs     (fn [& x] (vec (cons :darg x)))
+              :valhs     (fn [& x] (vec (cons :varg x)))
               :lat       (fn [& x] (vec (cons :at x)))
               :ldot      (fn [& x] (vec (cons :dot x)))
               :ldyop     (fn [& x] (vec (cons :dyop x)))
@@ -869,17 +872,19 @@
         n (mod (+ 1 (index-of a (mia x))) (+ 1 (count a)))]
     (vec (take n a))))
 (defn kdestructure [a x]
-  (reduce (fn [e [p q]] (let [t (first p)]
-                          (cond (= :id t)   (assoc e (keyword (second p)) q)
-                                (= :varg t) (merge e (kdestructure (next p) q))
-                                (= :darg t) (merge e
-                                                   (kdestructure [(second p)]
-                                                                 [(dict-key q)])
-                                                   (kdestructure [(second (next p))]
-                                                                 [(dict-val q)]))
-                                :else (err "nyi: destrucuring" a x))))
-          {}
-          (zipmap a x)))
+  (if (< (count x) (count a))
+    (err "destructuring mismatch" a x)
+    (reduce (fn [e [p q]] (let [t (first p)]
+                            (cond (= :id t)   (assoc e (keyword (second p)) q)
+                                  (= :varg t) (merge e (kdestructure (next p) q))
+                                  (= :darg t) (merge e
+                                                     (kdestructure [(second p)]
+                                                                   [(dict-key q)])
+                                                     (kdestructure [(second (next p))]
+                                                                   [(dict-val q)]))
+                                  :else (err "nyi: destrucuring" a x))))
+            {}
+            (zipmap a x))))
 (defn args [f] ;; f is parse tree
   "Create a function that will assign f's formals"
   (def simple (fn [a] {:formals a :rank [(count a)]}))
@@ -1041,7 +1046,7 @@
 (defn resolve-assign [tu e x]
   "Resolve the assignment specified by x"
   (let [[e2 r] (kresolve tu e (:rhs x))]
-    [(assoc e2 (keyword (:id x)) r) r]))
+    [(merge e2 (kdestructure [(:lhs x)] [r])) r]))
 
 (defn resolve-at [tu e x]
   "Resolve the @ expr specified by x"
@@ -1920,11 +1925,33 @@
              (count (parses "`a")) => 1)
        (fact "symbol vector literals"
              (count (parses "`a`b`c`d`e")) => 1))
-(facts "about destructuring"
-       (fact "vector destructuring uses whitespace"
+(facts "about destructuring function arguments"
+       (fact "vector destructuring can use vector literal syntax"
+             (keval "{[(x;y)]y}1 2") => 2
+             (keval "{[(x;y);z]z}[1 2;3]") => 3
+             (keval "{[x;(y;z)]z}[1;2 3]") => 3)
+       (fact "vector destructuring can use whitespace"
              (keval "{[x y]y}1 2") => 2
              (keval "{[x y;z]z}[1 2;3]") => 3
-             (keval "{[x;y z]z}[1;2 3]") => 3))
+             (keval "{[x;y z]z}[1;2 3]") => 3
+             (keval "*'0 1{[x y;z]y,x+y}\\!10") => [1 1 2 3 5 8 13 21 34 55])
+       (fact "dictionary destructuring uses !"
+             (keval "{[x!y]y}`a`b!3 4") => [3 4]
+             (keval "{[x!y;z]y}[`a`b!3 4;5]") => [3 4]
+             (keval "{[x;y!z]y}[6;`a`b!3 4]") => [:a :b])
+       (fact "destructuring can be incomplete"
+             (keval "{[x y z]z}1 2 3 4") => 3
+             (keval "{[a b!c d]c}`a`b`c`d!!4") => 0)
+       (fact "destructuring is recursive"
+             (keval "{[(a b;c d)]c}(1 2;3 4)") => 3
+             (keval "{[a b!c d]c}`a`b!1 2") => 1))
+(facts "about destructuring assignments"
+       (fact "vector destructuring can use vector literal syntax"
+             (keval "{(a;b):1 2;b}[]") => 2)
+       (fact "vector destructuring can use whitespace but parens are required"
+             (keval "{(a b):1 2;b}[]") => 2)
+       (fact "dictionary destructuring requires parens"
+             (keval "{(a!b):`a`b!1 2;a}[]") => [:a :b]))
 ;; gave up on this one: couldn't fix the <exprx> rule
 ;; (fact "select"
 ;;       (count
