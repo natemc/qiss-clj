@@ -93,9 +93,21 @@ qiss$ rlwrap lein run
 §)p
 42
 §)/ assignment is an expression
-§)/ like *all* expressions, assignment is processed right-to-left
+§)/ like *all* expressions, assignment is processed right-to-left 
 §)a*3+a:6
 54
+§)/ assignment supports clojure-esque destructuring
+§)(a;b):1 2 
+§)a
+1
+§)b
+2 
+§)(a b):3 4 / ; can be replaced with space when destructuring vectors
+§)a
+3
+§)(a b):5 6 7 8 / when destructuring, extra content is ignored
+§)b
+6
 §) 
 §)/ lambdas are in curly braces
 §)K:{[a;b]a} / the K combinator takes 2 args and returns its 1st
@@ -125,13 +137,27 @@ qiss$ rlwrap lein run
 §)/ indexing does not require square brackets
 §)`a`b`c`d`e 0 2 4
 [:a :c :e]
-§)/ monadic functions can be applied without square brackets
+§)/ monadic functions can be applied without square brackets 
 §)count:{#x}
 §)count[1 2 3]
 3
 §)count 1 2 3
 3
-§) 
+§)/ partial function application aka projection
+§)inc:1+ / when args are missing, binds the ones present
+§)inc 5
+6
+§)dec:-[;1] / elision of first argument
+§)dec 5
+4
+§)/ formal arguments support destructuring like assignment
+§)second:{[(a;b)]b} / destructured formal arg resembles corresponding literal
+§)second 1 2
+2
+§)second:{[a b]b}   / simplified syntax: no (;) needed for a vector
+§)second 1 2 3 4   / extra content is ignored
+2
+§)
 §)/ adverbs
 §)/ loops are expressed via higher-order functions called adverbs
 §)/ adverbs are suffixed to the operator or function they modify
@@ -152,21 +178,28 @@ qiss$ rlwrap lein run
 §){x*y+z}'[1 2 3;4 5 6;7 8 9] / triadic (aka ternary) each
 [11 26 45]
 §)/ ': is each-prior
-§)0-':2 6 6 10 14 18 21 23 26 28
+§)0-':2 6 6 10 14 18 21 23 26 28 / deltas
 [2 4 0 4 4 4 3 2 3 2]
+§)/ destructuring can make the use of adverbs simpler
+§)*'0 1{[x y;z]y,x+y}\!10 / monadic * is first
+[1 1 2 3 5 8 13 21 34 55]
 §) 
 §)/ dicts are formed using the ! operator on two vectors
 §)`a`b`c!1 2 3
 :a| 1
 :b| 2
 :c| 3
-§)/ BEWARE the interpreter will die if the vectors' lengths don't match
 §)/ as a convenience, two atoms can be made into a dict
 §)/ as if they were two vectors, each of length one
 §)(,`a)!,1
 :a| 1
 §)`a!1
 :a| 1
+§)(k!v):`a`b`c!1 2 3 / destructuring a dict
+§)k
+[:a :b :c]
+§)v
+[1 2 3]
 §)/ dict indexing is analogous to vector indexing 
 §)(`a`b`c!1 2 3)`a
 1
@@ -325,7 +358,7 @@ b
 \x
 §)"xyzzy" / vector of char
 xyzzy
-§)/ a vector of char behaves like any vector wrt atomic ops
+§)/ a vector of char behaves like any vector
 §)"foo","bar" 
 foobar
 §)(,"foo"),,"bar" / to make a pair of strings, enlist them first
@@ -351,9 +384,6 @@ pressing issues:
 * good error messages
 * virtual column i
 * port to ClojureScript
-* destructuring for function arguments (and assignments?)
-(a;b):0 1 / same as a:0;b:1
-(){[a;(b;c)]a+b*c]/(0 1;2 3;4 5)
 * insert
 * upsert
 * exec
