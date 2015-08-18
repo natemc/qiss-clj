@@ -878,13 +878,12 @@
               (let [t (first p)]
                 (cond (= :id t)   (assoc e (keyword (second p)) q)
                       (= :varg t) (merge e (kdestructure (next p) q))
-                      (= :targ t) (merge e (kdestructure (next p)
-                                                         (dict-val (flip q))))
-                      (= :darg t) (merge e
-                                         (kdestructure [(second p)]
-                                                       [(dict-key q)])
-                                         (kdestructure [(second (next p))]
-                                                       [(dict-val q)]))
+                      (or (= :targ t) (= :targs t))
+                      (merge e (kdestructure (next p) (dict-val (flip q))))
+                      (or (= :darg t) (= :ktarg t))
+                      (merge e
+                             (kdestructure [(second p)] [(dict-key q)])
+                             (kdestructure [(second (next p))] [(dict-val q)]))
                       :else (err "nyi: destrucuring" a x))))
             {}
             (zipmap a x))))
@@ -1943,19 +1942,34 @@
              (keval "{[x!y]y}`a`b!3 4") => [3 4]
              (keval "{[x!y;z]y}[`a`b!3 4;5]") => [3 4]
              (keval "{[x;y!z]y}[6;`a`b!3 4]") => [:a :b])
+       (fact "dictionary destructuring works on keyed tables"
+             (keval "{[k!v]v}([p:`a`b`c]q:1 2 3)") => (keval "([]q:1 2 3)"))
+       (fact "table destructuring can use table literal syntax"
+             (keval "{[([]a;b)]b}([]p:`a`b`c;q:1 2 3)") => [1 2 3])
+       (fact "table destructuring can use spaces instead of ;"
+             (keval "{[([]a b)]b}([]p:`a`b`c;q:1 2 3)") => [1 2 3])
+       (fact "keyed tables too"
+             (keval "{[([a]b c)]c}([p:`a`b`c]q:`d`e`f;r:1 2 3)") => [1 2 3])
        (fact "destructuring can be incomplete"
              (keval "{[x y z]z}1 2 3 4") => 3
              (keval "{[a b!c d]c}`a`b`c`d!!4") => 0)
        (fact "destructuring is recursive"
              (keval "{[(a b;c d)]c}(1 2;3 4)") => 3
-             (keval "{[a b!c d]c}`a`b!1 2") => 1))
+             (keval "{[a b!c d]c}`a`b!1 2") => 1
+             (keval "{[([]a)!([]b)]b}([p:`a`b`c]q:1 2 3)") => [1 2 3]))
 (facts "about destructuring assignments"
        (fact "vector destructuring can use vector literal syntax"
              (keval "{(a;b):1 2;b}[]") => 2)
        (fact "vector destructuring can use whitespace but parens are required"
              (keval "{(a b):1 2;b}[]") => 2)
        (fact "dictionary destructuring requires parens"
-             (keval "{(a!b):`a`b!1 2;a}[]") => [:a :b]))
+             (keval "{(a!b):`a`b!1 2;a}[]") => [:a :b])
+       (fact "table destructuring can use table literal syntax"
+             (keval "{[]([]a;b):([]p:`a`b`c;q:1 2 3);b}[]") => [1 2 3])
+       (fact "table destructuring can use spaces instead of ;"
+             (keval "{[]([]a b):([]p:`a`b`c;q:1 2 3);b}[]") => [1 2 3])
+       (fact "keyed tables too"
+             (keval "{[]([a]b):([p:`a`b`c]q:1 2 3);b}[]") => [1 2 3]))
 ;; gave up on this one: couldn't fix the <exprx> rule
 ;; (fact "select"
 ;;       (count
