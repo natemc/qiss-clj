@@ -876,7 +876,9 @@
     (err "destructuring mismatch" a x)
     (reduce (fn [e [p q]]
               (let [t (first p)]
-                (cond (= :id t)   (assoc e (keyword (second p)) q)
+                (cond (= :did t)  (let [id (keyword (second p))]
+                                    (if (not= :_ id)
+                                      (assoc e id q)))
                       (= :varg t) (merge e (kdestructure (next p) q))
                       (or (= :targ t) (= :targs t))
                       (merge e (kdestructure (next p) (dict-val (flip q))))
@@ -1950,12 +1952,16 @@
              (keval "{[([]a b)]b}([]p:`a`b`c;q:1 2 3)") => [1 2 3])
        (fact "keyed tables too"
              (keval "{[([a]b c)]c}([p:`a`b`c]q:`d`e`f;r:1 2 3)") => [1 2 3])
+       (fact "destructuring can use _ for values you don't need"
+             (keval "{[_ _ a _ _]a}@!5") => 2)
        (fact "destructuring can be incomplete"
              (keval "{[x y z]z}1 2 3 4") => 3
-             (keval "{[a b!c d]c}`a`b`c`d!!4") => 0)
+             (keval "{[a b!c d]c}`a`b`c`d!!4") => 0
+             (keval "{[_ _ a]a}@!5") => 2)
        (fact "destructuring is recursive"
              (keval "{[(a b;c d)]c}(1 2;3 4)") => 3
              (keval "{[a b!c d]c}`a`b!1 2") => 1
+             (keval "{[_!_ a b]a*b}`a`b`c`d`e!!5") => 2
              (keval "{[([]a)!([]b)]b}([p:`a`b`c]q:1 2 3)") => [1 2 3]))
 (facts "about destructuring assignments"
        (fact "vector destructuring can use vector literal syntax"
