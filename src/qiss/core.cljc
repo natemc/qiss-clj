@@ -876,7 +876,9 @@
     (err "destructuring mismatch" a x)
     (reduce (fn [e [p q]]
               (let [t (first p)]
-                (cond (= :did t)  (let [id (keyword (second p))]
+                (cond (= :hole t) e
+                      (= :id t)   (assoc e (keyword (second p)) q)
+                      (= :did t)  (let [id (keyword (second p))]
                                     (if (not= :_ id)
                                       (assoc e id q)))
                       (= :varg t) (merge e (kdestructure (next p) q))

@@ -97,20 +97,27 @@ qiss$ rlwrap lein run
 §)a*3+a:6
 54
 §)/ assignment supports clojure-esque destructuring
-§)(a;b):1 2 
+§)(a;b):1 2 / (;) is general vector literal syntax
 §)a
 1
 §)b
 2 
+§)(a;b):5 6 7 8 / when destructuring, extra content is ignored
+§)b
+6
+§)(;b):9 10 / holes are skipped
+§)a
+5
+§)b
+10
 §)(a b):3 4 / ; can be replaced with space when destructuring vectors
 §)a
 3
-§)(a b):5 6 7 8 / when destructuring, extra content is ignored
-§)b
-6
-§)(_ b):`a`b / when destructuring, _ means don't create a binding
+§)(_ b):`a`b / when using spaces, use _ to skip
 §)a
-5
+3
+§)b
+:b
 §) 
 §)/ lambdas are in curly braces
 §)K:{[a;b]a} / the K combinator takes 2 args and returns its 1st

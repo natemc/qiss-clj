@@ -13,11 +13,11 @@ ladverbed  = ladvin | !ladvin ladvpre |(!ladvin|ladvpre) ladvcore
 <ladvpre>  = ladvcore ws? lrhs
 aggs       = aggsx
 <aggsx>    = lexprx (<','> lexprx)*
-alhs       = dalhs | did | ktalhs | talhs | valhs
+alhs       = dalhs | id | ktalhs | talhs | valhs
 dalhs      = <'('> ws? arg ws? <'!'> ws? arg ws? <')'>
 <ktalhs>   = ktarg
 <talhs>    = targ
-valhs      = !dalhs <'('> ws? arg (ws? <';'> ws? arg)* ws? <')'>
+valhs      = !dalhs <'('> ws? (arg|hole) (ws? <';'> ws? (arg|hole))* ws? <')'>
            | <'('> ws? did (ws did)+ ws? <')'>
 assign     = alhs ws? <':'> ws? rhs
 lassign    = lid ws? <':'> ws? lrhs
@@ -75,9 +75,9 @@ ktarg      = <'('> ws? <'['> ws? targs <']'> ws? targs ws? <')'>
 targ       = <'('> ws? <'['> ws? <']'> ws? targsx ws? <')'>
 targs      = targsx
 <targsx>   = did ((ws? <';'> ws? did)* | (ws did)*)
-varg       = <'('> ws? arg (ws? <';'> ws? arg)* <')'>
+varg       = <'('> ws? (arg|hole) (ws? <';'> ws? (arg|hole))* <')'>
            | did (ws did)+
-formals    = <'['> ws? (arg (ws? <';'> ws? arg)* ws?)? <']'>
+formals    = <'['> ws? ((arg|hole) (ws? <';'> ws? (arg|hole))* ws?)? <']'>
 from       = <'from'> ws? lexprx  (* lexprx? *)
 hole       = ws?
 id         = idx
