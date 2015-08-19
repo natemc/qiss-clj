@@ -108,6 +108,9 @@ qiss$ rlwrap lein run
 §)(a b):5 6 7 8 / when destructuring, extra content is ignored
 §)b
 6
+§)(_ b):`a`b / when destructuring, _ means don't create a binding
+§)a
+5
 §) 
 §)/ lambdas are in curly braces
 §)K:{[a;b]a} / the K combinator takes 2 args and returns its 1st
