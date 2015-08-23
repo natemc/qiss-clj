@@ -42,6 +42,11 @@
   "The first index in x where i appears, or (count x) if i does not
   exist in x"
   [x i] (let [j (.indexOf x i)] (if (< j 0) (count x) j)))
+(defn last-index-of
+  "The last index in x where i appears, or (count x) if i does not
+  exist in x"
+  [x i] (let [j (index-of (vec (reverse x)) i)]
+          (if (= (count x) j) j (- (count x) (+ 1 j)))))
 (defn string [x]
   "make a string from one of string, keyword, vector<char>"
   (cond (string? x)  x
@@ -1414,11 +1419,92 @@
 
 (defn eval-no-env [x] (last (kresolve x {} (second (parse x)))))
 
+;; Consider
+;; a)
+;;     x+
+;;     y
+;; b)
+;;     x
+;;     +y
+;; c)
+;;     x
+;;     +
+;;     y
+;; should all be the same as x+y?
+;; a) looks like projection on line 1
+;; b) looks like monadic on line 2
+;; c) looks like function reference on line 2
+;; We could require that multiline expressions must either
+;;   1) be a special form [i.e., if, select, etc], or
+;;   2) use parens
+;; Since multiline expressions should be rare, this might be a good idea.
+;; The downside is that most (all?) grammar components need two versions:
+;; one that allows newlines in the whitespace, and one that doesn't.
+;; Indentation is another option:
+;; a)
+;;    x+
+;;     y
+;; is one expr where as the previous example a) is two exprs.
+
+;; Python does *both* by separating lexing from parsing. So, maybe the
+;; right path is to do some preprocessing that handles indentation,
+;; special forms, and parens before handing chunks of expressions off
+;; to the parser.  This also means the preprocessor needs to be smart
+;; about strings, too.
+
+;; Perhaps we can do it the Python way by inserting special character
+;; sequences to indicate indent and dedent.  Then we can let instaparse
+;; do the hard work.
+
+(defn expand [x]
+  "Expand tabs in the string x (like unix expand)"
+  (reduce (fn [s c]
+            (if (not= \tab c)
+              (str s c)
+              (apply str s (repeat (- 8 (mod (count s) 8)) \space))))
+          ""
+          x))
+(defn count-leading-spaces [x]
+  "The number of leading spaces in the string x"
+  (if-let [m (re-matches #"( +).*" x)]
+    (count (second m))
+    0))
+(defn add-indent-tokens [pl]
+    (first
+     (reduce (fn [[r s] n] ;; result indent-stack linenum
+               (let [ln (get pl n)
+                     i  (count-leading-spaces ln)
+                     t  (last s)]
+                 (cond (= t i) [(conj r ln) s]
+                       (< t i) [(conj r (str "!!!" ln)) (conj s i)]
+                       :else   (let [j (last-index-of s i)]
+                                 (if (= (count s) j)
+                                   (err "bad indent on line" n ":" ln)
+                                   [(conj r (apply str
+                                                   (repeat (- (count s) (+ 1 j))
+                                                           ":::")
+                                                   ln))
+                                    (subvec s j)])))))
+             [[] [0]]
+             (range (count pl)))))
 (defn kload [e x]
-  (let [f (slurp x)]
+  ;; whatever we do, preserve original line numbers
+  (let [f       (slurp x)
+        pl      (mapv expand (str/split-lines (slurp x))) ;; physical lines
+        indents (mapv count-leading-spaces pl)
+        text    (mapv subs pl indents)] ;; prolly useless
     (reduce #(let [[ne r] (resolve-full-expr f %1 %2)] ne)
             e
             (rest (parse f :start :exprs)))))
+;;(defn kload [e x]
+    ;; (reduce (fn [e [n i]]
+    ;;           (let [t (get text n)]
+    ;;             (if (or (= 0 (count t)) (= \/ (first t)))
+    ;;               e
+    ;;               (let [[ne r] (resolve-full-expr t e (parse t :start :exprs))]
+    ;;                 ne))))
+    ;;         e
+    ;;         (mapv vector (til (count pl)) indents))))
 
 (defn lj [x y]
   (cond (not (keyed-table? y)) (err "rhs of lj must be a keyed table")
