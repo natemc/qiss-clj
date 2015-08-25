@@ -1,5 +1,4 @@
-expr       = exprx
-lexpr      = lexprx   (* limited expression: , is not join *)
+exprs      = exprsx
 
 actuals    = <'[]'> | !'[]' <'['> exprsx <']'>
 adverb     = '/' | '\\' | '/:' | '\\:' | '\'' | '\':'
@@ -31,7 +30,7 @@ char       = <'"'> #'\\.|[^\"]' <'"'>
 chars      = <'"'> #'(\\.|[^\"])(\\.|[^\"])+' <'"'>
 col        = lid ws? <':'> ws? rhs
 cols       = col ws? (<';'> ws? col)*
-comment    = ws '/' #'.*'
+comment    = ws #'/.*'
 dcols      = id (ws? <','> ws? id)*
 <delete>   = <'delete'> ws (delrows|delcols)
 delcols    = dcols ws from
@@ -50,20 +49,21 @@ ldot       = dotcore
 dyop       = lhs ws? op ws? rhs
 ldyop      = llhs ws? lop ws? lrhs
 empty      = '()'
+expr       = exprx
 <exprx>    = (delete|select|update)
            / dy
            / nsvl
            / (call|juxt)
            / svl
-           / <comment>
+(*           / <comment> *)
+lexpr      = lexprx   (* limited expression: , is not join *)
 <lexprx>   = (delete|select|update)
            / ldy
            / lnsvl
            / (call|ljuxt)
            / svl
-           / <comment>
-exprs      = exprsx
-<exprsx>   = (exprx|hole) (ws? <';'> ws? (exprx|hole))*
+(*           / <comment> *)
+<exprsx>   = (exprx|hole) (ws? <';'> ws? (exprx|hole))* ws?
 float      = !floatsx #'-?([0-9]*\.[0-9]+|[0-9]+\.[0-9]*)([eE][-+]?[0-9]+)?'
 floats     = &(floatx | (longx ws)+ floatx) floatsx
 <floatsx>  = #'-?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?(([ \n\r\t]+)+-?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?)+'
@@ -130,6 +130,6 @@ verb       = adverbed | at | call | dot | id | lambda | op | parexpr
 lverb      = ladverbed | lat | call | ldot | lid | lambda | lop | parexpr
 where      = <'where'> ws lexprx (ws? <','> ws? lexprx)*
 <st>       = <#'[ \t]+'>
-<ws>       = <#'[ \n\r\t]+'>
+<ws>       = <#'[ \n\r\t]+(/.*)?'>
 indent     = <'!!!'>
 dedent     = <':::'>
