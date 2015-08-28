@@ -35,14 +35,20 @@ dcols      = id (ws? <','> ws? id)*
 <delete>   = <'delete'> ws (delrows|delcols)
 delcols    = dcols ws from
 delrows    = from ws? where?
-dot        = dotcore
+dotn       = dotnx
+<dotnx>    = id <'.'> (id|dotnx)
+ldotn      = ldotnx
+ldotnx     = lid <'.'> (lid|ldotnx)
+dot        = !dotn (
+             dotcore
            | dotcore ws? rhs
            | !(floatx|floatsx) elhs ws? dotcore ws? rhs
-           | &floatsx lhs ws dotcore ws? rhs
-ldot       = dotcore
+           | &floatsx lhs ws dotcore ws? rhs)
+ldot       = !ldotn (
+             dotcore
            | dotcore ws? lrhs
            | (!floatx|floatsx) lelhs ws? dotcore ws? lrhs
-           | &floatsx llhs ws dotcore ws? lrhs
+           | &floatsx llhs ws dotcore ws? lrhs)
 <dotcore>  = !(floatx|floatsx) <'.'>
 <dy>       = at | dot | dyop
 <ldy>      = lat | ldot | ldyop
@@ -52,6 +58,7 @@ empty      = '()'
 expr       = exprx
 <exprx>    = (delete|select|update)
            / dy
+	   / dotn
            / nsvl
            / (call|juxt)
            / svl
@@ -59,6 +66,7 @@ expr       = exprx
 lexpr      = lexprx   (* limited expression: , is not join *)
 <lexprx>   = (delete|select|update)
            / ldy
+	   / ldotn
            / lnsvl
            / (call|ljuxt)
            / svl
@@ -66,7 +74,7 @@ lexpr      = lexprx   (* limited expression: , is not join *)
 (* It can't be this simple.  Python doesn't have juxt *)
 <exprsx>   = (exprx|hole) (ws? <';'> ws? (exprx|hole))* ws?
 	   (* | indent exprsx dedent *)
-<file>     = <#'/.*\n'>? exprsx
+file       = <#'/.*\n'>? exprs
 float      = !floatsx #'-?([0-9]*\.[0-9]+|[0-9]+\.[0-9]*)([eE][-+]?[0-9]+)?'
 floats     = &(floatx | (longx ws)+ floatx) floatsx
 <floatsx>  = #'-?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?(([ \n\r\t]+)+-?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?)+'
@@ -101,8 +109,8 @@ lhs        = lhsx
 llhs       = llhsx
 elhs       = lhsx|op (* at and dot support op on lhs *)
 lelhs      = llhsx|lop
-<lhsx>     = svl / (call | id | lit | parexpr)
-<llhsx>    = call | lid | !svl lit | parexpr | svl
+<lhsx>     = svl / (call | dotn | id | lit | parexpr)
+<llhsx>    = call | ldotn | lid | !svl lit | parexpr | svl
 <lit>      = bool | char | empty | float | lambda | long | symbol | table | vec
 long       = !(bool|bools|longsx) longx
 longs      = longsx

@@ -42,6 +42,11 @@
   "The first index in x where i appears, or (count x) if i does not
   exist in x"
   [x i] (let [j (.indexOf x i)] (if (< j 0) (count x) j)))
+(defn knew
+  "create instance of java class x using params in y"
+  ([x] (eval (read-string (str "(new " (name x) ")"))))
+  ([x y] (eval (read-string (str "(new " (name x) " " (str/join " " y) ")")))))
+
 (defn last-index-of
   "The last index in x where i appears, or (count x) if i does not
   exist in x"
@@ -66,6 +71,7 @@
               :valhs     (fn [& x] (vec (cons :varg x)))
               :lat       (fn [& x] (vec (cons :at x)))
               :ldot      (fn [& x] (vec (cons :dot x)))
+              :ldotn     (fn [& x] (vec (cons :dotn x)))
               :ldyop     (fn [& x] (vec (cons :dyop x)))
               :lexpr     (fn [& x] (vec (cons :expr x)))
               :lid       (fn [& x] (vec (cons :id x)))
@@ -1084,6 +1090,18 @@
       (err "nyi: partially bound . from lhs")
       [e (ops :dot)])))
 
+(defn resolve-dotn [tu e x]
+  (let [o (kresolve tu e (first x))]
+    (println "hmm")
+    (if (null! (dict? x))
+      (err "nyi: dot notation for dicts")
+      (fn [& a]
+        (println "hey")
+        (let [g (eval
+                 (read-string
+                  (str "(fn [p] (." (second (second x)) " " p "))")))]
+          (g o))))))
+
 (defn resolve-call [tu e x]
   "Resolve the f[...] expr specified by x"
   (let [[e4 r] (reduce (fn [[e2 r] a]
@@ -1286,6 +1304,7 @@
                   (= :expr t)          (second x)
                   (= :parexpr t)       (second x)
                   (= :raw t)           (second x)
+                  (= :dotn t)          (next x)
                   (vector? (second x)) (map-from-tuples (next x))
                   (= 2 (count x))      (second x)
                   :else                (next x))
@@ -1302,6 +1321,7 @@
           (= t :delcols ) (resolve-delcols tu e v)
           (= t :delrows ) (resolve-delrows tu e v)
           (= t :dot     ) (resolve-dot tu e v)
+          (= t :dotn    ) (resolve-dotn tu e v)
           (= t :dyop    ) (resolve-dyop tu e v)
           (= t :empty   ) [e []]
           (= t :expr    ) (resolve-full-expr tu e v)
@@ -1496,7 +1516,7 @@
         text    (mapv subs pl indents)] ;; prolly useless
     (reduce #(let [[ne r] (resolve-full-expr f %1 %2)] ne)
             e
-            (rest (parse f :start :file)))))
+            (rest (second (parse f :start :file))))))
 ;;(defn kload [e x]
     ;; (reduce (fn [e [n i]]
     ;;           (let [t (get text n)]
@@ -1539,6 +1559,7 @@
                      :last   {:f klast :rank [1]}
                      :lj     {:f lj :rank [2]}
                      :mod    {:f kmod :rank [2]}
+                     :new    {:f knew :rank [1 2]}
                      :rcsv   {:f rcsv :rank [2]}
                      :rcsvh  {:f rcsvh :rank [2]}
                      :read   {:f read-lines :rank [1]}
