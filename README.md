@@ -387,6 +387,7 @@ qiss$
 Unbounded!  There is much work to do.  These are some of the most
 pressing issues:
 
+* ,' on tables
 * fix grammar so loading/running scripts isn't so fragile
 * test cases
 * nulls: will nil do?
@@ -408,6 +409,7 @@ things.
 * better console output
 * vector conditional form of ?
 * more ascii file I/O options
+* be smart about indentation to reduce the need for ;
 * learn APL and J to steal ideas
 * promote longs to doubles for =
 * fuzzy comparison of doubles

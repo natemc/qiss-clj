@@ -63,7 +63,10 @@ lexpr      = lexprx   (* limited expression: , is not join *)
            / (call|ljuxt)
            / svl
 (*           / <comment> *)
+(* It can't be this simple.  Python doesn't have juxt *)
 <exprsx>   = (exprx|hole) (ws? <';'> ws? (exprx|hole))* ws?
+	   (* | indent exprsx dedent *)
+<file>     = <#'/.*\n'>? exprsx
 float      = !floatsx #'-?([0-9]*\.[0-9]+|[0-9]+\.[0-9]*)([eE][-+]?[0-9]+)?'
 floats     = &(floatx | (longx ws)+ floatx) floatsx
 <floatsx>  = #'-?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?(([ \n\r\t]+)+-?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?)+'
@@ -93,7 +96,7 @@ ljuxt      = !(advin|delete|dy|floatsx|select|update)
            | &(floatsx(ws|'{'|'(')) llhs ws? !dot lrhs
 keycols    = <'['> ws? col? ws? (<';'> ws? col)* ws? <']'>
 keyword    = 'by'|'delete'|'from'|'select'|'update'|'where'
-lambda     = <'{'> ws? formals? ws? (exprs|exprs? indent exprs+ dedent) <'}'>
+lambda     = <'{'> ws? formals? ws? exprs <'}'>
 lhs        = lhsx
 llhs       = llhsx
 elhs       = lhsx|op (* at and dot support op on lhs *)
@@ -130,6 +133,6 @@ verb       = adverbed | at | call | dot | id | lambda | op | parexpr
 lverb      = ladverbed | lat | call | ldot | lid | lambda | lop | parexpr
 where      = <'where'> ws lexprx (ws? <','> ws? lexprx)*
 <st>       = <#'[ \t]+'>
-<ws>       = <#'[ \n\r\t]+(/.*)?'>
+<ws>       = <#'([ \n\r\t]+(/.*)?)+'>
 indent     = <'!!!'>
 dedent     = <':::'>

@@ -1469,24 +1469,25 @@
   (if-let [m (re-matches #"( +).*" x)]
     (count (second m))
     0))
+(defn dedents [n]
+  (apply str (repeat n ":::")))
 (defn add-indent-tokens [pl]
-    (first
-     (reduce (fn [[r s] n] ;; result indent-stack linenum
-               (let [ln (get pl n)
-                     i  (count-leading-spaces ln)
-                     t  (last s)]
-                 (cond (= t i) [(conj r ln) s]
-                       (< t i) [(conj r (str "!!!" ln)) (conj s i)]
-                       :else   (let [j (last-index-of s i)]
-                                 (if (= (count s) j)
-                                   (err "bad indent on line" n ":" ln)
-                                   [(conj r (apply str
-                                                   (repeat (- (count s) (+ 1 j))
-                                                           ":::")
-                                                   ln))
-                                    (subvec s j)])))))
-             [[] [0]]
-             (range (count pl)))))
+  (first
+   (reduce
+    (fn [[r s] n] ;; result indent-stack linenum
+      (let [ln (get pl n)
+            i  (count-leading-spaces ln)
+            t  (last (null! s))]
+        (cond (= t i) [(conj r (str \; ln)) s]
+              (< t i) [(conj r (str "!!!" ln)) (conj s i)]
+              :else   (let [j (last-index-of s i)
+                            k (- (count s) (+ 1 j))]
+                        (if (< k 0)
+                          (err "bad indent on line" (+ 1 n) ":" ln)
+                          [(conj r (apply str \; (dedents k) ln))
+                           (subvec s 0 k)])))))
+    [[] [0]]
+    (range (count pl)))))
 (defn kload [e x]
   ;; whatever we do, preserve original line numbers
   (let [f       (slurp x)
@@ -1495,7 +1496,7 @@
         text    (mapv subs pl indents)] ;; prolly useless
     (reduce #(let [[ne r] (resolve-full-expr f %1 %2)] ne)
             e
-            (rest (parse f :start :exprs)))))
+            (rest (parse f :start :file)))))
 ;;(defn kload [e x]
     ;; (reduce (fn [e [n i]]
     ;;           (let [t (get text n)]
