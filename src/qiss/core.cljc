@@ -854,16 +854,16 @@
 (defn map-from-tuples [x]
   "Like into but handles tuples not just pairs, because sometimes
   parse gives you back tuples."
-  (reduce #(let [p (first %2)
-                 q (next %2)]
-             (assoc %1 p (if (or (not= 1 (count q))
-                                 (some #{(first %2)}
-                                       [:actuals :aggs :by :dcols
-                                        :exprs :formals :where]))
-                           q
-                           (first q))))
-          {}
-          x))
+  ;; vpn means vector-preserving (ast) nodes
+  (let [vpn [:actuals :aggs :by :dcols :exprs :formals :where]]
+    (reduce (fn [m t]
+              (let [[p & q] t]
+                (assoc m p (if (or (not= 1 (count q))
+                                   (some #{p} vpn))
+                             q
+                             (first q)))))
+            {}
+            x)))
 (defn strmax [x y]
   "The maximum of two strings"
   (cond (nil? x)            y
@@ -1099,7 +1099,7 @@
         (println "hey")
         (let [g (eval
                  (read-string
-                  (str "(fn [p] (." (second (second x)) " " p "))")))]
+                  (str "(fn [p] (." (second (second x)) " p))")))]
           (g o))))))
 
 (defn resolve-call [tu e x]
