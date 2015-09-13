@@ -193,7 +193,7 @@
   (let [h (fn self [r j]
             (if (coll? j)
               (reduce self r j)
-              (let [[ne rr] (invoke e f [(r j)])]
+              (let [[_ rr] (invoke e f [(r j)])]
                 (assoc! r j rr))))]
     (persistent! (h (transient x) i))))
 (defn at-xform-update-table [t i c] ;; table index content
@@ -210,7 +210,7 @@
   (let [h (fn self [r j]
             (if (coll? j)
               (reduce self r j)
-              (let [[ne rr] (invoke e f [(index r j)])]
+              (let [[_ rr] (invoke e f [(index r j)])]
                 (at-xform-update-table r j rr))))]
     (h x i)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -220,7 +220,7 @@
               (reduce self r (if (coll? b)
                                (map vector j b)
                                (map #(vector % b) j)))
-              (let [[ne rr] (invoke e f [(r j) b])]
+              (let [[_ rr] (invoke e f [(r j) b])]
                 (assoc! r j rr))))]
     (persistent! (h (transient x) [i y]))))
 (defn at-xform-dyadic-table [e x i f y]
@@ -229,7 +229,7 @@
               (reduce self r (if (coll? b)
                                (map vector j b)
                                (map #(vector % b) j)))
-              (let [[ne rr] (invoke e f [(index r j) b])]
+              (let [[_ rr] (invoke e f [(index r j) b])]
                 (at-xform-update-table r j rr))))]
     (h x [i y])))
 (defn at-xform
@@ -267,7 +267,7 @@
          :else             (err "internal error at-xform" x i))))
 (defn at
   "type"
-  ([e x] (condp #(= (type %1) %2) x ; type
+  ([_ x] (condp #(= (type %1) %2) x ; type
            java.lang.Boolean -1
            java.lang.Long -7
            java.lang.Double -9
@@ -568,7 +568,7 @@
                                          (conj x y))
                (vector? y)              (vec (cons x y))
                (dict? x)                (if (dict? y)
-                                          ((atomize (fn [x y] y)) x y)
+                                          ((atomize (fn [_ y] y)) x y)
                                           (err "can't join" x y))
                (or (coll? x) (coll? y)) (err "can't join" x y)
                :else       [x y])))
@@ -845,10 +845,10 @@
           })
 (def adverbs {:' each
               (keyword "\\:") each-left
-              (keyword "':") each-prior
-              (keyword "/:") each-right
-              :/ over
-              (keyword "\\") scan})
+              (keyword "':")  each-prior
+              (keyword "/:")  each-right
+              (keyword "/")   over
+              (keyword "\\")  scan})
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn map-from-tuples [x]
@@ -928,7 +928,7 @@
                       (if (coll? (lambda-formals f))
                         (zipmap (lambda-formals f) x)
                         ((lambda-formals f) x)))] ;; formals is destructuring func
-        (last (reduce (fn [[e3 r] p] (resolve-full-expr tu e3 p))
+        (last (reduce (fn [[e3 _] p] (resolve-full-expr tu e3 p))
                       [e2 nil]
                       (lambda-body f)))))))
 (defn index-table [t i]
@@ -1109,7 +1109,7 @@
                            [e3 (cons rr r)]))
                        [e []]
                        (reverse (:actuals x))) ;; right-to-left!
-        [e5 f] (kresolve tu e4 (:target x))]
+        [_ f] (kresolve tu e4 (:target x))]
       (invoke e4 f r)))
 
 (defn resolve-dyop [tu e x]
@@ -1205,7 +1205,7 @@
 
 (defn resolve-delcols [tu e x]
   "Resolve the delete (columns) expr specified by x"
-  (let [[e2 t] (kresolve tu e (:from x))
+  (let [[_ t] (kresolve tu e (:from x))
         t2     (t-from-d (reduce remove-from-dict
                                  (d-from-t (unkey-table t))
                                  (map #(keyword (second %1)) (:dcols x))))]
@@ -1217,7 +1217,7 @@
   (let [[e2 t] (kresolve tu e (:from x))
         ut     (unkey-table t)
         e3     (merge e2 (zipmap (dict-key ut) (dict-val ut)))
-        [e4 i] (apply-constraints tu e3 ut (:where x))
+        [_ i] (apply-constraints tu e3 ut (:where x))
         u      (index-table ut (except (til-count ut) i))]
     [e (if (not (keyed-table? t)) u (key-table-by-colnames (keycols t) u))]))
 (defn resolve-select [tu e x]
@@ -1239,7 +1239,7 @@
                 v (make-table c (mapv #(index % (dict-val j)) (index ut c)))]
             [e (make-keyed-table k v)])))
       (if-let [a (:aggs x)]
-        (let [[e6 r] (compute-aggs tu e4 ut i a)
+        (let [[_ r] (compute-aggs tu e4 ut i a)
               n      (apply max (mapv kcount (dict-val r)))
               v      (mapv #(if (= 1 (kcount %)) (ktake n %) %) (dict-val r))]
           [e (make-table (dict-key r) v)])
@@ -1514,7 +1514,7 @@
         pl      (mapv expand (str/split-lines (slurp x))) ;; physical lines
         indents (mapv count-leading-spaces pl)
         text    (mapv subs pl indents)] ;; prolly useless
-    (reduce #(let [[ne r] (resolve-full-expr f %1 %2)] ne)
+    (reduce #(let [[ne _] (resolve-full-expr f %1 %2)] ne)
             e
             (rest (second (parse f :start :file))))))
 ;;(defn kload [e x]
