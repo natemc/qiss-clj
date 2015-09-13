@@ -12,5 +12,7 @@ pom.xml.asc
 /.nrepl-port
 *.swp
 /.repl-0.0-3308
+/out
+/repl
 /clojurescript/node_modules
 /clojurescript/out

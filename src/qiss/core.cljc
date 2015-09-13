@@ -1,17 +1,22 @@
 (ns qiss.core
   #?(:cljs (:require [instaparse.core :as insta]
+             [instaparse.viz :as instav]
              [testdouble.cljs.csv :as csv]
-             ; [clojure.java.io :as io]
-             [cljs.nodejs :as node]
-             [clojure.string :as str]))
+             [clojure.string :as str]
+             [goog.string :as gstring]
+             [goog.string.format]
+             [clojure.browser.repl :as browserrepl]))
+
   #?(:cljs (:use-macros [purnam.core :only [obj arr ? ?> ! !> f.n def.n def* def*n]]
-             [purnam.test :only [describe is is-not it fact facts]]))
+             [purnam.test :only [describe is is-not it fact facts]]
+             [qiss.core-macros :only [promote-bools bool?]]))
 
   #?@(:clj [(:require [instaparse.core :as insta]
                       [clojure-csv.core :as csv]
                       [clojure.java.io :as io]
                       [clojure.stacktrace :as st]           ;; not in use
                       [clojure.string :as str]
+              ; this creates a cyclical depedency?  [qiss.core-macros :refer [promote-bools bool?]]
                       [midje.sweet :refer :all])
             (:gen-class)]))
 
@@ -41,20 +46,22 @@
   (instance? java.lang.Boolean x))
 (declare lose-env)
 (defn err "throw x" [& x]
-  (throw (Exception. (str/join ["'" (str/join " " (map lose-env x))]))))
+  (throw #?(:clj (Exception. (str/join ["'" (str/join " " (map lose-env x))]))
+            :cljs (js/Error. (str/join ["'" (str/join " " (map lose-env x))])))))
 (defn exit
   "exit this process"
   ([] (exit 0))
-  ([x] #?(:clj (System/exit x)
-          :cljs node/process x) ))
+  ([x] #?(:clj (System/exit x))))
 (defn index-of
   "The first index in x where i appears, or (count x) if i does not
   exist in x"
   [x i] (let [j (.indexOf x i)] (if (< j 0) (count x) j)))
+
+;; there's not runtime eval in clojurescript
 (defn knew
   "create instance of java class x using params in y"
-  ([x] (eval (read-string (str "(new " (name x) ")"))))
-  ([x y] (eval (read-string (str "(new " (name x) " " (str/join " " y) ")")))))
+  ([x] #?(:clj (eval (read-string (str "(new " (name x) ")")))))
+  ([x y] #?(:clj (eval (read-string (str "(new " (name x) " " (str/join " " y) ")"))))))
 
 (defn last-index-of
   "The last index in x where i appears, or (count x) if i does not
@@ -67,9 +74,9 @@
         (keyword? x) (name x)
         :else        (str/join x))) ;; vector of char
 (defn read-lines "read file x as a vector of strings, one string per line" [x]
-  (with-open [r (io/reader (string x))] (vec (line-seq r))))
+  #?(:clj (with-open [r (io/reader (string x))] (vec (line-seq r)))))
 
-(def grammar (clojure.java.io/resource "qiss/grammar"))
+(def grammar #?(:clj (clojure.java.io/resource "qiss/grammar")))
 ;; Used by the parse and parse functions to replace all limited
 ;; non-terminals with their regular (not limited) versions, as the
 ;; limits apply only for parsing and are not relevant to evaluation.
@@ -95,7 +102,7 @@
 (def parser  (insta/parser grammar))
 (def parse   (comp (partial insta/transform xform) parser))
 (def parses  #(mapv (partial insta/transform xform) (insta/parses parser %)))
-(def vis     (comp insta/visualize parse))
+(def vis     #?(:clj (comp insta/visualize parse)))
 
 (defn bool-to-long "convert x, if boolean, to long" [x]
   (cond (coll? x) (if (= 0 (count x)) [] (mapv bool-to-long x))
@@ -413,19 +420,21 @@
           (table? y)  (make-table (cols y) (mapv #(self x %) (dict-val y)))
           :else       (f x y))))
 
+
 ;; bf bool function, i.e., function to use with two bool args
 ;; of ordinary function, to use with any other args
 (defmacro promote-bools [bf of x y]
   "If x and y are both bool, apply bf; otherwise apply of"
   `(let [f# (fn [a# b#]
-             (if (bool? a#)
-               (if (bool? b#)
-                 (~bf a# b#)
-                 (~of (if a# 1 0) b#))
-               (if (bool? b#)
-                 (~of a# (if b# 1 0))
-                 (~of a# b#))))]
-    ((atomize f#) ~x ~y)))
+              (if (bool? a#)
+                (if (bool? b#)
+                  (~bf a# b#)
+                  (~of (if a# 1 0) b#))
+                (if (bool? b#)
+                  (~of a# (if b# 1 0))
+                  (~of a# b#))))]
+     ((atomize f#) ~x ~y)))
+
 
 (defn amp
   "&x (where)      and    x&y (atomic min)"
@@ -820,19 +829,19 @@
         :else (err "nyi: parse type" (str x))))
 (defn rcsv [c f] ;; col types and file name
   "Read csv file f with column types specified by c per the parse-data function"
-  (let [d (csv/parse-csv (slurp (string f)))] ;; assumes header line
-    (mapv parse-data (string c) (flip (vec d)))))
+  #?(:clj (let [d (csv/parse-csv (slurp (string f)))] ;; assumes header line
+            (mapv parse-data (string c) (flip (vec d))))))
 (defn rcsvh [c f] ;; col types and file name
   "Read csv file f, whose first line is a header, with column types
   specified by c per the parse-data function"
-  (let [[h & d] (csv/parse-csv (slurp (string f)))] ;; assumes header line
-    (make-table (mapv keyword h) (mapv parse-data (string c) (flip (vec d))))))
+ #?(:clj (let [[h & d] (csv/parse-csv (slurp (string f)))] ;; assumes header line
+           (make-table (mapv keyword h) (mapv parse-data (string c) (flip (vec d)))))))
 (defn wcsv [f t] ;; output file and table
   "Write to csv file f the content of table t"
-  (let [make-string (fn [x] (mapv #(if (keyword? %) (name %) (str %)) x))
-        d (cons (mapv name (cols t)) (map make-string (flip (dict-val t))))]
-    (with-open [w (io/writer (string f))]
-      (.write w (csv/write-csv d)))))
+  #?(:clj (let [make-string (fn [x] (mapv #(if (keyword? %) (name %) (str %)) x))
+                d (cons (mapv name (cols t)) (map make-string (flip (dict-val t))))]
+            (with-open [w (io/writer (string f))]
+              (.write w (csv/write-csv d))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (def ops {
           (keyword "~") {:f tilde  :text "~" :rank [1 2]}
@@ -1110,10 +1119,10 @@
       (err "nyi: dot notation for dicts")
       (fn [& a]
         (println "hey")
-        (let [g (eval
-                 (read-string
-                  (str "(fn [p] (." (second (second x)) " p))")))]
-          (g o))))))
+        #?(:clj (let [g (eval
+                          (read-string
+                            (str "(fn [p] (." (second (second x)) " p))")))]
+                  (g o)))))))
 
 (defn resolve-call [tu e x]
   "Resolve the f[...] expr specified by x"
@@ -1346,7 +1355,8 @@
                             (err v "not found in scope"))
           (= t :juxt    ) (resolve-juxt tu e v)
           (= t :lambda  ) (resolve-lambda tu
-                                          (apply (partial subs tu) (insta/span x))
+                                          (apply (partial subs tu) #?(:clj (insta/span x)
+                                                                      :cljs (instav/span x)))
                                           e
                                           v)
           (= t :long    ) [e (parse-long v)]
@@ -1381,7 +1391,8 @@
   (let [ks (mapv stringify (dict-key x))
         kw (apply max (map count ks))
         f  (str "%" kw "s| %s")]
-    (str/join "\n" (map #(format f %1 %2) ks (mapv stringify (dict-val x))))))
+    (str/join "\n" (map #?(:clj #(format f %1 %2)
+                           :cljs #(gstring/format f %1 %2))  ks (mapv stringify (dict-val x))))))
 (defn table-as-strings [x]
   (let [h (mapv name (cols x)) ; col header
         n (min (:rows viewport) (count (first (dict-val x)))) ; TODO: fix
@@ -1389,7 +1400,8 @@
         s (mapv #(mapv stringify %) c)
         w (mapv #(apply max (cons (count %1) (map count %2))) h s)
         f (mapv #(str "%-" % "s") w)
-        fmt-row (fn [& r] (str/join " " (map format f r)))]
+        fmt-row (fn [& r] (str/join " " #?(:clj (map format f r)
+                                           :cljs (map gstring/format f r))))] ; TODO: gstring format differs
     (vec (cons (apply fmt-row h)
                (cons (str/join (replicate (+ -1 (count w) (reduce + w)) "-"))
                      (apply (partial map fmt-row) s))))))
@@ -1420,7 +1432,8 @@
         kw (apply max (map count ks))
         f  (str "%" kw "s| %s")]
     (doseq [[k v] (mapv vector ks (take n (map stringify (dict-val x))))]
-      (println (substr (format f k v) 0 w)))))
+      (println (substr #?(:clj (format f k v)
+                          :cljs (gstring/format f k v))  0 w)))))
 
 (defn show-lambda [x]
   (println (lambda-text x)))
@@ -1523,13 +1536,13 @@
     (range (count pl)))))
 (defn kload [e x]
   ;; whatever we do, preserve original line numbers
-  (let [f       (slurp x)
-        pl      (mapv expand (str/split-lines (slurp x))) ;; physical lines
-        indents (mapv count-leading-spaces pl)
-        text    (mapv subs pl indents)] ;; prolly useless
-    (reduce #(let [[ne r] (resolve-full-expr f %1 %2)] ne)
-            e
-            (rest (second (parse f :start :file))))))
+  #?(:clj (let [f       (slurp x)
+                pl      (mapv expand (str/split-lines (slurp x))) ;; physical lines
+                indents (mapv count-leading-spaces pl)
+                text    (mapv subs pl indents)] ;; prolly useless
+            (reduce #(let [[ne r] (resolve-full-expr f %1 %2)] ne)
+                    e
+                    (rest (second (parse f :start :file)))))))
 ;;(defn kload [e x]
     ;; (reduce (fn [e [n i]]
     ;;           (let [t (get text n)]
@@ -1584,28 +1597,29 @@
                      :xdesc  {:f xdesc :rank [2]}}
                     "src/qiss/qiss.qiss"))
 
+
 (defn repl
   ([] (repl builtin))
-  ([e] ;; env
-   (println "Welcome to qiss.  qiss is short and simple.")
-   (loop [e e]
-     (do ;; (print "e ") (println e)
-       ;;        (print "\u00b3)") (flush))
-       (print "\u00a7)") (flush))
-     (if-let [line (read-line)]
-       (if (or (empty? line) (= \/ (first line))) ; skip comments
-         (recur e)
-         (if (and (not= "\\\\" line) (not= "exit" line))
-           (let [e2 (try
-                      (let [x (second (parse line))
-                            [ne r] (resolve-full-expr line e x)]
-                        (if (not= :assign (first x))
-                          (show r))
-                        ne)
-                      (catch Exception ex
-                        (println (.getMessage ex))
-                        e))]
-             (recur e2))))))))
+  #?(:clj ([e] ;; env
+           (println "Welcome to qiss.  qiss is short and simple.")
+           (loop [e e]
+             (do ;; (print "e ") (println e)
+               ;;        (print "\u00b3)") (flush))
+               (print "\u00a7)") (flush))
+             (if-let [line (read-line)]
+               (if (or (empty? line) (= \/ (first line))) ; skip comments
+                 (recur e)
+                 (if (and (not= "\\\\" line) (not= "exit" line))
+                   (let [e2 (try
+                              (let [x (second (parse line))
+                                    [ne r] (resolve-full-expr line e x)]
+                                (if (not= :assign (first x))
+                                  (show r))
+                                ne)
+                              (catch Exception ex
+                                (println (.getMessage ex))
+                                e))]
+                     (recur e2)))))))))
 
 (defn keval
   ([x] (keval builtin x))
@@ -1614,10 +1628,14 @@
   ([x] (show (keval x)))
   ([e x] (show (keval e x))))
 
+(defonce conn
+         #?(:cljs (browserrepl/connect "http://localhost:9000/repl")
+            :clj ()))
+
 (defn -main
-  "qiss repl"
-  [& args]
-  (repl builtin))
+          "qiss repl"
+          [& args]
+          #?(:clj (repl builtin)))
 
 (facts "about bools"
        (fact "bools eval to themselves"
@@ -1988,7 +2006,7 @@
              (keval "`a`b xasc([a:`c`b`a`a`b`c]b:3 10 3 20 30 2)") =>
              (keval "([a:`a`a`b`b`c`c];b:3 20 10 30 2 3)")))
 (facts "about parsing non-ambiguity"
-       (fact adverbed
+       (fact "adverbed"
              (count (parses "f/")) => 1
              (count (parses "f/1 2 3")) => 1
              (count (parses "0 f/1 2 3")) => 1
