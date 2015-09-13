@@ -1,11 +1,19 @@
 (ns qiss.core
-  (:require [instaparse.core :as insta])
-  (:require [clojure-csv.core :as csv])
-  (:require [clojure.java.io :as io])
-  (:require [clojure.stacktrace :as st])
-  (:require [clojure.string :as str])
-  (:require [midje.sweet :refer :all])
-  (:gen-class))
+  #?(:cljs (:require [instaparse.core :as insta]
+             [testdouble.cljs.csv :as csv]
+             ; [clojure.java.io :as io]
+             [cljs.nodejs :as node]
+             [clojure.string :as str]))
+  #?(:cljs (:use-macros [purnam.core :only [obj arr ? ?> ! !> f.n def.n def* def*n]]
+             [purnam.test :only [describe is is-not it fact facts]]))
+
+  #?@(:clj [(:require [instaparse.core :as insta]
+                      [clojure-csv.core :as csv]
+                      [clojure.java.io :as io]
+                      [clojure.stacktrace :as st]           ;; not in use
+                      [clojure.string :as str]
+                      [midje.sweet :refer :all])
+            (:gen-class)]))
 
 ;; Backlog
 ;;   @ 3&4 args on keyed tables
@@ -37,7 +45,8 @@
 (defn exit
   "exit this process"
   ([] (exit 0))
-  ([x] (System/exit x)))
+  ([x] #?(:clj (System/exit x)
+          :cljs node/process x) ))
 (defn index-of
   "The first index in x where i appears, or (count x) if i does not
   exist in x"
@@ -788,9 +797,13 @@
            (kremove x y))))
 
 (defn parse-double "parse the string x as a double" [x]
-  (if (coll? x) (mapv parse-double x) (Double/parseDouble x)))
+  (if (coll? x) (mapv parse-double x)
+                #?(:clj (Double/parseDouble x)
+                   :cljs (js/parseDouble x))))
 (defn parse-long "parse the string x as a long" [x]
-  (if (coll? x) (mapv parse-long x) (Long/parseLong x)))
+  (if (coll? x) (mapv parse-long x)
+                #?(:clj (Long/parseLong x)
+                   :cljs (js/parseLong x))))
 (defn parse-symbol "parse the string x as a symbol (clojure keyword)" [x]
   (if (coll? x) (mapv keyword x) (keyword x)))
 (defn parse-data
