@@ -43,7 +43,8 @@
 
 ;; functions that will differ btwn JVM and JS
 (defn bool? "is x a boolean?" [x]
-  (instance? java.lang.Boolean x))
+  #?(:clj  (instance? java.lang.Boolean x)
+     :cljs (= (type x) js/Boolean)))
 (declare lose-env)
 (defn err "throw x" [& x]
   (throw #?(:clj (Exception. (str/join ["'" (str/join " " (map lose-env x))]))
@@ -53,12 +54,16 @@
   ([] (exit 0))
   ([x] #?(:clj (System/exit x))))
 (defn index-of
-  "The first index in x where i appears, or (count x) if i does not
+  "The first index in x where e appears, or (count x) if e does not
   exist in x"
-  [x i] (let [j (.indexOf x i)] (if (< j 0) (count x) j)))
+  [x e] #?(:clj  (let [i (.indexOf x e)] (if (< i 0) (count x) i))
+           :cljs (loop [i 0 p x]
+                   (if (or (empty? p) (= e (first p)))
+                     i
+                     (recur (inc i) (rest p))))))
 
 ;; there's not runtime eval in clojurescript
-(defn knew
+(defn k-new
   "create instance of java class x using params in y"
   ([x] #?(:clj (eval (read-string (str "(new " (name x) ")")))))
   ([x y] #?(:clj (eval (read-string (str "(new " (name x) " " (str/join " " y) ")"))))))
@@ -1585,7 +1590,7 @@
                      :last   {:f klast :rank [1]}
                      :lj     {:f lj :rank [2]}
                      :mod    {:f kmod :rank [2]}
-                     :new    {:f knew :rank [1 2]}
+                     :new    {:f k-new :rank [1 2]}
                      :rcsv   {:f rcsv :rank [2]}
                      :rcsvh  {:f rcsvh :rank [2]}
                      :read   {:f read-lines :rank [1]}
