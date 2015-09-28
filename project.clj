@@ -7,7 +7,7 @@
                  [org.clojure/clojurescript "1.7.48"]
                  [clojure-csv/clojure-csv "2.0.1"]
                  [testdouble/clojurescript.csv "0.2.0"]
-                 [instaparse "1.4.0"]
+                 [instaparse "1.4.1"]
                  [com.lucasbradstreet/instaparse-cljs "1.4.1.0"]
                  [midje "1.6.3"]
                  [im.chit/purnam "0.5.2"]
