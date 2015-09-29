@@ -14,7 +14,7 @@ ClojureScript so we can write in qisses (qiss on EcmaScript), too.
 ## Installation
 
 ### Make sure you have the following installed:
-  * a recent JDK from [Oracle](http://www.oracle.com/technetwork/java/javase/downloads/index.html)
+  * a recent (>= SE 8) [JDK from Oracle](http://www.oracle.com/technetwork/java/javase/downloads/index.html)
   * git
   * [Leiningen](http://leiningen.org/)
   * rlwrap
