@@ -8,7 +8,7 @@ the following features:
 * Precedence-less right-to-left evaluation of expressions
 * Syntax that requires minimal punctuation
 
-The interpreter is written in clojure, and the plan is to port it to
+The interpreter is written in clojure, and it works (modulo platform limitations) in
 ClojureScript so we can write in qisses (qiss on EcmaScript), too.
 
 ## Installation
@@ -382,6 +382,10 @@ true
 qiss$
 ```
 
+### qisses in the browser
+
+To get things started, run the fig script in the qiss directory.  Next, go to http://localhost:3449 in your browser.  Lastly, view the web page source to see you qiss has been embedded in a script tag in the page.
+
 ### Bugs
 
 Unbounded!  There is much work to do.  These are some of the most
@@ -394,20 +398,21 @@ pressing issues:
 * update
 * good error messages
 * virtual column i
-* port to ClojureScript
+* JS oddities: no int/float distinction, only numbers; no char/string distinction
+* JS interop (w/react? DOM? node?)
 * insert
 * upsert
 * exec
 * reshape (take a box) form of the # operator
 * more variations on 3- and 4-arg versions of @ and .
-Allow : as the 3rd arg?  {y} works just as well and doesn't complicate
-things.
+* Allow : as the 3rd arg (maybe.  {y} works just as well and doesn't complicate
+things.)
 * get rid of :pass-global-env 
 * if special form
 * date and time types
 * string, casting and parsing with $ 
 * better console output
-* vector conditional form of ?
+* vector conditional form of ? (or maybe if automatically vectorizes)
 * more ascii file I/O options
 * be smart about indentation to reduce the need for ;
 * learn APL and J to steal ideas
