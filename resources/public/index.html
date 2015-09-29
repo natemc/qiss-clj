@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <script src="js/compiled/qiss.js" type="text/javascript"></script>
+    <!-- Loading qiss code from a file -->
+    <script src='qiss/qiss.qiss' type='text/qiss'></script>
+    <!-- Embedding qiss code directly in an HTML file -->
+    <script type='text/qiss'>
+      show'`click ev sel1"#go"
+    </script>
+<!--      sel1["#result"],/:`click ev sel1"#go" -->
+<!--      sel1["#result"],/:{x;"<p>foo</p>"}'`click ev sel1"#go" -->
+    <title>qisses</title>
+  </head>
+  <body>
+    <h1>qisses</h1>
+    <div id="app">
+      <form>
+        <input id='go' type='button' value='Go!'/>
+      </form>
+      <div id='result'/>
+    </div>
+  </body>
+</html>

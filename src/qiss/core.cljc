@@ -1,15 +1,18 @@
 (ns qiss.core
   #?(:cljs (:require [clojure.browser.repl :as brepl]
                      [clojure.string :as str]
-                     [goog.string :as gstring :refer format]
+                     [dommy.core :as dom :refer-macros [sel sel1]]
+                     [goog.net.XhrIo :as xhr]
+                     [goog.string :as gstring :refer [format]]
                      [instaparse.core :as insta]
                      [instaparse.viz :as instav]
+                     [purnam.test :refer-macros [describe is is-not it fact facts]]
                      [testdouble.cljs.csv :as csv]))
 
   ;; We may need to trim this down if we want to use core.async
   ;; since it uses some of the same function names.
-  #?(:cljs (:use-macros [purnam.core :only [obj arr ? ?> ! !> f.n def.n def* def*n]]
-             [purnam.test :only [describe is is-not it fact facts]]))
+;;  #?(:cljs (:use-macros [purnam.core :only [obj arr ? ?> ! !> f.n def.n def* def*n]]
+;;             [purnam.test :only [describe is is-not it fact facts]]))
 
   #?@(:clj [(:require [clojure-csv.core :as csv]
                       [clojure.java.io :as io]
@@ -21,6 +24,10 @@
             (:gen-class)]))
 
 #?(:cljs (enable-console-print!)) ;; println -> js/console.log
+#?(:cljs (defn on-js-reload [])
+;;           (swap! genv update-in [:__figwheel_counter] inc)))
+         )
+#?(:cljs (defn response-text [x] (.getResponseText (.-target x))))
 
 ;; Backlog
 ;;   @ 3&4 args on keyed tables
@@ -57,10 +64,6 @@
   ([x] #?(:clj (System/exit x))))
 ;; ACK js is all Number.  Use meta to distinguish?
 #?(:cljs (defn float? [x] (not= x (.floor js/Math x))))
-;; TODO this is different in JS from JVM
-#?(:cljs (defn format
-           ([f x] (gstring/format f x))
-           ([f x y] (gstring/format f x y))))
 (defn index-of
   "The first index in x where e appears, or (count x) if e does not
   exist in x"
@@ -1643,6 +1646,12 @@
     ;;         (mapv vector (til (count pl)) indents))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; DOM
+#?(:cljs (defn ev [event ele] (merge ele {:estream true :event event})))
+#?(:cljs (defn sel [s] (mapv #({:element %}) (dom/sel (apply str s)))))
+#?(:cljs (defn sel1 [s] {:element (dom/sel1 (apply str s))}))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def builtin-common {:cols   {:f cols :rank [1]}
                      :div    {:f div :rank [2]}
@@ -1752,7 +1761,7 @@
 (defn -main
           "qiss repl"
           [& args]
-          #?(:clj (repl builtin)))
+          #?(:clj (repl @genv)))
 
 (facts "about bools"
        (fact "bools eval to themselves"
