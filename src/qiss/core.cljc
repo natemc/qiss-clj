@@ -1,5 +1,6 @@
 (ns qiss.core
-  #?(:cljs (:require [clojure.browser.repl :as brepl]
+  #?(:cljs (:require [cljs.core.async :refer [put! chan <! <!!]]
+                     [clojure.browser.repl :as brepl]
                      [clojure.string :as str]
                      [dommy.core :as dom :refer-macros [sel sel1]]
                      [goog.net.XhrIo :as xhr]
@@ -15,6 +16,7 @@
 ;;             [purnam.test :only [describe is is-not it fact facts]]))
 
   #?@(:clj [(:require [clojure-csv.core :as csv]
+                      [clojure.core.async :as async :refer [put! chan <! <!!]]
                       [clojure.java.io :as io]
                       [clojure.stacktrace :as st] ;; handy from the repl
                       [clojure.string :as str]
@@ -97,7 +99,6 @@
 (defn dict? [x] (and (map? x) (:k x) (:v x) (not (:t x)) (not (:kt x))))
 (defn dict-key [x] (:k x))
 (defn dict-val [x] (:v x))
-(defn estream? [x] (:estream x))
 (defn keyed-table? [x] (and (map? x) (:k x) (:v x) (:kt x)))
 (defn lambda? [x] (and (map? x) (:f x)))
 (defn lambda-body [x] (:exprs x))
@@ -110,6 +111,7 @@
 (defn lambda-rank [x] (:rank x))
 (defn lambda-text [x] (:text x))
 (defn lose-env [x] (if (lambda? x) (dissoc x :env) x))
+(defn stream? [x] (:stream x))
 (defn table? [x] (and (map? x) (:k x) (:v x) (:t x)))
 (defn add-to-dict [d k v] (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
 (defn catv "concat x and y into a vector" [x y] (vec (concat x y)))
@@ -480,6 +482,16 @@
   (if (number? n)
     (make-keyed-table (ktake n (dict-key x)) (ktake n (dict-val x)))
     (take-from-table n (unkey-table x))))
+;;(declare on-next)
+;;(defn on-next [s n] ())
+(defn take-from-stream [n x] x)
+  ;; (if (= 0 n)
+  ;;   []
+  ;;   (let [i (atom 0)]
+  ;;     (on-next x (fn [e]
+  ;;                  (if (< i n)
+  ;;                    (swap! i inc)
+  ;;                  e)))))
 (defn kcount [x]
   "#x (count)  returns 1 for atoms"
   (cond (vector? x)      (count x)
@@ -497,7 +509,8 @@
             (dict? y)        (take-from-dict n y)
             (table? y)       (take-from-table n y)
             (keyed-table? y) (take-from-keyed-table n y)
-            :else           (err "nyi: # on " y)))))
+            (stream? y)      (take-from-stream n y)
+            :else            (err "nyi: # on " y)))))
 (defn pound
   "#x (count) and x#y (take)"
   ([x] (kcount x))
@@ -608,7 +621,7 @@
   the arity of f."
   (fn [e & x]
     (let [p (lambda-callable e f)]
-      (if (and (= 1 (count x)) (estream? (first x)))
+      (if (and (= 1 (count x)) (stream? (first x)))
         (install-multi-event-handler p (first x))
         (apply (partial mapv (fn [& a] (apply p a))) x)))))
 (defn each-left [f]
@@ -616,7 +629,7 @@
   over its lhs argument"
   (fn [e x y]
     (let [p #((lambda-callable e f) % y)] 
-      (if (and (= 1 (count x)) (estream? (first x)))
+      (if (and (= 1 (count x)) (stream? (first x)))
         (install-multi-event-handler p (first x))
         (mapv p x)))))
 (defn each-prior [f]
@@ -634,7 +647,7 @@
   over its rhs argument"
   (fn [e x y]
     (let [p (partial (lambda-callable e f) x)]
-      (if (and (= 1 (count y)) (estream? (first y)))
+      (if (and (= 1 (count y)) (stream? (first y)))
         (install-multi-event-handler p (first y))
         (mapv p y)))))
 (defn over [f]
@@ -1045,7 +1058,7 @@
         min-rank (apply min (lambda-rank f))
         args     (cond (> (count a) max-rank) (err "rank")
                        (< (count a) min-rank)
-                       ;; add holes if needed
+                       ;; add holes i-f needed
                        (concat a (repeat (- min-rank (count a)) :hole))
                        :else a)
         formals (mapv #(keyword (str/join ["a" (str %)]))
@@ -1070,17 +1083,29 @@
           (empty? y)          (catv r x)
           (= :hole (first x)) (recur (rest x) (rest y) (conj r (first y)))
           :else               (recur (next x) y (conj r (first x))))))
+(declare make-monadic-stream)
+(declare sub)
+(defn invoke-with-streams [e f a]
+  (let [b (map #(if (stream? %) :hole %) a)
+        s (filter stream? a)
+        [e2 g] (if (= (count a) (count s))
+                 [e f]
+                 (invoke-partial e f b))
+        m (make-monadic-stream e2 g)]
+    (sub (first s) m)
+    [e2 m]))
 (defn invoke [e f a]
   "Apply f to a. If f is not a lambda, index f at depth using a"
   (if (not (lambda? f))
-    (if (and (vector? f) (some #{:hole} f))
+    (if (and (vector? f) (some #{:hole} f)) ;; (;4)3 => (3;4)
       [e (fill-vector-holes f a)]
       [e (index-deep f a)])
-    (let [p (lambda-callable e f)]
-      (if (and (not (some #{:hole} a))
-               (some #{(count a)} (lambda-rank f)))
-        [e (apply p a)]
-        (invoke-partial e f a)))))
+    (if (and (not (some #{:hole} a))
+             (some #{(count a)} (lambda-rank f)))
+      (if (some stream? a)
+        (invoke-with-streams e f a)
+        [e (apply (lambda-callable e f) a)])
+      (invoke-partial e f a))))
 (defn is-callable "Can x be invoked" [x] (instance? clojure.lang.IFn x))
 (defn can-only-be-monadic
   "Can x be invoked with 1 argument and no other number of arguments?"
@@ -1646,20 +1671,108 @@
     ;;         (mapv vector (til (count pl)) indents))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Streams
+;; A stream is (currently implemented as) a clojure map with the 3 usual methods
+;; on-done, on-error, and on-next.  We need to expand this to a stream with
+;; variadic input, so for each input ...
+;; Maybe a stream is a collection of subscribers?
+(defn make-stream [h] ;; handlers
+  (let [subs (atom [])]
+    {:stream true
+     :sub #(swap! subs conj %)
+     :subs subs ;; for debugging
+     :unsub (fn [x] (swap! subs (fn [s] (vec (remove #(= x %) s)))))}))
+(defn propagate-event
+  ([cb] (doseq [f cb] (f)))
+  ([cb a] (doseq [f cb] (f a))))
+(defn on-done [subs]
+  (propagate-event (filter some? (map :on-done subs))))
+(defn on-error [subs e]
+  (propagate-event (filter some? (map :on-error subs)) e))
+(defn on-next [subs e]
+  (propagate-event (filter some? (map :on-next subs)) e))
+(defn sub [p s] ;; publisher, subscriber
+  ((:sub p) s))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Stream transforms
+;; TODO: this model is wrong
+;; We need 3 handlers for each *input* stream
+(defn make-monadic-stream [e f]
+  (let [n    (lambda-callable e f)
+        subs (atom [])]
+    {:stream true
+     :sub #(swap! subs conj %)
+     :subs subs ;; for debugging
+     :unsub (fn [x] (swap! subs (fn [s] (vec (remove #(= x %) s)))))
+     :on-done (fn [] (on-done @subs))
+     :on-error #(on-error @subs %)
+     :on-next #(on-next @subs (n %))}))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; DOM
-#?(:cljs (defn ev [event ele] (merge ele {:estream true :event event})))
+#?(:cljs (defn ev [event ele] (merge ele {:stream true :event event})))
 #?(:cljs (defn sel [s] (mapv #({:element %}) (dom/sel (apply str s)))))
 #?(:cljs (defn sel1 [s] {:element (dom/sel1 (apply str s))}))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Timer
+(defn now []
+  #?(:clj  (.getTime (java.util.Date.))
+     :cljs (.getTime (js/Date.))))
+(defn set-timer [f t]
+  #?(:clj  (future (while true (do (Thread/sleep t) (f))))
+     :cljs (js/setInterval f t)))
+(defn stop-timer [x]
+  #?(:clj  (future-cancel x)
+           :cljs (js/clearInterval x)))
+(defn every [e t]
+  (let [subs (atom [])]
+    {:on-done (fn [] (on-done @subs))
+     :stream true
+     :sub #(swap! subs conj %)
+     :subs subs ;; for debugging
+     ;; TODO: add try/catch and on-error
+     :timer-id (set-timer (fn [] (on-next @subs (now)))
+                          t)}))
+(defn stop [x]
+  (stop-timer (:timer-id x))
+  ((:on-done x)))
+  
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Testing event source
+(defn test-stream [e x]
+  (let [subs (atom [])]
+    {:go (fn []
+           (doseq [i x] (on-next @subs i))
+           (on-done @subs))
+     :stream true
+     :sub #(swap! subs conj %)
+     :unsub (fn [x] (swap! subs (fn [s] (vec (remove #(= x %) s)))))
+     :subs subs ;; for debugging
+     }))
+(defn wait [x]
+  (if (not (stream? x))
+    x
+    (let [r    (atom [])
+          this {
+                :on-next #(swap! r conj %)}]
+      (sub x this)
+      (if (:go x)
+        ((:go x))
+        (let [c (chan)]
+          (sub x {:on-done (fn [] (put! c 1))})
+          (<!! c)))
+      @r)))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (def builtin-common {:cols   {:f cols :rank [1]}
                      :div    {:f div :rank [2]}
+                     :every  {:f every :pass-global-env true :rank [1]}
                      :keys   {:f keycols :rank [1]}
                      :last   {:f klast :rank [1]}
                      :lj     {:f lj :rank [2]}
                      :mod    {:f kmod :rank [2]}
                      :show   {:f show :rank [1]}
+                     :stop   {:f stop :rank [1]}
                      :sv     {:f sv :rank [2]}
                      :vs     {:f vs :rank [2]}
                      :xasc   {:f xasc :rank [2]}
@@ -1679,14 +1792,14 @@
 
 (defn eval-no-env [x] (last (kresolve x {} (second (parse x)))))
 
-(defonce genv (atom builtin))
+(def genv (atom builtin))
 (defn set-genv [e]
   (swap! genv (fn [x y] y) e))
 (defn keval
   ([x] (let [[e r] (resolve-full-expr x @genv (second (parse x)))]
          (set-genv e)
-         r))
-  ([e x] (last (resolve-full-expr x e (second (parse x))))))
+         (lose-env r)))
+  ([e x] (lose-env (last (resolve-full-expr x e (second (parse x)))))))
 (defn krun
   ([x] (show (keval x)))
   ([e x] (show (keval e x))))
