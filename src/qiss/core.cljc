@@ -1,5 +1,6 @@
 (ns qiss.core
-  #?(:cljs (:require [cljs.core.async :refer [put! chan <! <!!]]
+  #?(:cljs (:require-macros [cljs.core.async.macros :refer [go go-loop]]))
+  #?(:cljs (:require [cljs.core.async :as async :refer [chan put! <!]]
                      [clojure.browser.repl :as brepl]
                      [clojure.string :as str]
                      [dommy.core :as dom :refer-macros [sel sel1]]
@@ -10,13 +11,14 @@
                      [purnam.test :refer-macros [describe is is-not it fact facts]]
                      [testdouble.cljs.csv :as csv]))
 
-  ;; We may need to trim this down if we want to use core.async
-  ;; since it uses some of the same function names.
-;;  #?(:cljs (:use-macros [purnam.core :only [obj arr ? ?> ! !> f.n def.n def* def*n]]
-;;             [purnam.test :only [describe is is-not it fact facts]]))
+  #?(:cljs (:use-macros ;; [purnam.core :only
+                        ;;              [obj arr ? ?> ! !> f.n def.n def* def*n]]
+                        ;; [purnam.test :only [describe is is-not it fact facts]]))
+                        [purnam.test :only [fact facts]]))
 
   #?@(:clj [(:require [clojure-csv.core :as csv]
-                      [clojure.core.async :as async :refer [put! chan <! <!!]]
+                      [clojure.core.async :as async
+                         :refer [chan go go-loop put! <! <!!]]
                       [clojure.java.io :as io]
                       [clojure.stacktrace :as st] ;; handy from the repl
                       [clojure.string :as str]
@@ -611,7 +613,10 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; adverbs
-;; TODO: handle various event types, cross-platform mess, etc
+;; TODO: How should adverbs work with streams?
+;;   Never?  Seems a bad idea
+;;   Always the same as if there were no adverb?
+;;   Require the use of adverbs with streams?  Seems a bad idea
 (defn install-multi-event-handler [f x]
   #?(:cljs (dom/listen! (:element x) (:event x) f)))
 
@@ -621,17 +626,17 @@
   the arity of f."
   (fn [e & x]
     (let [p (lambda-callable e f)]
-      (if (and (= 1 (count x)) (stream? (first x)))
-        (install-multi-event-handler p (first x))
-        (apply (partial mapv (fn [& a] (apply p a))) x)))))
+;;      (if (and (= 1 (count x)) (stream? (first x)))
+;;        (install-multi-event-handler p (first x))
+      (apply (partial mapv (fn [& a] (apply p a))) x))))
 (defn each-left [f]
   "Create a dyadic function from f (which must be dyadic) that loops
   over its lhs argument"
   (fn [e x y]
     (let [p #((lambda-callable e f) % y)] 
-      (if (and (= 1 (count x)) (stream? (first x)))
-        (install-multi-event-handler p (first x))
-        (mapv p x)))))
+;;      (if (and (= 1 (count x)) (stream? (first x)))
+;;        (install-multi-event-handler p (first x))
+      (mapv p x))))
 (defn each-prior [f]
   "Create a dyadic function from f (which must be dyadic) that loops
   over a list passing each element and its prior, e.g., deltas is 0-':x"
@@ -647,9 +652,9 @@
   over its rhs argument"
   (fn [e x y]
     (let [p (partial (lambda-callable e f) x)]
-      (if (and (= 1 (count y)) (stream? (first y)))
-        (install-multi-event-handler p (first y))
-        (mapv p y)))))
+;;      (if (and (= 1 (count y)) (stream? (first y)))
+;;        (install-multi-event-handler p (first y))
+      (mapv p y))))
 (defn over [f]
   "Create a dyadic function from f (which must be dyadic) that
   performs a reduce (aka fold left) over its rhs argument"
@@ -1091,8 +1096,7 @@
         [e2 g] (if (= (count a) (count s))
                  [e f]
                  (invoke-partial e f b))
-        m (make-monadic-stream e2 g)]
-    (sub (first s) m)
+        m (make-monadic-stream e2 g (first s))]
     [e2 m]))
 (defn invoke [e f a]
   "Apply f to a. If f is not a lambda, index f at depth using a"
@@ -1167,11 +1171,11 @@
 
 (defn resolve-dotn [tu e x]
   (let [o (kresolve tu e (first x))]
-    (println "hmm")
+    (null! "hmm")
     (if (null! (dict? x))
       (err "nyi: dot notation for dicts")
       (fn [& a]
-        (println "interop goes here")
+        (null! "interop goes here")
         #?(:clj (let [g (eval
                           (read-string
                             (str "(fn [p] (." (second (second x)) " p))")))]
@@ -1538,7 +1542,7 @@
         (table? x)       (show-table x)
         (keyed-table? x) (show-keyed-table x)
         (lambda? x)      (show-lambda x)
-        :else       (println x)))
+        :else            (println x)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; parser initialization
 ;; Used by the parse and parse functions to replace all limited
@@ -1570,10 +1574,9 @@
       :cljs (let [req (js/XMLHttpRequest.)]
               (.open req "GET" x false) ;; sync! we need that grammar
               (.send req)
-              (log (.-status req))
               (if (= 200 (.-status req))
                 (.-responseText req)
-                (err "Could not load qiss grammar!")))))
+                (err "Could not load qiss grammar!" req)))))
   ([x f] ;; url, callback
    #?(:clj  (f (load-grammar x))
       :cljs (xhr/send x (fn [r] (f (response-text r)))))))
@@ -1697,21 +1700,29 @@
 ;; Stream transforms
 ;; TODO: this model is wrong
 ;; We need 3 handlers for each *input* stream
-(defn make-monadic-stream [e f]
-  (let [n    (lambda-callable e f)
-        subs (atom [])]
+(defn make-monadic-stream [e f s]
+  (let [c (chan)
+        i ((:sub s))
+        m (async/mult c)
+        n (lambda-callable e f)]
+    (go-loop [a (<! i)] ;; arg from stream's channel
+      (when a
+        (if-let [r (n a)]
+          (put! c r))
+        (recur (<! i))))
     {:stream true
-     :sub #(swap! subs conj %)
-     :subs subs ;; for debugging
-     :unsub (fn [x] (swap! subs (fn [s] (vec (remove #(= x %) s)))))
-     :on-done (fn [] (on-done @subs))
-     :on-error #(on-error @subs %)
-     :on-next #(on-next @subs (n %))}))
+     :sub (fn [] (async/tap m (chan)))}))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; DOM
-#?(:cljs (defn ev [event ele] (merge ele {:stream true :event event})))
-#?(:cljs (defn sel [s] (mapv #({:element %}) (dom/sel (apply str s)))))
-#?(:cljs (defn sel1 [s] {:element (dom/sel1 (apply str s))}))
+#?(:cljs (defn ev [event ele]
+           (let [c (chan)
+                 m (async/mult c)]
+             (dom/listen! (:element ele) event #(put! c %))
+             (merge ele {:stream true
+                         :event event
+                         :sub (fn [] (async/tap m (chan)))}))))
+#?(:cljs (defn ksel [s] (mapv #({:element %}) (dom/sel (apply str s)))))
+#?(:cljs (defn ksel1 [s] {:element (dom/sel1 (apply str s))}))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Timer
@@ -1724,49 +1735,33 @@
 (defn stop-timer [x]
   #?(:clj  (future-cancel x)
            :cljs (js/clearInterval x)))
-(defn every [e t]
-  (let [subs (atom [])]
-    {:on-done (fn [] (on-done @subs))
+(defn every [t] ;; milliseconds
+  (let [c (chan)
+        m (async/mult c)]
+    {:on-done (fn [] (async/close! c))
      :stream true
-     :sub #(swap! subs conj %)
-     :subs subs ;; for debugging
+     :sub (fn [] (async/tap m (chan)))
      ;; TODO: add try/catch and on-error
-     :timer-id (set-timer (fn [] (on-next @subs (now)))
-                          t)}))
+     :timer-id (set-timer (fn [] (put! c (now))) t)}))
 (defn stop [x]
   (stop-timer (:timer-id x))
   ((:on-done x)))
   
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Testing event source
-(defn test-stream [e x]
-  (let [subs (atom [])]
-    {:go (fn []
-           (doseq [i x] (on-next @subs i))
-           (on-done @subs))
-     :stream true
-     :sub #(swap! subs conj %)
-     :unsub (fn [x] (swap! subs (fn [s] (vec (remove #(= x %) s)))))
-     :subs subs ;; for debugging
-     }))
+(defn test-stream [x]
+  {:stream true
+   :sub (fn [] (async/to-chan x))})
 (defn wait [x]
   (if (not (stream? x))
     x
-    (let [r    (atom [])
-          this {
-                :on-next #(swap! r conj %)}]
-      (sub x this)
-      (if (:go x)
-        ((:go x))
-        (let [c (chan)]
-          (sub x {:on-done (fn [] (put! c 1))})
-          (<!! c)))
-      @r)))
+    #?(:clj  (<!! (async/into [] ((:sub x))))
+       :cljs (err "nyi: no wait since cljs.core.async lacks <!!"))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (def builtin-common {:cols   {:f cols :rank [1]}
                      :div    {:f div :rank [2]}
-                     :every  {:f every :pass-global-env true :rank [1]}
+                     :every  {:f every :rank [1]}
                      :keys   {:f keycols :rank [1]}
                      :last   {:f klast :rank [1]}
                      :lj     {:f lj :rank [2]}
@@ -1785,8 +1780,8 @@
                               :read   {:f read-lines :rank [1]}
                               :wcsv   {:f wcsv :rank [2]}}
                        :cljs {:ev     {:f ev :rank [2]}
-                              :sel    {:f sel :rank [1]}
-                              :sel1   {:f sel1 :rank [1]}})))
+                              :sel    {:f ksel :rank [1]}
+                              :sel1   {:f ksel1 :rank [1]}})))
 
 ;; (def builtin (kload builtin "src/qiss/qiss.qiss"))
 
@@ -1824,7 +1819,8 @@
                     (aset r i (str/trim (.-text e)))
                     (xhr/send s (fn [v] (aset r i (response-text v))
                                   (when (all? r)
-                                    (doseq [c r] (load-code c)))))))))))
+                                    (doseq [c r] (load-code c))
+                                    (null! "code loaded"))))))))))
   ([x]
    (set-genv (reduce #(let [[ne r] (resolve-full-expr x %1 %2)] ne)
                      @genv
@@ -1836,6 +1832,7 @@
 #?(:clj (declare vis))
 (load-grammar "qiss/grammar"
               (fn [g]
+                (null! "loaded grammer OK")
                 (def grammar g)
                 (def parser  (insta/parser grammar))
                 (def parse   (comp (partial insta/transform xform) parser))
