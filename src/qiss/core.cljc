@@ -404,18 +404,40 @@
          (keyed-table? x) (make-keyed-table (dict-key x) (tilde (dict-val x)))
          :else            (if (= 0 x) true (not x))))
   ([x y] (= x y))) ;; match
+;; Helper for writing stream processing functions.
+;; Creates all the plumbing, a quit function that closes
+;; all necessary channels, and a result you can return.
+(defn stream-prologue [s]
+  (let [in   (if (stream? s)
+               ((:sub s))
+               (mapv #((:sub %)) s))
+        out  (chan)
+        m    (async/mult out)
+        quit (if (stream? s)
+               (fn [] (doseq [p [in out]] (async/close! p)))
+               (fn [] (doseq [p (conj in out)] (async/close! p))))
+        res  {:stream true
+              :sub (fn [] (async/tap m (chan)))}]
+    [in out quit res]))
+;; This is just an example to show how to use
+;; stream-prologue to write a stream processing function.
+(defn process-stream [s h]
+  (let [[in out quit res] (stream-prologue s)]
+    (go-loop [e (<! in)]
+      (if-not e
+        (quit)
+        (do (if-let [r (h e)]
+              (put! out r))
+            (recur (<! in)))))
+    res))
 (defn times
   "*x (first) and x*y (atomic multiplication)"
   ([x] (if (stream? x)
-         (let [c (chan)
-               i ((:sub x))
-               m (async/mult c)]
-           (go (when-let [r (<! i)]
-                 (put! c r))
-               (async/close! c))
-           {:extract true ;; hack for wait
-            :stream true
-            :sub (fn [] (async/tap m (chan)))})
+         (let [[in out quit res] (stream-prologue x)]
+           (go (when-let [e (<! in)]
+                 (put! out e))
+               (quit))
+           (merge res {:extract true})) ;; hack for wait
          (first x)))
   ([x y] ((atomize *) x y)))
 (defn vs [x y]
@@ -508,18 +530,15 @@
 (defn take-from-stream [n x]
   ;; TODO: save up events so we can overtake if the stream
   ;; closes before we get n events
-  (let [c (chan)
-        i ((:sub x))
-        m (async/mult c)]
-    (go-loop [j 0]
-      (if (= j n)
-        (async/close! c)
-        (if-let [r (<! i)]
-          (do (put! c r)
-              (recur (inc j)))
-          (async/close! c))))
-    {:stream true
-     :sub (fn [] (async/tap m (chan)))}))
+  (let [[in out quit res] (stream-prologue x)]
+    (go-loop [i 0]
+      (if (= i n)
+        (quit)
+        (if-let [e (<! in)]
+          (do (put! out e)
+              (recur (inc i)))
+          (quit))))
+    res))
 (defn kcount [x]
   "#x (count)  returns 1 for atoms"
   (cond (vector? x)      (count x)
@@ -612,31 +631,23 @@
   (let [i (mapv range (next (deltas (conj x (kcount y)))))]
     (index y (mapv (fn [p q] (mapv #(+ p %) q)) x i))))
 (defn drop-from-stream [n x]
-  (let [c (chan)
-        i ((:sub x))
-        m (async/mult c)]
-    (go-loop [j n]
-      (if-let [r (<! i)]
-        (if (< 0 j)
-          (recur (dec j))
-          (do (put! c r)
-              (recur j)))
-        (async/close! c)))
-    {:stream true
-     :sub (fn [] (async/tap m (chan)))}))
+  (let [[in out quit res] (stream-prologue x)]
+    (go-loop [i n]
+      (if-let [e (<! in)]
+        (cond (< 0 i) (recur (dec i))
+              :else   (do (put! out e) (recur i)))
+        (quit)))
+    res))
 (defn drop-last-from-stream [n x]
-  (let [c (chan)
-        i ((:sub x))
-        m (async/mult c)]
-    (go-loop [j []]
-      (if-let [r (<! i)]
-        (if (< (count j) n)
-          (recur (conj j r))
-          (do (put! c (first j))
-              (recur (conj (vec (drop 1 j)) r))))
-        (async/close! c)))
-    {:stream true
-     :sub (fn [] (async/tap m (chan)))}))
+  (let [[in out quit res] (stream-prologue x)]
+    (go-loop [i []]
+      (if-let [e (<! in)]
+        (if (< (count i) n)
+          (recur (conj i e))
+          (do (put! out (first i))
+              (recur (conj (vec (drop 1 i)) e))))
+        (quit)))
+    res))
 (defn kdrop [x y]
   "Remove the first x elements from y (negative x => drop from the back)"
   (let [o (if (<= 0 x) (partial drop x) (partial drop-last (- x)))]
@@ -1736,12 +1747,6 @@
 ;; on-done, on-error, and on-next.  We need to expand this to a stream with
 ;; variadic input, so for each input ...
 ;; Maybe a stream is a collection of subscribers?
-(defn make-stream [h] ;; handlers
-  (let [subs (atom [])]
-    {:stream true
-     :sub #(swap! subs conj %)
-     :subs subs ;; for debugging
-     :unsub (fn [x] (swap! subs (fn [s] (vec (remove #(= x %) s)))))}))
 (defn propagate-event
   ([cb] (doseq [f cb] (f)))
   ([cb a] (doseq [f cb] (f a))))
@@ -1762,55 +1767,46 @@
 ;; containing a formula: the cell updates whenever any input to
 ;; the formula changes.
 (defn make-monadic-stream [e f s]
-  (let [c (chan)
-        i ((:sub s))
-        m (async/mult c)
+  (let [[in out quit res] (stream-prologue s)
         n (lambda-callable e f)]
-    (go-loop [a (<! i)] ;; arg from stream's channel
+    (go-loop [a (<! in)] ;; arg from stream's channel
       (if (not a)
-        (async/close! c)
+        (quit)
         (do (if-let [r (n a)]
-              (put! c r))
-            (recur (<! i)))))
-    {:stream true
-     :sub (fn [] (async/tap m (chan)))}))
+              (put! out r))
+            (recur (<! in)))))
+    res))
 ;; This is too complicated :-/
 ;; f is a function of (count s) arguments; s is a vec of streams.
 (defn make-stream [e f s]
   (if (= 1 (count s))
     (make-monadic-stream e f (first s))
-    (let [c (chan)
-          i (mapv #((:sub %)) s)
-          m (async/mult c)
+    (let [[in out quit res] (stream-prologue s)
           n (lambda-callable e f)]
       ;; collect events from the input streams and remember them in a
       ;; when an input stream closes, mark it in d until all are done
-      (go-loop [a (mapv (fn [x] nil) i)    ;; args
-                d (mapv (fn [x] false) i)] ;; done
-        (let [[v j] (async/alts! i)
-              k     (index-of i j)]
-          (if (nil? v) ;; stream k closed?
-            (if (nil? (a k)) ;; closed before started => abort
-              (async/close! c)
-              (let [dd (assoc d k true)] ;; mark k done
-                (if (all? dd)
-                  (async/close! c)
-                  (recur a dd)))) ;; continue until all done
-            (let [p (assoc a k v)] ;; p is the curr inputs from all i
-              ;; don't call f until we have data from all input streams
-              (when (all? p)
-                (if-let [r (apply n p)]
-                  (put! c r)))
-              (recur p d)))))
-      {:stream true
-       :sub (fn [] (async/tap m (chan)))})))
+      (go-loop [a (mapv (fn [x] nil) in)    ;; args
+                d (mapv (fn [x] false) in)] ;; done
+        (let [[v j] (async/alts! in)
+              i     (index-of in j)]
+          (if v
+            (let [p (assoc a i v)] ;; p is the curr inputs from all in
+              (when (all? p) ;; don't call til we have data from all in
+                (when-let [r (apply n p)] (put! out r)))
+              (recur p d))
+            (if (nil? (a i)) ;; closed before started => abort
+              (quit)
+              (let [dd (assoc d i true)] ;; mark k done
+                (if (all? dd) (quit) (recur a dd))))))) ;; til all done
+      res)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; DOM
 #?(:cljs (defn ev [event ele]
-           (let [c (chan)
-                 m (async/mult c)]
-             (dom/listen! (:element ele) event #(put! c %))
-             (merge ele {:stream true
+           (let [out (chan)
+                 m   (async/mult out)]
+             (dom/listen! (:element ele) event #(put! out %))
+             (merge ele {:on-done (fn [] (async/close! out))
+                         :stream true
                          :event event
                          :sub (fn [] (async/tap m (chan)))}))))
 #?(:cljs (defn ksel [s] (mapv #({:element %}) (dom/sel (apply str s)))))
@@ -1828,17 +1824,32 @@
   #?(:clj  (future-cancel x)
            :cljs (js/clearInterval x)))
 (defn every [t] ;; milliseconds
-  (let [c (chan)
-        m (async/mult c)]
-    {:on-done (fn [] (async/close! c))
+  (let [out (chan)
+        m   (async/mult out)]
+    ;; TODO: call on-done when there are no references left
+    {:on-done (fn [] (async/close! out))
      :stream true
      :sub (fn [] (async/tap m (chan)))
      ;; TODO: add try/catch and on-error
-     :timer-id (set-timer (fn [] (put! c (now))) t)}))
+     :timer-id (set-timer (fn [] (put! out (now))) t)}))
 (defn stop [x]
-  (stop-timer (:timer-id x))
-  ((:on-done x)))
-  
+  (when-let [t (:timer-id x)] (stop-timer t))
+  (when-let [d (:on-done x)]  (d)))
+(defn throttle [t s] ; millis, stream
+  "Sample s every t milliseconds"
+  (let [[in out quit res] (stream-prologue s)
+        latest            (atom nil)
+        push-latest       (fn [] (when-let [x @latest]
+                                   (put! out x)
+                                   (swap! latest (fn [o] nil))))]
+    (go-loop [e (<! in)]
+      (if (not e)
+        (quit)
+        (do (swap! latest (fn [x] e))
+            (recur (<! in)))))
+    (merge res
+           {:on-done  quit
+            :timer-id (set-timer push-latest t)})))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Testing event source
 (defn into-stream [x]
@@ -1853,19 +1864,20 @@
        :cljs (err "nyi: no wait since cljs.core.async lacks <!!"))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(def builtin-common {:cols   {:f cols :rank [1]}
-                     :div    {:f div :rank [2]}
-                     :every  {:f every :rank [1]}
-                     :keys   {:f keycols :rank [1]}
-                     :last   {:f klast :rank [1]}
-                     :lj     {:f lj :rank [2]}
-                     :mod    {:f kmod :rank [2]}
-                     :show   {:f show :rank [1]}
-                     :stop   {:f stop :rank [1] :stream-aware [1]}
-                     :sv     {:f sv :rank [2]}
-                     :vs     {:f vs :rank [2]}
-                     :xasc   {:f xasc :rank [2]}
-                     :xdesc  {:f xdesc :rank [2]}})
+(def builtin-common {:cols     {:f cols :rank [1]}
+                     :div      {:f div :rank [2]}
+                     :every    {:f every :rank [1]}
+                     :keys     {:f keycols :rank [1]}
+                     :last     {:f klast :rank [1]}
+                     :lj       {:f lj :rank [2]}
+                     :mod      {:f kmod :rank [2]}
+                     :show     {:f show :rank [1]}
+                     :stop     {:f stop :rank [1] :stream-aware [1]}
+                     :sv       {:f sv :rank [2]}
+                     :throttle {:f throttle :rank [2] :stream-aware [2]}
+                     :vs       {:f vs :rank [2]}
+                     :xasc     {:f xasc :rank [2]}
+                     :xdesc    {:f xdesc :rank [2]}})
 (def builtin (merge builtin-common
                     #?(:clj  {:exit   {:f exit :rank [0 1]}
                               :new    {:f k-new :rank [1 2]}
