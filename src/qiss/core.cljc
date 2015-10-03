@@ -1175,13 +1175,17 @@
                  (invoke-partial e f b))]
     [e2 (make-stream (lambda-callable e g) s)]))
 (defn index-from-streams [e c i]
-  (invoke-with-streams e (:dot ops) [c i]))
+  (invoke-with-streams e
+                       (:dot ops)
+                       [c (if-not (some stream? i)
+                            i
+                            (make-stream (fn [& x] x) i))]))
 (defn invoke [e f a]
   "Apply f to a. If f is not a lambda, index f at depth using a"
   (if (not (lambda? f))
     (if (and (vector? f) (some #{:hole} f)) ;; (;4)3 => (3;4)
       [e (fill-vector-holes f a)]
-      (if (some stream? a)
+      (if (or (stream? f) (some stream? a))
         (index-from-streams e f a)
         [e (index-deep f a)]))
     (if (and (not (some #{:hole} a))
@@ -1802,6 +1806,9 @@
             (recur (<! in)))))
     res))
 ;; This is too complicated :-/
+;; Do we need to support arbitrarily nested structures containing
+;; streams?  Or can we avoid that situation by creating streams
+;; as we go so by the time we get here it's streams all the way down?
 ;; f is a function of (count s) arguments; s is a vec of streams.
 ;; make-stream will create a stream that will call f every time
 ;; any element of s changes and push the results of f.
