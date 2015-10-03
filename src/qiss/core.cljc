@@ -188,6 +188,34 @@
         (keyword? x) (key-table-by-colname x y)
         :else        (err "nyi" x "!" y)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Helper for writing stream processing functions.
+;; Creates all the plumbing, a quit function that closes
+;; all necessary channels, and a result you can return.
+(defn stream-prologue [s]
+  (let [in   (if (stream? s)
+               ((:sub s))
+               (mapv #((:sub %)) s))
+        out  (chan)
+        m    (async/mult out)
+        quit (if (stream? s)
+               (fn [] (doseq [p [in out]] (async/close! p)))
+               (fn [] (doseq [p (conj in out)] (async/close! p))))
+        res  {:stream true
+              :sub (fn [] (async/tap m (chan)))}]
+    [in out quit res]))
+;; This is just an example to show how to use
+;; stream-prologue to write a stream processing function.
+(defn process-stream [s h]
+  (let [[in out quit res] (stream-prologue s)]
+    (go-loop [e (<! in)]
+      (if-not e
+        (quit)
+        (do (if-let [r (h e)]
+              (put! out r))
+            (recur (<! in)))))
+    res))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; handy code
 (defn all? "is every x truthy?" [x] (if (every? (fn [x] x) x) true false))
 (defn any? "is any x truthy?" [x] (if (some (fn [x] x) x) true false))
@@ -330,10 +358,17 @@
                         (of a (if b 1 0))
                         (of a b))))]
     ((atomize f) x y)))
-
+(defn where-from-stream [x]
+  (let [[in out quit res] (stream-prologue x)]
+    (go-loop [e (<! in)]
+      (if-not e
+        (quit)
+        (do (put! out {:where e})
+            (recur (<! in)))))
+    res))
 (defn amp
   "&x (where)      and    x&y (atomic min)"
-  ([x] (where x))
+  ([x]  (if (stream? x) (where-from-stream x) (where x)))
   ([x y] (promote-bools (fn [& b] (and b)) min x y)))
 (defn div "atomic integer division" [x y] ((atomize quot) x y))
 (declare group)
@@ -404,32 +439,6 @@
          (keyed-table? x) (make-keyed-table (dict-key x) (tilde (dict-val x)))
          :else            (if (= 0 x) true (not x))))
   ([x y] (= x y))) ;; match
-;; Helper for writing stream processing functions.
-;; Creates all the plumbing, a quit function that closes
-;; all necessary channels, and a result you can return.
-(defn stream-prologue [s]
-  (let [in   (if (stream? s)
-               ((:sub s))
-               (mapv #((:sub %)) s))
-        out  (chan)
-        m    (async/mult out)
-        quit (if (stream? s)
-               (fn [] (doseq [p [in out]] (async/close! p)))
-               (fn [] (doseq [p (conj in out)] (async/close! p))))
-        res  {:stream true
-              :sub (fn [] (async/tap m (chan)))}]
-    [in out quit res]))
-;; This is just an example to show how to use
-;; stream-prologue to write a stream processing function.
-(defn process-stream [s h]
-  (let [[in out quit res] (stream-prologue s)]
-    (go-loop [e (<! in)]
-      (if-not e
-        (quit)
-        (do (if-let [r (h e)]
-              (put! out r))
-            (recur (<! in)))))
-    res))
 (defn times
   "*x (first) and x*y (atomic multiplication)"
   ([x] (if (stream? x)
@@ -969,7 +978,7 @@
           :% {:f fdiv :text "%" :rank [1 2]}
           :# {:f pound :text "#" :rank [1 2] :stream-aware [2]}
           (keyword ",") {:f join :text "," :rank [1 2]}
-          :& {:f amp :text "&" :rank [1 2]}
+          :& {:f amp :text "&" :rank [1 2] :stream-aware [1]}
           :| {:f pipe :text "|" :rank [1 2]}
           :_ {:f under :text "_" :rank [1 2] :stream-aware [2]}
           := {:f eq :text "=" :rank [1 2]}
@@ -1104,7 +1113,7 @@
         (keyed-table? x) (index-keyed-table x i)
         (dict? i)        (make-dict (dict-key i) (index x (dict-val i)))
         (vector? i)      (mapv (partial index x) i)
-        (coll? i)        (reduce index x i) ;; wrong
+        (coll? i)        (reduce index x i) ;; TODO: fix
         (vector? x)      (x i)
         :else            ((dict-val x) (index-of (dict-key x) i))))
 (defn index-deep [x i]
@@ -1164,13 +1173,17 @@
         [e2 g] (if (= (count a) (count s))
                  [e f]
                  (invoke-partial e f b))]
-    [e2 (make-stream e2 g s)]))
+    [e2 (make-stream (lambda-callable e g) s)]))
+(defn index-from-streams [e c i]
+  (invoke-with-streams e (:dot ops) [c i]))
 (defn invoke [e f a]
   "Apply f to a. If f is not a lambda, index f at depth using a"
   (if (not (lambda? f))
     (if (and (vector? f) (some #{:hole} f)) ;; (;4)3 => (3;4)
       [e (fill-vector-holes f a)]
-      [e (index-deep f a)])
+      (if (some stream? a)
+        (index-from-streams e f a)
+        [e (index-deep f a)]))
     (if (and (not (some #{:hole} a))
              (some #{(count a)} (lambda-rank f)))
       (if (and (not (stream-aware? f (count a)))
@@ -1289,7 +1302,15 @@
                   :pass-global-env true
                   :text t})]
     [e (assoc w :f (feval tu w))]))
-
+(defn vec-with-streams [v]
+  (let [f (fn [& x] ;; fill stream elements of v using x
+            (loop [i v j x r []]
+              (if (empty? i)
+                r
+                (if (stream? (first i))
+                  (recur (next i) (next j) (conj r (first j)))
+                  (recur (next i) j (conj r (first i)))))))]
+    (make-stream f (filter stream? v))))
 (defn resolve-vec [tu e x]
   "Resolve the (...;...) expr specified by x"
   (let [[e2 r] (reduce (fn [[e r] i]
@@ -1299,7 +1320,12 @@
                        (reverse x))]  ;; eval right-to-left!
     ;; Cannot turn vector with holes into lambda here, because .
     ;; uses vectors with holes for index elision
-    [e2 (vec r)]))
+    ;; We do need to deal with streams, tho
+    ;; We can handle streams and holes at the same time,
+    ;; but I don't know if that makes any sense.
+    (if (some stream? r)
+      [e2 (vec-with-streams r)]
+      [e2 (vec r)])))
 
 (defn resolve-monop [tu e x]
   "Resolve the Op specified by x"
@@ -1766,23 +1792,23 @@
 ;; as its stream arguments change.  It's like a spreadsheet cell
 ;; containing a formula: the cell updates whenever any input to
 ;; the formula changes.
-(defn make-monadic-stream [e f s]
-  (let [[in out quit res] (stream-prologue s)
-        n (lambda-callable e f)]
+(defn make-monadic-stream [f s]
+  (let [[in out quit res] (stream-prologue s)]
     (go-loop [a (<! in)] ;; arg from stream's channel
       (if (not a)
         (quit)
-        (do (if-let [r (n a)]
+        (do (if-let [r (f a)]
               (put! out r))
             (recur (<! in)))))
     res))
 ;; This is too complicated :-/
 ;; f is a function of (count s) arguments; s is a vec of streams.
-(defn make-stream [e f s]
+;; make-stream will create a stream that will call f every time
+;; any element of s changes and push the results of f.
+(defn make-stream [f s]
   (if (= 1 (count s))
-    (make-monadic-stream e f (first s))
-    (let [[in out quit res] (stream-prologue s)
-          n (lambda-callable e f)]
+    (make-monadic-stream f (first s))
+    (let [[in out quit res] (stream-prologue s)]
       ;; collect events from the input streams and remember them in a
       ;; when an input stream closes, mark it in d until all are done
       (go-loop [a (mapv (fn [x] nil) in)    ;; args
@@ -1792,7 +1818,7 @@
           (if v
             (let [p (assoc a i v)] ;; p is the curr inputs from all in
               (when (all? p) ;; don't call til we have data from all in
-                (when-let [r (apply n p)] (put! out r)))
+                (when-let [r (apply f p)] (put! out r)))
               (recur p d))
             (if (nil? (a i)) ;; closed before started => abort
               (quit)
