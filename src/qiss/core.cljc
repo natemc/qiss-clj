@@ -506,6 +506,8 @@
 ;;(declare on-next)
 ;;(defn on-next [s n] ())
 (defn take-from-stream [n x]
+  ;; TODO: save up events so we can overtake if the stream
+  ;; closes before we get n events
   (let [c (chan)
         i ((:sub x))
         m (async/mult c)]
@@ -515,7 +517,7 @@
         (if-let [r (<! i)]
           (do (put! c r)
               (recur (inc j)))
-          (async/close! c)))) ;; perhaps we should overtake...
+          (async/close! c))))
     {:stream true
      :sub (fn [] (async/tap m (chan)))}))
 (defn kcount [x]
@@ -609,6 +611,32 @@
   "y x+!'1_0-':x,#y"
   (let [i (mapv range (next (deltas (conj x (kcount y)))))]
     (index y (mapv (fn [p q] (mapv #(+ p %) q)) x i))))
+(defn drop-from-stream [n x]
+  (let [c (chan)
+        i ((:sub x))
+        m (async/mult c)]
+    (go-loop [j n]
+      (if-let [r (<! i)]
+        (if (< 0 j)
+          (recur (dec j))
+          (do (put! c r)
+              (recur j)))
+        (async/close! c)))
+    {:stream true
+     :sub (fn [] (async/tap m (chan)))}))
+(defn drop-last-from-stream [n x]
+  (let [c (chan)
+        i ((:sub x))
+        m (async/mult c)]
+    (go-loop [j []]
+      (if-let [r (<! i)]
+        (if (< (count j) n)
+          (recur (conj j r))
+          (do (put! c (first j))
+              (recur (conj (vec (drop 1 j)) r))))
+        (async/close! c)))
+    {:stream true
+     :sub (fn [] (async/tap m (chan)))}))
 (defn kdrop [x y]
   "Remove the first x elements from y (negative x => drop from the back)"
   (let [o (if (<= 0 x) (partial drop x) (partial drop-last (- x)))]
@@ -617,7 +645,10 @@
           (table? y)       (make-table (dict-key y) (mapv o (dict-val y)))
           (keyed-table? y) (make-keyed-table (kdrop x (dict-key y))
                                              (kdrop x (dict-val y)))
-          :else (err "nyi: _ (drop) on" x y))))
+          (stream? y)      (if (<= 0 x)
+                             (drop-from-stream x y)
+                             (drop-last-from-stream (- x) y))
+          :else            (err "nyi: _ (drop) on" x y))))
 (defn kremove [x y]
   "Remove the yth element from x"
   (cond (vector? x) (removev x y)
@@ -929,7 +960,7 @@
           (keyword ",") {:f join :text "," :rank [1 2]}
           :& {:f amp :text "&" :rank [1 2]}
           :| {:f pipe :text "|" :rank [1 2]}
-          :_ {:f under :text "_" :rank [1 2]}
+          :_ {:f under :text "_" :rank [1 2] :stream-aware [2]}
           := {:f eq :text "=" :rank [1 2]}
           :<> {:f neq :text "<>" :rank [2]}
           :< {:f less :text "<" :rank [1 2]}
@@ -1830,10 +1861,9 @@
                      :lj     {:f lj :rank [2]}
                      :mod    {:f kmod :rank [2]}
                      :show   {:f show :rank [1]}
-                     :stop   {:f stop :rank [1]}
+                     :stop   {:f stop :rank [1] :stream-aware [1]}
                      :sv     {:f sv :rank [2]}
                      :vs     {:f vs :rank [2]}
-;;                     :wait   {:f wait :rank [1] :stream-aware [1]}
                      :xasc   {:f xasc :rank [2]}
                      :xdesc  {:f xdesc :rank [2]}})
 (def builtin (merge builtin-common
