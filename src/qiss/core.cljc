@@ -1185,7 +1185,7 @@
   (if (not (lambda? f))
     (if (and (vector? f) (some #{:hole} f)) ;; (;4)3 => (3;4)
       [e (fill-vector-holes f a)]
-      (if (or (stream? f) (some stream? a))
+      (if (or (stream? f) (stream? a) (some stream? a))
         (index-from-streams e f a)
         [e (index-deep f a)]))
     (if (and (not (some #{:hole} a))
