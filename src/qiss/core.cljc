@@ -114,7 +114,8 @@
 (defn lambda-text [x] (:text x))
 (defn lose-env [x] (if (lambda? x) (dissoc x :env) x))
 (defn stream? [x] (:stream x))
-(defn stream-aware? [x] (:stream-aware x))
+(defn stream-aware? [x r] ;; lambda, rank
+  (and (:stream-aware x) (some #{r} (:stream-aware x))))
 (defn table? [x] (and (map? x) (:k x) (:v x) (:t x)))
 (defn add-to-dict [d k v] (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
 (defn catv "concat x and y into a vector" [x y] (vec (concat x y)))
@@ -363,10 +364,8 @@
 (defn kmod "atomic mod" [x y] ((atomize mod) x y))
 (declare wait)
 (defn le "atomic <="
-  ;; ([x] (wait x)) ;; monadic "<=x" waits for stream x to complete
-  ([x y] ;; (if (or (stream? x) (stream? y))
-         ;;   (err "nyi: <= needs work to handle streams")
-   ((atomize <=) x y)))
+  ([x] (wait x)) ;; monadic "<=x" waits for stream x to complete
+  ([x y] ((atomize <=) x y)))
 (defn less
   "<x (iasc)      and    x<y (atomic <)"
   ([x] ;; iasc
@@ -407,7 +406,17 @@
   ([x y] (= x y))) ;; match
 (defn times
   "*x (first) and x*y (atomic multiplication)"
-  ([x] (first x))
+  ([x] (if (stream? x)
+         (let [c (chan)
+               i ((:sub x))
+               m (async/mult c)]
+           (go (when-let [r (<! i)]
+                 (put! c r))
+               (async/close! c))
+           {:extract true ;; hack for wait
+            :stream true
+            :sub (fn [] (async/tap m (chan)))})
+         (first x)))
   ([x y] ((atomize *) x y)))
 (defn vs [x y]
   "vector from string"
@@ -496,14 +505,19 @@
     (take-from-table n (unkey-table x))))
 ;;(declare on-next)
 ;;(defn on-next [s n] ())
-(defn take-from-stream [n x] x)
-  ;; (if (= 0 n)
-  ;;   []
-  ;;   (let [i (atom 0)]
-  ;;     (on-next x (fn [e]
-  ;;                  (if (< i n)
-  ;;                    (swap! i inc)
-  ;;                  e)))))
+(defn take-from-stream [n x]
+  (let [c (chan)
+        i ((:sub x))
+        m (async/mult c)]
+    (go-loop [j 0]
+      (if (= j n)
+        (async/close! c)
+        (if-let [r (<! i)]
+          (do (put! c r)
+              (recur (inc j)))
+          (async/close! c)))) ;; perhaps we should overtake...
+    {:stream true
+     :sub (fn [] (async/tap m (chan)))}))
 (defn kcount [x]
   "#x (count)  returns 1 for atoms"
   (cond (vector? x)      (count x)
@@ -513,6 +527,7 @@
         :else            1))
 (defn ktake [x y]
   "x#y take from y the elements specified by x"
+  ;; TODO: support stream for x
   (if (and (coll? x) (not (empty? x)) (number? (first x)))
     (err "nyi: reshape") ;; TODO: take a box
     (let [n (if (bool? x) (if x 1 0) x)]
@@ -908,9 +923,9 @@
           :dot {:f dot :pass-global-env true :text "." :rank [1 2 3 4]}
           :+ {:f plus :text "+" :rank [1 2]}
           :- {:f minus :text "-" :rank [1 2]}
-          :* {:f times :text "*" :rank [1 2]}
+          :* {:f times :text "*" :rank [1 2] :stream-aware [1]}
           :% {:f fdiv :text "%" :rank [1 2]}
-          :# {:f pound :text "#" :rank [1 2]}
+          :# {:f pound :text "#" :rank [1 2] :stream-aware [2]}
           (keyword ",") {:f join :text "," :rank [1 2]}
           :& {:f amp :text "&" :rank [1 2]}
           :| {:f pipe :text "|" :rank [1 2]}
@@ -919,8 +934,8 @@
           :<> {:f neq :text "<>" :rank [2]}
           :< {:f less :text "<" :rank [1 2]}
           :> {:f greater :text ">" :rank [1 2]}
-          :<= {:f le :text "<=" :rank [1 2]}
-;;               :stream-aware true} ;; monadic form waits for stream?
+          :<= {:f le :text "<=" :rank [1 2]
+               :stream-aware [1]} ;; monadic form waits for stream
           :>= {:f ge :text ">=" :rank [1 2]} ; monadic form creates stream
           :? {:f ques :text "?" :rank [1 2 3]}
           })
@@ -1116,7 +1131,8 @@
       [e (index-deep f a)])
     (if (and (not (some #{:hole} a))
              (some #{(count a)} (lambda-rank f)))
-      (if (and (not (stream-aware? f)) (some stream? a))
+      (if (and (not (stream-aware? f (count a)))
+               (some stream? a))
         (invoke-with-streams e f a)
         [e (apply (lambda-callable e f) a)])
       (invoke-partial e f a))))
@@ -1801,7 +1817,8 @@
 (defn wait [x]
   (if (not (stream? x))
     x
-    #?(:clj  (<!! (async/into [] ((:sub x))))
+    #?(:clj  (let [r (<!! (async/into [] ((:sub x))))]
+               (if (:extract x) (first r) r))
        :cljs (err "nyi: no wait since cljs.core.async lacks <!!"))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1816,7 +1833,7 @@
                      :stop   {:f stop :rank [1]}
                      :sv     {:f sv :rank [2]}
                      :vs     {:f vs :rank [2]}
-                     :wait   {:f wait :rank [1] :stream-aware true}
+;;                     :wait   {:f wait :rank [1] :stream-aware [1]}
                      :xasc   {:f xasc :rank [2]}
                      :xdesc  {:f xdesc :rank [2]}})
 (def builtin (merge builtin-common
