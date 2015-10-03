@@ -114,6 +114,7 @@
 (defn lambda-text [x] (:text x))
 (defn lose-env [x] (if (lambda? x) (dissoc x :env) x))
 (defn stream? [x] (:stream x))
+(defn stream-aware? [x] (:stream-aware x))
 (defn table? [x] (and (map? x) (:k x) (:v x) (:t x)))
 (defn add-to-dict [d k v] (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
 (defn catv "concat x and y into a vector" [x y] (vec (concat x y)))
@@ -344,7 +345,11 @@
   ([x] (if (coll? x) (mapv #(double (/ %)) x)
            (double (/ x))))
   ([x y] ((atomize #(double (/ %1 %2))) x y)))
-(defn ge "atomic >=" [x y] ((atomize >=) x y))
+(declare into-stream)
+(defn ge
+  "atomic >="
+  ([x] (into-stream x)) ;; monadic ">=x" creates a stream from x
+  ([x y] ((atomize >=) x y)))
 (defn greater
   ">x (idesc)      and    x>y (atomic >)"
   ([x] ;; idesc
@@ -356,7 +361,12 @@
          :else            (err "can't >" x)))
   ([x y] ((atomize >) x y)))
 (defn kmod "atomic mod" [x y] ((atomize mod) x y))
-(defn le "atomic <=" [x y] ((atomize <=) x y))
+(declare wait)
+(defn le "atomic <="
+  ;; ([x] (wait x)) ;; monadic "<=x" waits for stream x to complete
+  ([x y] ;; (if (or (stream? x) (stream? y))
+         ;;   (err "nyi: <= needs work to handle streams")
+   ((atomize <=) x y)))
 (defn less
   "<x (iasc)      and    x<y (atomic <)"
   ([x] ;; iasc
@@ -909,8 +919,9 @@
           :<> {:f neq :text "<>" :rank [2]}
           :< {:f less :text "<" :rank [1 2]}
           :> {:f greater :text ">" :rank [1 2]}
-          :<= {:f le :text "<=" :rank [2]} ; don't know what the monadic form does in k
-          :>= {:f ge :text ">=" :rank [2]}
+          :<= {:f le :text "<=" :rank [1 2]}
+;;               :stream-aware true} ;; monadic form waits for stream?
+          :>= {:f ge :text ">=" :rank [1 2]} ; monadic form creates stream
           :? {:f ques :text "?" :rank [1 2 3]}
           })
 (def adverbs {:' each
@@ -1088,16 +1099,15 @@
           (empty? y)          (catv r x)
           (= :hole (first x)) (recur (rest x) (rest y) (conj r (first y)))
           :else               (recur (next x) y (conj r (first x))))))
-(declare make-monadic-stream)
+(declare make-stream)
 (declare sub)
 (defn invoke-with-streams [e f a]
   (let [b (map #(if (stream? %) :hole %) a)
         s (filter stream? a)
         [e2 g] (if (= (count a) (count s))
                  [e f]
-                 (invoke-partial e f b))
-        m (make-monadic-stream e2 g (first s))]
-    [e2 m]))
+                 (invoke-partial e f b))]
+    [e2 (make-stream e2 g s)]))
 (defn invoke [e f a]
   "Apply f to a. If f is not a lambda, index f at depth using a"
   (if (not (lambda? f))
@@ -1106,7 +1116,7 @@
       [e (index-deep f a)])
     (if (and (not (some #{:hole} a))
              (some #{(count a)} (lambda-rank f)))
-      (if (some stream? a)
+      (if (and (not (stream-aware? f)) (some stream? a))
         (invoke-with-streams e f a)
         [e (apply (lambda-callable e f) a)])
       (invoke-partial e f a))))
@@ -1698,20 +1708,55 @@
   ((:sub p) s))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Stream transforms
-;; TODO: this model is wrong
-;; We need 3 handlers for each *input* stream
+;; When a function is applied to a set of arguments (via invoke)
+;; and any of those arguments is a stream, then we create a new
+;; stream which will push the results of the function being re-applied
+;; as its stream arguments change.  It's like a spreadsheet cell
+;; containing a formula: the cell updates whenever any input to
+;; the formula changes.
 (defn make-monadic-stream [e f s]
   (let [c (chan)
         i ((:sub s))
         m (async/mult c)
         n (lambda-callable e f)]
     (go-loop [a (<! i)] ;; arg from stream's channel
-      (when a
-        (if-let [r (n a)]
-          (put! c r))
-        (recur (<! i))))
+      (if (not a)
+        (async/close! c)
+        (do (if-let [r (n a)]
+              (put! c r))
+            (recur (<! i)))))
     {:stream true
      :sub (fn [] (async/tap m (chan)))}))
+;; This is too complicated :-/
+;; f is a function of (count s) arguments; s is a vec of streams.
+(defn make-stream [e f s]
+  (if (= 1 (count s))
+    (make-monadic-stream e f (first s))
+    (let [c (chan)
+          i (mapv #((:sub %)) s)
+          m (async/mult c)
+          n (lambda-callable e f)]
+      ;; collect events from the input streams and remember them in a
+      ;; when an input stream closes, mark it in d until all are done
+      (go-loop [a (mapv (fn [x] nil) i)    ;; args
+                d (mapv (fn [x] false) i)] ;; done
+        (let [[v j] (async/alts! i)
+              k     (index-of i j)]
+          (if (nil? v) ;; stream k closed?
+            (if (nil? (a k)) ;; closed before started => abort
+              (async/close! c)
+              (let [dd (assoc d k true)] ;; mark k done
+                (if (all? dd)
+                  (async/close! c)
+                  (recur a dd)))) ;; continue until all done
+            (let [p (assoc a k v)] ;; p is the curr inputs from all i
+              ;; don't call f until we have data from all input streams
+              (when (all? p)
+                (if-let [r (apply n p)]
+                  (put! c r)))
+              (recur p d)))))
+      {:stream true
+       :sub (fn [] (async/tap m (chan)))})))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; DOM
 #?(:cljs (defn ev [event ele]
@@ -1749,9 +1794,10 @@
   
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Testing event source
-(defn test-stream [x]
-  {:stream true
-   :sub (fn [] (async/to-chan x))})
+(defn into-stream [x]
+  (let [c (if (coll? x) x [x])]
+    {:stream true
+     :sub (fn [] (async/to-chan c))}))
 (defn wait [x]
   (if (not (stream? x))
     x
@@ -1770,6 +1816,7 @@
                      :stop   {:f stop :rank [1]}
                      :sv     {:f sv :rank [2]}
                      :vs     {:f vs :rank [2]}
+                     :wait   {:f wait :rank [1] :stream-aware true}
                      :xasc   {:f xasc :rank [2]}
                      :xdesc  {:f xdesc :rank [2]}})
 (def builtin (merge builtin-common
