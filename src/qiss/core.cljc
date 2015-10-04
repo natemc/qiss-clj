@@ -8,13 +8,13 @@
                      [goog.string :as gstring :refer [format]]
                      [instaparse.core :as insta]
                      [instaparse.viz :as instav]
-                     [purnam.test :refer-macros [describe is is-not it fact facts]]
+                     [purnam.test :refer-macros [fact facts]]
                      [testdouble.cljs.csv :as csv]))
 
-  #?(:cljs (:use-macros ;; [purnam.core :only
+;;  #?(:cljs (:use-macros ;; [purnam.core :only
                         ;;              [obj arr ? ?> ! !> f.n def.n def* def*n]]
                         ;; [purnam.test :only [describe is is-not it fact facts]]))
-                        [purnam.test :only [fact facts]]))
+;;                        [purnam.test :only [fact facts]]))
 
   #?@(:clj [(:require [clojure-csv.core :as csv]
                       [clojure.core.async :as async
@@ -208,13 +208,13 @@
 (defn process-stream [s h]
   (let [[in out quit res] (stream-prologue s)]
     (go-loop [e (<! in)]
-      (if-not e
-        (quit)
-        (do (if-let [r (h e)]
-              (put! out r))
+      (if (nil? e) ;; beware if-let and when-let
+        (quit)     ;; we want to test for non-nil, not truthiness
+        (do (let [r (h e)]
+              (when (some? r)
+                (put! out r)))
             (recur (<! in)))))
     res))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; handy code
 (defn all? "is every x truthy?" [x] (if (every? (fn [x] x) x) true false))
@@ -323,7 +323,6 @@
           (table? y)  (make-table (cols y) (mapv #(self x %) (dict-val y)))
           :else       (f x y))))
 
-
 ;; AFAIK it is impossible to write promote-bools as a macro
 ;; in a platform-independent way.
 ;; You can't have a macro that depends on JS-specific stuff.
@@ -361,14 +360,16 @@
 (defn where-from-stream [x]
   (let [[in out quit res] (stream-prologue x)]
     (go-loop [e (<! in)]
-      (if-not e
+      (if (nil? e)
         (quit)
         (do (put! out {:where e})
             (recur (<! in)))))
     res))
 (defn amp
   "&x (where)      and    x&y (atomic min)"
-  ([x]  (if (stream? x) (where-from-stream x) (where x)))
+  ([x]  (if (stream? x)
+          (where-from-stream x)
+          (where x)))
   ([x y] (promote-bools (fn [& b] (and b)) min x y)))
 (defn div "atomic integer division" [x y] ((atomize quot) x y))
 (declare group)
@@ -441,13 +442,14 @@
   ([x y] (= x y))) ;; match
 (defn times
   "*x (first) and x*y (atomic multiplication)"
-  ([x] (if (stream? x)
+  ([x] (if-not (stream? x)
+         (first x)
          (let [[in out quit res] (stream-prologue x)]
-           (go (when-let [e (<! in)]
-                 (put! out e))
+           (go (let [e (<! in)]
+                 (if (some? e)
+                   (put! out e)))
                (quit))
-           (merge res {:extract true})) ;; hack for wait
-         (first x)))
+           (merge res {:extract true})))) ;; hack for wait
   ([x y] ((atomize *) x y)))
 (defn vs [x y]
   "vector from string"
@@ -541,22 +543,24 @@
     (go-loop [w []] ;; window
       (if (= (count w) n)
         (quit)
-        (if-let [e (<! in)]
-          (do (put! out e)
-              (recur (conj w e)))
-          (do (doseq [i (range (count w) n)]
-                (put! out (w (mod i (count w)))))
-              (quit)))))
+        (let [e (<! in)]
+          (if (some? e)
+            (do (put! out e)
+                (recur (conj w e)))
+            (do (doseq [i (range (count w) n)]
+                  (put! out (w (mod i (count w)))))
+                (quit))))))
     res))
 (defn take-last-from-stream [n x]
   (let [[in out quit res] (stream-prologue x)]
     (go-loop [w []] ;; window
-      (if-let [e (<! in)]
-        (recur (conj (if (< (count w) n) w (vec (drop 1 w))) e))
-        (do (when (not (empty? w))
-              (doseq [i (reverse (range n))]
-                (put! out (w (- (count w) 1 (mod i (count w)))))))
-            (quit))))
+      (let [e (<! in)]
+        (if (some? e)
+          (recur (conj (if (< (count w) n) w (vec (drop 1 w))) e))
+          (do (when (not (empty? w))
+                (doseq [i (reverse (range n))]
+                  (put! out (w (- (count w) 1 (mod i (count w)))))))
+              (quit)))))
     res))
 (defn kcount [x]
   "#x (count)  returns 1 for atoms"
@@ -654,20 +658,22 @@
 (defn drop-from-stream [n x]
   (let [[in out quit res] (stream-prologue x)]
     (go-loop [i n]
-      (if-let [e (<! in)]
-        (cond (< 0 i) (recur (dec i))
-              :else   (do (put! out e) (recur i)))
-        (quit)))
+      (let [e (<! in)]
+        (if (some? e)
+          (cond (< 0 i) (recur (dec i))
+                :else   (do (put! out e) (recur i)))
+          (quit))))
     res))
 (defn drop-last-from-stream [n x]
   (let [[in out quit res] (stream-prologue x)]
     (go-loop [i []]
-      (if-let [e (<! in)]
-        (if (< (count i) n)
-          (recur (conj i e))
-          (do (put! out (first i))
-              (recur (conj (vec (drop 1 i)) e))))
-        (quit)))
+      (let [e (<! in)]
+        (if (nil? e)
+          (quit)
+          (if (< (count i) n)
+            (recur (conj i e))
+            (do (put! out (first i))
+                (recur (conj (vec (drop 1 i)) e)))))))
     res))
 (defn kdrop [x y]
   "Remove the first x elements from y (negative x => drop from the back)"
@@ -846,14 +852,15 @@
          :else             (err "internal error at-xform" x i))))
 (defn at
   "type"
-  ([_ x] (condp #(= (type %1) %2) x ; type
-           java.lang.Boolean -1
-           java.lang.Long -7
-           java.lang.Double -9
-           java.lang.Character -10
-           java.lang.String 10
-           clojure.lang.Keyword -11
-           0))
+  ([_ x] (err "nyi: monadic @"))
+  ;; (condp #(= (type %1) %2) x ; type
+  ;;          java.lang.Boolean -1
+  ;;          java.lang.Long -7
+  ;;          java.lang.Double -9
+  ;;          java.lang.Character -10
+  ;;          java.lang.String 10
+  ;;          clojure.lang.Keyword -11
+  ;;          0))
 ;;  "index at top level"
   ([e x y] (last (invoke e x [y])))
 ;;  "selectively transform at top level"
@@ -1066,7 +1073,7 @@
   "Create a function that will assign f's formals"
   (def simple (fn [a] {:formals a :rank [(count a)]}))
   (if-let [a (:formals f)]
-    (if (all? (map #(= :id first %) a))
+    (if (all? (mapv #(= :id (first %)) a))
       (simple (mapv #(keyword (second %)) a))
       {:formals (partial kdestructure a) :rank [(count a)]})
     (simple (mapv keyword (implicit-args (:exprs f))))))
@@ -1316,6 +1323,7 @@
                  a
                  {:env e
                   :pass-global-env true
+                  :stream-aware (:rank a)
                   :text t})]
     [e (assoc w :f (feval tu w))]))
 (defn vec-with-streams [v]
@@ -1785,21 +1793,10 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Streams
-;; A stream is (currently implemented as) a clojure map with the 3 usual methods
-;; on-done, on-error, and on-next.  We need to expand this to a stream with
-;; variadic input, so for each input ...
-;; Maybe a stream is a collection of subscribers?
-(defn propagate-event
-  ([cb] (doseq [f cb] (f)))
-  ([cb a] (doseq [f cb] (f a))))
-(defn on-done [subs]
-  (propagate-event (filter some? (map :on-done subs))))
-(defn on-error [subs e]
-  (propagate-event (filter some? (map :on-error subs)) e))
-(defn on-next [subs e]
-  (propagate-event (filter some? (map :on-next subs)) e))
-(defn sub [p s] ;; publisher, subscriber
-  ((:sub p) s))
+;; Streams are implemented using core.async.  The go macro really makes
+;; implementing this stuff much easier than doing it ourselves.
+;; One drawback is we can't pass nil, which is another thing to keep in mind
+;; whenever we get around to dealing with nulls in qiss.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Stream transforms
 ;; When a function is applied to a set of arguments (via invoke)
@@ -1811,10 +1808,11 @@
 (defn make-monadic-stream [f s]
   (let [[in out quit res] (stream-prologue s)]
     (go-loop [a (<! in)] ;; arg from stream's channel
-      (if (not a)
+      (if (nil? a)
         (quit)
-        (do (if-let [r (f a)]
-              (put! out r))
+        (do (let [r (f a)]
+              (when (some? r)
+                (put! out r)))
             (recur (<! in)))))
     res))
 ;; This is too complicated :-/
@@ -1834,15 +1832,18 @@
                 d (mapv (fn [x] false) in)] ;; done
         (let [[v j] (async/alts! in)
               i     (index-of in j)]
-          (if v
+          (if (some? v)
             (let [p (assoc a i v)] ;; p is the curr inputs from all in
-              (when (all? p) ;; don't call til we have data from all in
-                (when-let [r (apply f p)] (put! out r)))
+              (when (every? some? p) ;; need full arg set b4 1st call
+                (let [r (apply f p)]
+                  (when (some? r) (put! out r))))
               (recur p d))
             (if (nil? (a i)) ;; closed before started => abort
               (quit)
               (let [dd (assoc d i true)] ;; mark k done
-                (if (all? dd) (quit) (recur a dd))))))) ;; til all done
+                (if (every? some? dd)
+                  (quit)
+                  (recur a dd))))))) ;; til all done
       res)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; DOM
@@ -1884,11 +1885,12 @@
   "Sample s every t milliseconds"
   (let [[in out quit res] (stream-prologue s)
         latest            (atom nil)
-        push-latest       (fn [] (when-let [x @latest]
-                                   (put! out x)
-                                   (swap! latest (fn [o] nil))))]
+        push-latest       (fn [] (let [x @latest]
+                                   (when (some? x)
+                                     (put! out x)
+                                     (swap! latest (fn [o] nil)))))]
     (go-loop [e (<! in)]
-      (if (not e)
+      (if (nil? e)
         (quit)
         (do (swap! latest (fn [x] e))
             (recur (<! in)))))
@@ -1969,7 +1971,7 @@
                   (if (= "" s) ;; no src attr => code is in tag's text
                     (aset r i (str/trim (.-text e)))
                     (xhr/send s (fn [v] (aset r i (response-text v))
-                                  (when (all? r)
+                                  (when (every? some? r)
                                     (doseq [c r] (load-code c))
                                     (null! "code loaded"))))))))))
   ([x]
@@ -1983,7 +1985,7 @@
 #?(:clj (declare vis))
 (load-grammar "qiss/grammar"
               (fn [g]
-                (null! "loaded grammer OK")
+                (null! "loaded grammar OK")
                 (def grammar g)
                 (def parser  (insta/parser grammar))
                 (def parse   (comp (partial insta/transform xform) parser))
@@ -2519,45 +2521,47 @@
              (keval "{[]([a]b):([p:`a`b`c]q:1 2 3);b}[]") => [1 2 3]))
 #?(:clj ;; these tests don't work in js due to no cljs.async.core/wait
    (facts "about streams"
-          (fact "atomic ops"
-                (keval "<=2*>=!3") => [0 2 4]
-                (keval "<=1 2 3*>=!3") => [[0 0 0] [1 2 3] [2 4 6]])
-                ;; (keval "<=(>=!3)*>=!3") => one of the following:
-                ;; [[0 2 4] [0 0 2 4] [0 0 1 2 4]]
-                ;; How do we say this in midje?
-          (fact "user-defined functions"
-                (keval "<={x*x}@>=!3") => [0 1 4])
-          (fact "first"
-                (keval "<=*>=!3") => 0)
-          (fact "take"
-                (keval "<=0#>=!3") => []
-                (keval "<=2#>=!3") => [0 1])
-          (fact "take from the back"
-                (keval "<=-1#>=!3") => [2]
-                (keval "<=-3#>=!3") => [0 1 2])
-          (fact "overtake"
-                (keval "<=5#>=!3") => [0 1 2 0 1]
-                (keval "<=-5#>=!3") => [1 2 0 1 2])
-          (fact "drop"
-                (keval "<=1_>=!3") => [1 2]
-                (keval "<=3_>=!3") => []
-                (keval "<=4_>=!3") => [])
-          (fact "drop from the back"
-                (keval "<=-1_>=!3") => [0 1]
-                (keval "<=-3_>=!3") => []
-                (keval "<=-4_>=!3") => [])
-          (fact "vector literals with stream components"
-                (keval "<=(1;>=!3)") => [[1 0] [1 1] [1 2]])
-          (fact "indexing with @ with a stream on the rhs"
-                (keval "<=(!5)@>=0 2 4") => [0 2 4])
-          (fact "indexing with @ with a stream on the lhs"
-                (keval "<=(>=(0 2 4;1 3 5))1") => [2 3])
-          (fact "indexing with . with a stream on the rhs"
-                (keval "<=(0 1;2 3).>=(0 1;1 1)") => [1 3])
-          (fact "indexing with . with a stream on the lhs"
-                (keval "<=(>=((0 1;2 3);(4 5;6 7))). 0 1") => [1 5])))
+;;          (fact "atomic ops"
+;;                (keval "<=2*>=!3") => [0 2 4]
+;;                (keval "<=1 2 3*>=!3") => [[0 0 0] [1 2 3] [2 4 6]])
+          ;; (keval "<=(>=!3)*>=!3") => one of the following:
+          ;; [[0 2 4] [0 0 2 4] [0 0 1 2 4]]
+          ;; How do we say this in midje?
+;;          (fact "user-defined functions"
+;;                (keval "<={x*x}@>=!3") => [0 1 4])
+;;          (fact "first"
+;;                (keval "<=*>=!3") => 0)
+;;          (fact "take"
+;;                (keval "<=0#>=!3") => []
+;;                (keval "<=2#>=!3") => [0 1])
+;;          (fact "take from the back"
+;;                (keval "<=-1#>=!3") => [2]
+;;                (keval "<=-3#>=!3") => [0 1 2])
+;;          (fact "overtake"
+;;                (keval "<=5#>=!3") => [0 1 2 0 1]
+;;                (keval "<=-5#>=!3") => [1 2 0 1 2])
+;;          (fact "drop"
+;;                (keval "<=1_>=!3") => [1 2]
+;;                (keval "<=3_>=!3") => []
+;;                (keval "<=4_>=!3") => [])
+;;          (fact "drop from the back"
+;;                (keval "<=-1_>=!3") => [0 1]
+;;                (keval "<=-3_>=!3") => []
+;;                (keval "<=-4_>=!3") => [])
+;;          (fact "vector literals with stream components"
+;;                (keval "<=(1;>=!3)") => [[1 0] [1 1] [1 2]])
+;;          (fact "indexing with @ with a stream on the rhs"
+;;                (keval "<=(!5)@>=0 2 4") => [0 2 4])
+;;          (fact "indexing with @ with a stream on the lhs"
+;;                (keval "<=(>=(0 2 4;1 3 5))1") => [2 3])
+;;          (fact "indexing with . with a stream on the rhs"
+;;                (keval "<=(0 1;2 3).>=(0 1;1 1)") => [1 3])
+;;          (fact "indexing with . with a stream on the lhs"
+;;                (keval "<=(>=((0 1;2 3);(4 5;6 7))). 0 1") => [1 5])))
+  ))
 ;; gave up on this one: couldn't fix the <exprx> rule
 ;; (fact "select"
 ;;       (count
 ;;        (parses
 ;;         "select +/a,+/b from([]a:,/3#/:1 2;b:6#10 20 30)where b<=20")) => 1))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
