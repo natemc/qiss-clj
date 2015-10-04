@@ -3,18 +3,13 @@
   #?(:cljs (:require [cljs.core.async :as async :refer [chan put! <!]]
                      [clojure.browser.repl :as brepl]
                      [clojure.string :as str]
+                     [cljs.test :refer-macros [deftest is run-tests testing]]
                      [dommy.core :as dom :refer-macros [sel sel1]]
                      [goog.net.XhrIo :as xhr]
                      [goog.string :as gstring :refer [format]]
                      [instaparse.core :as insta]
                      [instaparse.viz :as instav]
-                     [purnam.test :refer-macros [fact facts]]
                      [testdouble.cljs.csv :as csv]))
-
-;;  #?(:cljs (:use-macros ;; [purnam.core :only
-                        ;;              [obj arr ? ?> ! !> f.n def.n def* def*n]]
-                        ;; [purnam.test :only [describe is is-not it fact facts]]))
-;;                        [purnam.test :only [fact facts]]))
 
   #?@(:clj [(:require [clojure-csv.core :as csv]
                       [clojure.core.async :as async
@@ -22,9 +17,9 @@
                       [clojure.java.io :as io]
                       [clojure.stacktrace :as st] ;; handy from the repl
                       [clojure.string :as str]
+                      [clojure.test :refer :all]
                       [instaparse.core :as insta]
-                      [instaparse.viz :as instav]
-                      [midje.sweet :refer :all])
+                      [instaparse.viz :as instav])
             (:gen-class)]))
 
 #?(:cljs (enable-console-print!)) ;; println -> js/console.log
@@ -951,7 +946,7 @@
 (defn parse-double "parse the string x as a double" [x]
   (if (coll? x) (mapv parse-double x)
                 #?(:clj (Double/parseDouble x)
-                   :cljs (js/parseDouble x))))
+                   :cljs (js/parseFloat x))))
 (defn parse-long "parse the string x as a long" [x]
   (if (coll? x) (mapv parse-long x)
                 #?(:clj (Long/parseLong x)
@@ -2025,543 +2020,545 @@
           "qiss repl"
           [& args]
           #?(:clj (repl @genv)))
-
-(facts "about bools"
-       (fact "bools eval to themselves"
-             (keval "1b") => true
-             (keval "0b") => false))
-(facts "about simple bool vector literals"
-       (fact "compact"
-             (keval "1001001b") => [true false false true false false true]))
-(facts "about ~"
-       (fact "atom"
-             (keval "~5") => false
-             (keval "~0b") => true)
-       (fact "vector"
-             (keval "~101b") => [false true false]
-             (keval "~2 7 0") => [false false true])
-       (fact "dict"
-             (keval "~`a`b`c!101b") => (keval "`a`b`c!010b"))
-       (fact "table"
-             (keval "~([]a:1 0 4)") => (keval "([]a:010b)"))
-       (fact "keyed tables"
-             (keval "~([a:1 0 4]b:010b)") => (keval "([a:1 0 4]b:101b)")))
-(facts "about chars"
-       (facts "chars eval to themselves"
-              (keval "\"a\"") => \a))
-(facts "about simple char vector literals"
-       (fact "char vector literals eval to vectors of char"
-             (keval "\"abc\"") => [\a \b \c]))
-(facts "about floats"
-       (fact "floats eval to themselves"
-             (keval "1.") => 1.0
-             (keval "-1.") => -1.0))
-(facts "about float vector literals"
-       (fact "no punctuation"
-             (keval "1.4 2.5 3.6") => [1.4 2.5 3.6])
-       (fact "any float promotes the whole vector"
-             (keval "1 2.0 3") => [1.0 2.0 3.0])
-       (fact "fractional part not needed if it is zero"
-             (keval "1 2. 3") => [1.0 2.0 3.0])
-       (fact "spaces may be added for formatting"
-             (keval "1     2.    3") => [1.0 2.0 3.0]))
-(facts "about longs"
-       (fact "longs eval to themselves"
-             (keval "1") => 1
-             (keval "-123") => -123)
-       (fact "longs add" ;; TODO: + in clojure promotes to bignum
-             (keval "1+10") => 11
-             (keval "1+-10") => -9
-             (keval "-1+10") => 9)
-       (fact "longs subtract"
-             (keval "1-10") => -9
-             (keval "100-42") => 58))
-(facts "about simple long vector literals"
-       (fact "no puncuation"
-             (keval "1 2 3") => [1 2 3])
-       (fact "monadic - sticks to literals"
-             (keval "1 -2 3") => [1 -2 3])
-       (fact "spaces may be added for formatting"
-             (keval "1    2     3") => [1 2 3]))
-(facts "about mixed vectors"
-       (fact "top-level indexing"
-             (keval "(`a`b`c;1)0") => [:a :b :c]))
-(facts "about vectors with holes"
-       (fact "holes are maintained"
-             (keval "(3;)") => [3 :hole])
-       (fact "holes can be filled via []"
-             (keval "(3;)[4]") => [3 4]
-             (keval "(;3;)[4;5]") => [4 3 5])
-       (fact "holes can be filled via juxt"
-             (keval "(3;)4") => [3 4])
-       (fact "holes can be filled in stages"
-             (keval "(;3;)4") => [4 3 :hole]
-             (keval "(;3;)[4]5") => [4 3 5]))
-(facts "about !"
-       (fact "monadic ! on a long is til"
-             (keval "!3") => [0 1 2])
-       (fact "monadic ! on a dict is key"
-             (keval "!`a`b`c!1 2 3") => [:a :b :c]))
-(facts "about ?"
-       (fact "container?... => find"
-             (keval "(!5)?0") => 0
-             (keval "(!5)?0 2 4") => [0 2 4]
-             (keval "(!5)?10 3 1") => [5 3 1]
-             (keval "(`a`b`c!1 2 3)?2") => :b
-             (keval "(`a`b`c!1 2 3)?3 1") => [:c :a]
-             (keval "([]a:1 2 3)?([]a:1 2)") => [0 1]
-             (keval "([a:`a`b`c]b:1 2 3)?([]b:1 2)") => (keval "([]a:`a`b)")))
-(facts "about +"
-       (fact "+ is atomic"
-             (keval "1+10 20") => [11 21]
-             (keval "1 2+10") => [11 12]
-             (keval "1 2+10 20") => [11 22]))
-(facts "about symbols"
-       (fact "symbols eval to clojure keywords"
-             (keval "`abc") => :abc))
-(facts "about symbol vector literals"
-       (fact "no spaces"
-             (keval "`abc`def") => [:abc :def]))
-;; TODO             (keval "`abc `def") => error
-(facts "about +"
-       (fact "+ doesn't care about spaces"
-             (keval "1 +2") => 3
-             (keval "1+ 2") => 3
-             (keval "1 + 2") => 3))
-(facts "about <"
-       (fact "monadic < is iasc"
-             (keval "<`d`d`e`c`c`b`d`e`e`b") => [5 9 3 4 0 1 6 2 7 8])
-       (fact "< works on dicts"
-             (keval "<`a`b`c`d`e`f`g`h`i`j!4 0 2 1 2 1 2 3 2 4") =>
-             (keval "`b`d`f`c`e`g`i`h`a`j")))
-(facts "about >"
-       (fact "monadic > is idesc"
-             (keval ">`d`d`e`c`c`b`d`e`e`b") => [2 7 8 0 1 6 3 4 5 9]))
-(facts "about right-to-left"
-       (fact "no operator precedence"
-             (keval "10*2+3") => 50))
-(facts "about #"
-       (fact "n#container => take 1st n"
-             (keval "3#!5") => [0 1 2]
-             (keval "2#`a`b`c!1 2 3") => (keval "`a`b!1 2")
-             (keval "2#([]a:`a`b`c`d;b:1 2 3 4)") => (keval "([]a:`a`b;b:1 2)")
-             (keval "1#([]a:`a`b`c;b:1 2 3)") => (keval "([]a:,`a;b:,1)"))
-       (fact "(-n)# container => take last n"
-             (keval "-2#!5") => [3 4]
-             (keval "-2#`a`b`c!1 2 3") => (keval "`b`c!2 3")
-             (keval "-2#([]a:`a`b`c`d;b:1 2 3 4)") => (keval "([]a:`c`d;b:3 4)"))
-       (fact "n#x where n>#x => overtake"
-             (keval "5#!3") => [0 1 2 0 1]
-             (keval "-5#!3") => [1 2 0 1 2]))
-(facts "about _"
-       (fact "n _ container => drop 1st n"
-             (keval "2_!5") => [2 3 4]
-             (keval "2_`a`b`c`d!1 2 3 4") => (keval "`c`d!3 4")
-             (keval "2_([]a:`a`b`c`d;b:1 2 3 4)") =>
-             (keval "([]a:`c`d;b:3 4)")
-             (keval "2_([]a:`a`b`c;b:1 2 3)") => (keval "([]a:,`c;b:,3)"))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-       (fact "(-n) _ container => drop last n"
-             (keval "-2_!5") => [0 1 2]
-             (keval "-2_`a`b`c`d!1 2 3 4") => (keval "`a`b!1 2")
-             (keval "-1_([]a:`a`b`c;b:1 2 3)") => (keval "([]a:`a`b;b:1 2)")
-             (keval "2_([a:`a`b`c]b:1 2 3)") => (keval "([a:,`c]b:,3)"))
-       (fact "[n0...] _ vector => cut"
-             (keval "0 2 5_\"0123456\"") => (keval "(\"01\";\"234\";\"56\")"))
-       (fact "container _ index => remove at"
-             (keval "(!5)_2") => [0 1 3 4]
-             (keval "(`a`b`c!1 2 3)_`c") => (keval "`a`b!1 2")
-             (keval "(`a`b`c!1 2 3)_`b") => (keval "`a`c!1 3")
-             (keval "([]a:`a`b`c;b:1 2 3)_`a") => (keval "([]b:1 2 3)")
-             (keval "([]a:`a`b`c;b:1 2 3)_1") => (keval "([]a:`a`c;b:1 3)")))
-(facts "about adverbs"
-       (fact "they can be monadic"
-             (keval "+/1 2 3") => 6)
-       (fact "they can be dyadic"
-             (keval "0+/1 2 3") => 6)
-       (fact "/: does"
-             (keval "1 2 3*/:1 2") => [[1 2 3] [2 4 6]])
-       (fact "adverbed functions can be assigned"
-             (keval "{a:+/;a[0;3 4 5]}[]") => 12)
-       (fact "they can be stacked"
-             (keval ",//(1 2 3;(4 5 6;7 8 9))") => [1 2 3 4 5 6 7 8 9]
-             (keval "1 2,/:\\:3 4") => [[[1 3] [1 4]] [[2 3] [2 4]]]
-             (keval "#''((1 2 3;3 4 5);(5 6 7;7 8 9))") => [[3 3] [3 3]]))
-(facts "about calling functions"
-       (fact "supplying all arguments causing invocation"
-             (keval "div[10;3]") => 3))
-(facts "about partials"
-       (fact "works with []"
-             (keval "{z}[3][4][5]") => 5)
-       (fact "works with [;]"
-             (keval "{z;y}[;10;][3;4]") => 10
-             (keval "{z;y}[;10][3;4]") => 10)
-       (fact "works with juxt"
-             (keval "{y}[3]5") => 5
-             (keval "(1+)3") => 4
-             (keval "@[!10;2*!5;3*]") => [0 1 6 3 12 5 18 7 24 9]
-             (keval "(in 1 2 3)1 2") => (keval "110b")))
-(facts "about indexing at depth"
-       (fact "2-d vector"
-             (keval "(`a`b`c;1 2 3)[0;1]") => :b
-             (keval "(`a`b`c;1 2 3)[0;0 1]") => [:a :b])
-       (fact "eliding first dimension yields columns"
-             (keval "(0 1 2;3 4 5;6 7 8)[;0]") => [0 3 6]))
-(facts "about lambdas"
-       (fact "implicit args"
-             (keval "{x}[3]") => 3
-             (keval "{x+y}[3;4]") => 7
-             (keval "{x+y+z}[3;4;5]") => 12))
-(facts "about juxtaposition"
-       (fact "lambdas juxtapose without whitespace"
-             (keval "{x}3") => 3)
-       (fact "symbol vector literals followed by longs"
-             (keval "`a`b`c`d`e 1") => :b
-             (keval "`a`b`c`d`e 1 2 3") => [:b :c :d])
-       (fact "dyadic user-defined functions can be used infix"
-             (keval "`a`b`c`d`e{x y}1 2 3") => [:b :c :d]
-             (keval "1 2 4 in 1 2 3") => (keval "110b"))
-       (fact "float vector literals are valid lhs"
-             (keval "1 2.{x+y}3 4") => (keval "4 6.")
-             (keval "1 2. in 2 4. 6") => (keval "01b")))
-(facts "about indexing"
-       (fact "square brackets no semicolons"
-             (keval "1 2 3 4[0 2]") => [1 3])
-       (fact "with @"
-             (keval "1 2 3 4@0 2") => [1 3])
-       (fact "with juxt"
-             (keval "{x 0 2}1 2 3 4") => [1 3])
-       (fact "repeated"
-             (keval "1 2 3 4@(0 2;1 3)") => [[1 3] [2 4]]))
-(facts "about group (monadic =)"
-       (fact "vector"
-             (keval "=4 0 2 1 2 1 2 3 2 4") =>
-             (keval "4 0 2 1 3!(0 9;,1;2 4 6 8;3 5;,7)"))
-       (fact "dict"
-             (keval "=`a`b`c`d`e`f`g`h`i`j!0 1 2 0 1 2 0 1 2 0") =>
-             (keval "0 1 2!(`a`d`g`j;`b`e`h;`c`f`i)")))
-(facts "about @"
-       (fact "call it like a function"
-             (keval "@[1 2 3 4;0 2]") => [1 3]
-             (keval "@[{x+x};4]") => 8))
-(facts "about 3-arg @"
-       (fact "vector indexed with long"
-             (keval "@[!4;1;{x*2}]") => [0 2 2 3])
-       (fact "vector indexed with vector"
-             (keval "@[!4;1 3;{x+1}]") => [0 2 2 4])
-       (fact "vector repeatedly indexed with vector"
-             (keval "@[!4;(0 1;1 2);{x+1}]") => [1 3 3 3])
-       (fact "dict indexed with atom"
-             (keval "@[`a`b`c!1 2 3;`a;{x+1}]") => (keval "`a`b`c!2 2 3"))
-       (fact "dict indexed with vector"
-             (keval "@[`a`b`c!1 2 3;`a`c;{x+1}]") => (keval "`a`b`c!2 2 4"))
-       (fact "dict indexed repeatedly with vector"
-             (keval "@[`a`b`c!1 2 3;(`a`b;`a`c);{x+1}]") =>
-             (keval "`a`b`c!3 3 4"))
-       (fact "table indexed with long"
-             (keval "@[([]a:1 2 3);0;{2*x}]") => (keval "([]a:2 2 3)"))
-       (fact "table indexed with longs"
-             (keval "@[([]a:1 2 3);0 2;{2*x}]") => (keval "([]a:2 2 6)"))
-       (fact "table indexed with symbol"
-             (keval "@[([]a:1 2 3;b:10 20 30);`a;{2*x}]") =>
-             (keval "([]a:2 4 6;b:10 20 30)"))
-       (fact "table indexed with symbols"
-             (keval "@[([]a:1 2 3;b:10 20 30;c:100 200 300);`a`c;{2*x}]") =>
-             (keval "([]a:2 4 6;b:10 20 30;c:200 400 600)"))
-       (fact "table complex indexing"
-             (keval "@[([]a:1 2 3;b:10 20 30;c:100 200 300);(`a;0);{2*x}]") =>
-             (keval "([]a:4 4 6;b:20 20 30;c:200 200 300)")))
-(facts "about 4-arg @"
-       (fact "vector indexed with long"
-             (keval "@[!4;1;*;2]") => [0 2 2 3])
-       (fact "vector indexed with vector paired with atom"
-             (keval "@[!4;1 3;*;2]") => [0 2 2 6])
-       (fact "vector indexed with matrix paired with atom"
-             (keval "@[!4;(1 3;2 0);*;2]") => [0 2 4 6])
-       (fact "vector indexed with matrix paired with vector"
-             (keval "@[!4;(1 3;2 0);*;2 4]") => [0 2 8 6])
-       (fact "vector indexed with matrix paired with matrix"
-             (keval "@[!4;(1 3;2 0);*;(2 4;6 8)]") => [0 2 12 12])
-       (fact "dict indexed with ragged paired with atom"
-             (keval "@[`a`b`c!1 2 3;(`a`c;`b);*;2]") => (keval "`a`b`c!2 4 6"))
-       (fact "tables"
-             (keval "@[([]a:1 2 3;b:10 20 30;c:100 200 300);(`a`b;0);*;(5 10;100)]") =>
-             (keval "([]a:500 10 15;b:10000 200 300;c:10000 200 300)")))
-(facts "about 2-arg dot"
-       (fact "indexing vectors with vectors"
-             (keval "1 2 3 4 .,1") => 2
-             (keval "1 2 3 4 .,1 2") => [2 3]
-             (keval "(0 1 2;3 4 5;6 7 8).,0 2") => [[0 1 2] [6 7 8]]
-             (keval "(0 1 2;3 4 5;6 7 8). 1 1") => 4
-             (keval "(0 1 2;3 4 5;6 7 8).(0 1;1)") => [1 4]
-             (keval "(0 1 2;3 4 5;6 7 8).(0 2;0 2)") => [[0 2] [6 8]])
-       (fact "eliding the first index yields columns"
-             (keval "(0 1 2;3 4 5;6 7 8).(;0 2)") => [[0 2] [3 5] [6 8]])
-       (fact "indexing dicts of vectors"
-             (keval "(`a`b`c!(0 1 2;3 4 5;6 7 8)).(`b;1)") => 4
-             (keval "(`a`b`c!(0 1 2;3 4 5;6 7 8)).(`a`b;1)") => [1 4]
-             (keval "(`a`b`c!(0 1 2;3 4 5;6 7 8)).(`b;0 2)") => [3 5])
-       (fact "indexing tables"
-             (keval "([]a:1 2 3;b:4 5 6).(`b;1)") => 5
-             (keval "([]a:1 2 3;b:4 5 6).(1;`b)") => 5
-             (keval "([]a:1 2 3;b:4 5 6).(`a`b;1)") => [2 5]
-             (keval "([]a:1 2 3;b:4 5 6).(`a`b;0 2)") => [[1 3] [4 6]])
-       (fact "applying functions"
-             (keval "{2}.()") => 2
-             (keval "{x}.,2") => 2
-             (keval "{x+y}. 1 2") => 3
-             (keval "+. 1 2") => 3
-             (keval "{x+z}. 1 2 3") => 4))
-(facts "about 3-arg dot"
-       (fact "cross-product index"
-             (keval ".[(0 1 2;3 4 5;6 7 8);(0 1;0 1);{x+100}]") =>
-             (keval "(100 101 2;103 104 5;6 7 8)")
-             (keval ".[(0 1 2;3 4 5;6 7 8);(1;0 1 2);{x+100}]") =>
-             (keval "(0 1 2;103 104 105;6 7 8)"))
-       (fact "3d matrix"
-             (keval ".[((0 1;2 3);(4 5;6 7);(8 9;10 11));1 1 1;{x*x}]") =>
-             (keval "((0 1;2 3);(4 5;6 49);(8 9;10 11))")))
-(facts "about 4-arg dot"
-       (fact "dict"
-             (keval ".[`a`b`c!(0 1 2;3 4 5;6 7 8);(`b;0 2);*;10 100]") =>
-             (keval "`a`b`c!(0 1 2;30 4 500;6 7 8)")))
-(facts "about join"
-       (fact "monadic , envectors"
-             (keval ",1") => [1]
-             (keval ",1 2 3") => [[1 2 3]])
-       (fact "dyadic joins"
-             (keval "1 2,3 4") => [1 2 3 4])
-       (fact "joining dicts is a merge where rhs wins"
-             (keval "(`a`b`c`e!1 2 3 5),`b`c`d!10 20 30") =>
-             (keval "`a`b`c`e`d!1 10 20 5 30")))
-(facts "about deleting columns"
-       (fact "can delete a column"
-             (keval "delete b from ([]a:1 2 3;b:1 2 3)") =>
-             (keval "([]a:1 2 3)"))
-       (fact "can delete multiple columns"
-             (keval "delete a,c from ([]a:1 2 3;b:1 2 3;c:1 2 3)") =>
-             (keval "([]b:1 2 3)"))
-       (fact "can delete a key column"
-             (keval "delete a from ([a:1 2 3]b:1 2 3;c:1 2 3)") =>
-             (keval "([]b:1 2 3;c:1 2 3)"))
-       (fact "deleting only non-keycols from a keyed table preserves keycols"
-             (keval "delete b from ([a:1 2 3]b:1 2 3;c:1 2 3)") =>
-             (keval "([a:1 2 3]c:1 2 3)")
-             (keval "delete b from ([a:1 2 3;b:1 2 3]c:1 2 3)") =>
-             (keval "([]a:1 2 3;c:1 2 3)")))
-(facts "about deleting rows"
-       (fact "can delete all rows"
-             (keval "delete from([]a:1 2 3)") => (keval "([]a:())"))
-       (fact "can delete rows specified by where"
-             (keval "delete from([]a:1 2 3)where a=2") => (keval "([]a:1 3)"))
-       (fact "can delete rows from keyed tables"
-             (keval "delete from ([a:1 2 3]b:1 2 3)where a=2") =>
-             (keval "([a:1 3]b:1 3)")))
-(facts "about select"
-       (fact "no agg required"
-             (keval "select from([]a:1 2 3)") => (keval "([]a:1 2 3)"))
-       (fact "id agg guesses result column to match original column"
-             (keval "select a from([]a:1 2 3)") => (keval "([]a:1 2 3)"))
-       (fact "works on keyed tables"
-             (keval "select from([a:`a`b]b:1 2)") => (keval "([a:`a`b]b:1 2)")))
-(facts "about by"
-       (fact "simple case"
-             (keval "select +/b by a from([]a:6#`a`b`c;b:!6)") =>
-             (keval "([a:`a`b`c]b:3 5 7)"))
-       (fact "compound by clause"
-             (keval "select by a,b from([]a:8#`a`a`b`b;b:8#`a`b;c:!8)") =>
-             (keval "([a:`a`a`b`b;b:`a`b`a`b];c:(0 4;1 5;2 6;3 7))")))
-(facts "about keying tables"
-       (fact "can key by first n columns"
-             (keval "1!([]a:`a`b`c;b:1 2 3)") => (keval "([a:`a`b`c]b:1 2 3)")
-             (keval "2!([]a:`a`b;b:1 2;c:3 4") => (keval "([a:`a`b;b:1 2]c:3 4"))
-       (fact "can key by col name(s)"
-             (keval "`a!([]a:`a`b`c;b:1 2 3)") => (keval "([a:`a`b`c]b:1 2 3)")
-             (keval "`a`c!([]a:`a`b;b:1 2;c:3 4") => (keval "([a:`a`b;c:3 4]b:1 2")))
-(facts "about indexing keyed tables"
-       (fact "can be done with a dict"
-             (keval "([a:`a`b`c]b:1 2 3)`a!`a") => (keval "`b!1"))
-       (fact "can be done with just the value of a dict"
-             (keval "([a:`a`b`c]b:1 2 3)`c") => (keval "`b!3"))
-       (fact "can be done with a table"
-             (keval "([a:`a`b`c]b:1 2 3)([]a:`a`c)") => (keval "([]b:1 3)")))
-(facts "about where"
-       (fact "works with bools"
-             (keval "&1001b") => [0 3])
-       (fact "works with longs"
-             (keval "&0 1 2 3") => [1 2 2 3 3 3]))
-(facts "about lj"
-       (fact "uses rhs key col"
-             (keval "([]a:`a`b`c)lj([a:`a`b`c]b:1 2 3)") =>
-             (keval "([]a:`a`b`c;b:1 2 3)"))
-       (fact "two key cols"
-             (keval "([]a:`a`b`c;b:1 2 3)lj([a:`a`b`c;b:1 2 3]c:10 20 30)") =>
-             (keval "([]a:`a`b`c;b:1 2 3;c:10 20 30)")))
-(facts "about xasc"
-       (fact "sort on one col"
-             (keval "`a xasc([]a:`c`b`a;b:1 2 3)") =>
-             (keval "([]a:`a`b`c;b:3 2 1)"))
-       (fact "sort on two cols"
-             (keval "`a`b xasc([]a:`c`b`a`a`b`c;b:3 10 3 20 30 2)") =>
-             (keval "([]a:`a`a`b`b`c`c;b:3 20 10 30 2 3)"))
-       (fact "works on keyed tables"
-             (keval "`a`b xasc([a:`c`b`a`a`b`c]b:3 10 3 20 30 2)") =>
-             (keval "([a:`a`a`b`b`c`c];b:3 20 10 30 2 3)")))
-(facts "about parsing non-ambiguity"
-       (fact "adverbed"
-             (count (parses "f/")) => 1
-             (count (parses "f/1 2 3")) => 1
-             (count (parses "0 f/1 2 3")) => 1
-             (count (parses "0 f//1 2 3")) => 1
-             (count (parses "f//1 2 3")) => 1)
-       (fact "assign"
-             (count (parses "a:3")) => 1
-             (count (parses "a:`a`b`c`d`e 1 2 3")) => 1)
-       (fact "bools"
-             (count (parses "0b")) => 1
-             (count (parses "1b")) => 1)
-       (fact "bool vector literals"
-             (count (parses "010b")) => 1
-             (count (parses "1001b")) => 1)
-       (fact "call"
-             (count (parses "`a`b`c[0]")) => 1
-             (count (parses "`a`b`c[0 1]")) => 1
-             (count (parses "{x}[0]")) => 1)
-       (fact "chars"
-             (count (parses "\"a\"")) => 1
-             (count (parses "\"\\\"\"")) => 1)
-       (fact "char vector lterals"
-             (count (parses "\"abc\"")) => 1
-             (count (parses "\"abc\\\"\"def")) => 1)
-       (fact "dyop"
-             (count (parses "1+2")) => 1
-             (count (parses "1 +2")) => 1
-             (count (parses "1+ 2")) => 1
-             (count (parses "1 + 2")) => 1)
-       (fact "floats"
-             (count (parses "1.")) => 1
-             (count (parses "-1.")) => 1)
-       (fact "float vector literals"
-             (count (parses "1. 2 3")) => 1
-             (count (parses "1 2. 3")) => 1
-             (count (parses "-1 2. 3")) => 1
-             (count (parses "1    2.    3")) => 1)
-       (fact "ids"
-             (count (parses "x")) => 1
-             (count (parses "xyzzy")) => 1)
-       (fact "juxt"
-             (count (parses "`a`b`c`d`e 1")) => 1
-             (count (parses "`a`b`c`d`e 1 2 3")) => 1
-             (count (parses "x 1")) => 1
-             (count (parses "x 1+2")) => 1
-             (count (parses "{x}3")) => 1
-             (count (parses "1{y}3")) => 1
-             (count (parses "1{y}")) => 1) ; bind 1st arg
-       (fact "lambdas"
-             (count (parses "{}")) => 1
-             (count (parses "{x}")) => 1
-             (count (parses "{[a]a}")) => 1
-             (count (parses "`a`b`c{x y}0 1 2")) => 1)
-       (fact "longs"
-             (count (parses "1")) => 1)
-       (fact "long vector literals"
-             (count (parses "1 2 3")) => 1
-             (count (parses "1    2    3")) => 1)
-       (fact "monop"
-             (count (parses "*1 2 3")) => 1)
-       (fact "symbols"
-             (count (parses "`a")) => 1)
-       (fact "symbol vector literals"
-             (count (parses "`a`b`c`d`e")) => 1))
-(facts "about destructuring function arguments"
-       (fact "vector destructuring can use vector literal syntax"
-             (keval "{[(x;y)]y}1 2") => 2
-             (keval "{[(x;y);z]z}[1 2;3]") => 3
-             (keval "{[x;(y;z)]z}[1;2 3]") => 3)
-       (fact "vector destructuring can use whitespace"
-             (keval "{[x y]y}1 2") => 2
-             (keval "{[x y;z]z}[1 2;3]") => 3
-             (keval "{[x;y z]z}[1;2 3]") => 3
-             (keval "*'0 1{[x y;z]y,x+y}\\!10") => [1 1 2 3 5 8 13 21 34 55])
-       (fact "dictionary destructuring uses !"
-             (keval "{[x!y]y}`a`b!3 4") => [3 4]
-             (keval "{[x!y;z]y}[`a`b!3 4;5]") => [3 4]
-             (keval "{[x;y!z]y}[6;`a`b!3 4]") => [:a :b])
-       (fact "dictionary destructuring works on keyed tables"
-             (keval "{[k!v]v}([p:`a`b`c]q:1 2 3)") => (keval "([]q:1 2 3)"))
-       (fact "table destructuring can use table literal syntax"
-             (keval "{[([]a;b)]b}([]p:`a`b`c;q:1 2 3)") => [1 2 3])
-       (fact "table destructuring can use spaces instead of ;"
-             (keval "{[([]a b)]b}([]p:`a`b`c;q:1 2 3)") => [1 2 3])
-       (fact "keyed tables too"
-             (keval "{[([a]b c)]c}([p:`a`b`c]q:`d`e`f;r:1 2 3)") => [1 2 3])
-       (fact "destructuring can use _ for values you don't need"
-             (keval "{[_ _ a _ _]a}@!5") => 2)
-       (fact "destructuring can be incomplete"
-             (keval "{[x y z]z}1 2 3 4") => 3
-             (keval "{[a b!c d]c}`a`b`c`d!!4") => 0
-             (keval "{[_ _ a]a}@!5") => 2)
-       (fact "destructuring is recursive"
-             (keval "{[(a b;c d)]c}(1 2;3 4)") => 3
-             (keval "{[a b!c d]c}`a`b!1 2") => 1
-             (keval "{[_!_ a b]a*b}`a`b`c`d`e!!5") => 2
-             (keval "{[([]a)!([]b)]b}([p:`a`b`c]q:1 2 3)") => [1 2 3]))
-(facts "about destructuring assignments"
-       (fact "vector destructuring can use vector literal syntax"
-             (keval "{(a;b):1 2;b}[]") => 2)
-       (fact "vector destructuring can use whitespace but parens are required"
-             (keval "{(a b):1 2;b}[]") => 2)
-       (fact "dictionary destructuring requires parens"
-             (keval "{(a!b):`a`b!1 2;a}[]") => [:a :b])
-       (fact "table destructuring can use table literal syntax"
-             (keval "{[]([]a;b):([]p:`a`b`c;q:1 2 3);b}[]") => [1 2 3])
-       (fact "table destructuring can use spaces instead of ;"
-             (keval "{[]([]a b):([]p:`a`b`c;q:1 2 3);b}[]") => [1 2 3])
-       (fact "keyed tables too"
-             (keval "{[]([a]b):([p:`a`b`c]q:1 2 3);b}[]") => [1 2 3]))
-#?(:clj ;; these tests don't work in js due to no cljs.async.core/wait
-   (facts "about streams"
-;;          (fact "atomic ops"
-;;                (keval "<=2*>=!3") => [0 2 4]
-;;                (keval "<=1 2 3*>=!3") => [[0 0 0] [1 2 3] [2 4 6]])
-          ;; (keval "<=(>=!3)*>=!3") => one of the following:
-          ;; [[0 2 4] [0 0 2 4] [0 0 1 2 4]]
-          ;; How do we say this in midje?
-;;          (fact "user-defined functions"
-;;                (keval "<={x*x}@>=!3") => [0 1 4])
-;;          (fact "first"
-;;                (keval "<=*>=!3") => 0)
-;;          (fact "take"
-;;                (keval "<=0#>=!3") => []
-;;                (keval "<=2#>=!3") => [0 1])
-;;          (fact "take from the back"
-;;                (keval "<=-1#>=!3") => [2]
-;;                (keval "<=-3#>=!3") => [0 1 2])
-;;          (fact "overtake"
-;;                (keval "<=5#>=!3") => [0 1 2 0 1]
-;;                (keval "<=-5#>=!3") => [1 2 0 1 2])
-;;          (fact "drop"
-;;                (keval "<=1_>=!3") => [1 2]
-;;                (keval "<=3_>=!3") => []
-;;                (keval "<=4_>=!3") => [])
-;;          (fact "drop from the back"
-;;                (keval "<=-1_>=!3") => [0 1]
-;;                (keval "<=-3_>=!3") => []
-;;                (keval "<=-4_>=!3") => [])
-;;          (fact "vector literals with stream components"
-;;                (keval "<=(1;>=!3)") => [[1 0] [1 1] [1 2]])
-;;          (fact "indexing with @ with a stream on the rhs"
-;;                (keval "<=(!5)@>=0 2 4") => [0 2 4])
-;;          (fact "indexing with @ with a stream on the lhs"
-;;                (keval "<=(>=(0 2 4;1 3 5))1") => [2 3])
-;;          (fact "indexing with . with a stream on the rhs"
-;;                (keval "<=(0 1;2 3).>=(0 1;1 1)") => [1 3])
-;;          (fact "indexing with . with a stream on the lhs"
-;;                (keval "<=(>=((0 1;2 3);(4 5;6 7))). 0 1") => [1 5])))
-  ))
-;; gave up on this one: couldn't fix the <exprx> rule
-;; (fact "select"
-;;       (count
-;;        (parses
-;;         "select +/a,+/b from([]a:,/3#/:1 2;b:6#10 20 30)where b<=20")) => 1))
+;; Tests
+(deftest test-bool-literals
+  (testing "bools eval to themselves"
+    (is (= true (keval "1b")))
+    (is (= false (keval "0b"))))
+  (testing "simple bool vector literals are compact"
+    (is (= [true false false true false false true] (keval "1001001b")))))
+(deftest test-tilde
+  (testing "atom"
+    (is (= false (keval "~5")))
+    (is (= true (keval "~0b"))))
+  (testing "vector"
+    (is (= [false true false] (keval "~101b")))
+    (is (= [false false true] (keval "~2 7 0"))))
+  (testing "dict"
+    (is (= (keval "`a`b`c!010b") (keval "~`a`b`c!101b"))))
+  (testing "table"
+    (is (= (keval "([]a:010b)") (keval "~([]a:1 0 4)"))))
+  (testing "keyed tables"
+    (is (= (keval "([a:1 0 4]b:101b)") (keval "~([a:1 0 4]b:010b)")))))
+(deftest test-char-literals
+  (testing "chars eval to themselves"
+    (is (= \5 (keval "\"5\"")))
+    (is (= \a (keval "\"a\""))))
+  (testing "char vector literals eval to vectors of char"
+    (is (= [\a \b \c] (keval "\"abc\"")))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(deftest test-float-literals
+  (testing "floats eval to themselves"
+    (is (= 1.0 (keval "1.")))
+    (is (= -1.0 (keval "-1."))))
+  (testing "float vector literals"
+    (is (= [1.4 2.5 3.6] (keval "1.4 2.5 3.6")) "no punctuation")
+    (is (= [1.0 2.0 3.0] (keval "1 2.0 3")) "any float promotes the whole vector")
+    (is (= [1.0 2.0 3.0] (keval "1 2. 3")) "fractional part not needed if it is zero")
+    (is (= [1.0 2.0 3.0] (keval "1     2.    3")) "spaces may be added for formatting")))
+(deftest test-long-literals
+  (testing "longs eval to themselves"
+    (is (= 1 (keval "1")))
+    (is (= -123 (keval "-123"))))
+  (testing "simple long vector literals"
+    (is (= [1 2 3] (keval "1 2 3")) "no puncuation")
+    (is (= [1 -2 3] (keval "1 -2 3")) "monadic - sticks to literals")
+    (is (= [1 2 3] (keval "1    2     3")) "spaces may be added for formatting")))
+(deftest test-symbol-literals
+  (testing "symbols eval to clojure keywords"
+    (is (= :abc (keval "`abc"))))
+  (testing "symbol vectore literals have no spaces"
+    (is (= [:abc :def] (keval "`abc`def")))))
+;; ;; TODO             (keval "`abc `def") => error
+(deftest test-mixed-vector-literals
+  (testing "(;)"
+    (is (= [[:a :b :c] 1] (keval "(`a`b`c;1)"))))
+  (testing "top-level indexing" ;; TODO put this where it belongs
+    (is (= [:a :b :c] (keval "(`a`b`c;1)0")))))
+(deftest test-vector-literals-with-holes
+  (testing "holes are maintained"
+    (is (= [3 :hole] (keval "(3;)"))))
+  (testing "holes can be filled via []"
+    (is (= [3 4] (keval "(3;)[4]")))
+    (is (= [4 3 5] (keval "(;3;)[4;5]"))))
+  (testing "holes can be filled via juxt"
+    (is (= [3 4] (keval "(3;)4"))))
+  (testing "holes can be filled in stages"
+    (is (= [4 3 :hole] (keval "(;3;)4")))
+    (is (= [4 3 5] (keval "(;3;)[4]5")))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(deftest test-long-arithmetic
+  (testing "longs add" ;; TODO: + in clojure promotes to bignum
+    (is (= 11 (keval "1+10")))
+    (is (= -9 (keval "1+-10")))
+    (is (= 9  (keval "-1+10"))))
+  (testing "longs subtract"
+    (is (= -9 (keval "1-10")))
+    (is (= 58 (keval "100-42")))))
+(deftest test-monadic-bang
+  (testing "monadic ! on a long is til"
+    (is (= [] (keval "!0")))
+    (is (= [0 1 2] (keval "!3"))))
+  (testing "monadic ! on a vector is til count"
+    (is (= [0 1 2] (keval "!`a`b`c"))))
+  (testing "monadic ! on a dict is key"
+    (is (= [:a :b :c] (keval "!`a`b`c!1 2 3"))))
+  (testing "monadic ! on a keyed table is key"
+    (is (= (keval "([]p:`a`b`c)") (keval "!([p:`a`b`c]q:1 2 3)")))))
+(deftest test-question-mark
+  (testing "container?... => find"
+    (is (= 0 (keval "(!5)?0")))
+    (is (= [0 2 4] (keval "(!5)?0 2 4")))
+    (is (= [5 3 1] (keval "(!5)?10 3 1")))
+    (is (= :b (keval "(`a`b`c!1 2 3)?2")))
+    (is (= [:c :a] (keval "(`a`b`c!1 2 3)?3 1")))
+    (is (= [0 1] (keval "([]a:1 2 3)?([]a:1 2)")))
+    (is (= (keval "([]a:`a`b)") (keval "([a:`a`b`c]b:1 2 3)?([]b:1 2)")))))
+(deftest test-atomic-plus
+  (testing "+ is atomic"
+    (is (= [11 21] (keval "1+10 20")))
+    (is (= [11 12] (keval "1 2+10")))
+    (is (= [11 22] (keval "1 2+10 20"))))
+  (testing "dyadic operators don't care about spaces"
+    (is (= 3 (keval "1 +2")))
+    (is (= 3 (keval "1+ 2")))
+    (is (= 3 (keval "1 + 2")))))
+(deftest test-monadic-less
+  (testing "monadic < is iasc"
+    (is (= [5 9 3 4 0 1 6 2 7 8] (keval "<`d`d`e`c`c`b`d`e`e`b")))
+    (is (= (keval "`b`d`f`c`e`g`i`h`a`j")
+           (keval "<`a`b`c`d`e`f`g`h`i`j!4 0 2 1 2 1 2 3 2 4")))))
+(deftest test-monadic-greater
+  (testing "monadic > is idesc"
+    (is (= [2 7 8 0 1 6 3 4 5 9] (keval ">`d`d`e`c`c`b`d`e`e`b")))))
+(deftest test-right-to-left
+  (testing "no operator precedence"
+    (is (= 50 (keval "10*2+3")))))
+(deftest test-dyadic-pound
+  (testing "n#container => take 1st n"
+    (is (= [0 1 2] (keval "3#!5")))
+    (is (= (keval "`a`b!1 2") (keval "2#`a`b`c!1 2 3")))
+    (is (= (keval "([]a:`a`b;b:1 2)") (keval "2#([]a:`a`b`c`d;b:1 2 3 4)")))
+    (is (= (keval "([]a:,`a;b:,1)") (keval "1#([]a:`a`b`c;b:1 2 3)"))))
+  (testing "(-n)# container => take last n"
+    (is (= [3 4] (keval "-2#!5")))
+    (is (= (keval "`b`c!2 3") (keval "-2#`a`b`c!1 2 3")))
+    (is (= (keval "([]a:`c`d;b:3 4)") (keval "-2#([]a:`a`b`c`d;b:1 2 3 4)"))))
+  (testing "n#x where n>#x => overtake"
+    (is (= [0 1 2 0 1] (keval "5#!3")))
+    (is (= [1 2 0 1 2] (keval "-5#!3")))))
+(deftest test-underscore
+  (testing "n _ container => drop 1st n"
+    (is (= [2 3 4] (keval "2_!5")))
+    (is (= (keval "`c`d!3 4") (keval "2_`a`b`c`d!1 2 3 4")))
+    (is (= (keval "([]a:`c`d;b:3 4)")
+           (keval "2_([]a:`a`b`c`d;b:1 2 3 4)")))
+    (is = ((keval "([]a:,`c;b:,3)")
+           (keval "2_([]a:`a`b`c;b:1 2 3)"))))
+  (testing "(-n) _ container => drop last n"
+    (is (= [0 1 2] (keval "-2_!5")))
+    (is (= (keval "`a`b!1 2") (keval "-2_`a`b`c`d!1 2 3 4")))
+    (is (= (keval "([]a:`a`b;b:1 2)") (keval "-1_([]a:`a`b`c;b:1 2 3)")))
+    (is (= (keval "([a:,`c]b:,3)") (keval "2_([a:`a`b`c]b:1 2 3)"))))
+  (testing "[n0...] _ vector => cut"
+    (is (= (keval "(\"01\";\"234\";\"56\")") (keval "0 2 5_\"0123456\""))))
+  (testing "container _ index => remove at"
+    (is (= [0 1 3 4] (keval "(!5)_2")))
+    (is (= (keval "`a`b!1 2") (keval "(`a`b`c!1 2 3)_`c")))
+    (is (= (keval "`a`c!1 3") (keval "(`a`b`c!1 2 3)_`b")))
+    (is (= (keval "([]b:1 2 3)") (keval "([]a:`a`b`c;b:1 2 3)_`a")))
+    (is (= (keval "([]a:`a`c;b:1 3)") (keval "([]a:`a`b`c;b:1 2 3)_1")))))
+(deftest test-adverbs
+  (testing "they can be monadic"
+    (is (= 6 (keval "+/1 2 3"))))
+  (testing "they can be dyadic"
+    (is (= 6 (keval "0+/1 2 3"))))
+  (testing "/: does"
+    (is (= [[1 2 3] [2 4 6]] (keval "1 2 3*/:1 2"))))
+  (testing "adverbed functions can be assigned"
+    (is (= 12 (keval "{a:+/;a[0;3 4 5]}[]"))))
+  (testing "they can be stacked"
+    (is (= [1 2 3 4 5 6 7 8 9] (keval ",//(1 2 3;(4 5 6;7 8 9))")))
+    (is (= [[[1 3] [1 4]] [[2 3] [2 4]]] (keval "1 2,/:\\:3 4")))
+    (is (= [[3 3] [3 3]] (keval "#''((1 2 3;3 4 5);(5 6 7;7 8 9))")))))
+(deftest test-calling-functions
+  (testing "supplying all arguments causing invocation"
+    (is (= 3 (keval "div[10;3]"))))
+  (testing "partials work with []"
+    (is (= 5 (keval "{z}[3][4][5]"))))
+  (testing "partials work with [;]"
+    (is (= 10 (keval "{z;y}[;10;][3;4]")))
+    (is (= 10 (keval "{z;y}[;10][3;4]"))))
+  (testing "partials work with juxt"
+    (is (= 5 (keval "{y}[3]5")))
+    (is (= 4 (keval "(1+)3")))
+    (is (= [0 1 6 3 12 5 18 7 24 9] (keval "@[!10;2*!5;3*]")))
+    (is (= (keval "110b") (keval "(in 1 2 3)1 2")))))
+(deftest test-indexing-at-depth
+  (testing "indexing with a 2-d vector"
+    (is (= :b (keval "(`a`b`c;1 2 3)[0;1]")))
+    (is (= [:a :b] (keval "(`a`b`c;1 2 3)[0;0 1]"))))
+  (testing "eliding first dimension yields columns"
+    (is (= [0 3 6] (keval "(0 1 2;3 4 5;6 7 8)[;0]")))))
+(deftest test-lambdas-implicit-args
+  (testing "implicit args"
+    (is (= 3 (keval "{x}[3]")))
+    (is (= 7 (keval "{x+y}[3;4]")))
+    (is (= 12 (keval "{x+y+z}[3;4;5]")))))
+(deftest test-juxtaposition
+  (testing "lambdas juxtapose without whitespace"
+    (is (= 3 (keval "{x}3"))))
+  (testing "symbol vector literals followed by longs"
+    (is (= :b (keval "`a`b`c`d`e 1")))
+    (is (= [:b :c :d] (keval "`a`b`c`d`e 1 2 3"))))
+  (testing "dyadic user-defined functions can be used infix"
+    (is (= [:b :c :d] (keval "`a`b`c`d`e{x y}1 2 3")))
+    (is (= (keval "110b") (keval "1 2 4 in 1 2 3"))))
+  (testing "float vector literals are valid lhs"
+    (is (= (keval "4 6.") (keval "1 2.{x+y}3 4")))
+    (is (= (keval "01b") (keval "1 2. in 2 4. 6")))))
+(deftest test-top-level-indexing
+  (testing "square brackets no semicolons"
+    (is (= [1 3] (keval "1 2 3 4[0 2]"))))
+  (testing "with @"
+    (is (= [1 3] (keval "1 2 3 4@0 2"))))
+  (testing "with juxt"
+    (is (= [1 3] (keval "{x 0 2}1 2 3 4"))))
+  (testing "repeated"
+    (is (= [[1 3] [2 4]] (keval "1 2 3 4@(0 2;1 3)")))))
+(deftest test-monadic-eq-ie-group
+  (testing "vector"
+    (is (= (keval "4 0 2 1 3!(0 9;,1;2 4 6 8;3 5;,7)")
+           (keval "=4 0 2 1 2 1 2 3 2 4"))))
+  (testing "dict"
+    (is (= (keval "0 1 2!(`a`d`g`j;`b`e`h;`c`f`i)")
+           (keval "=`a`b`c`d`e`f`g`h`i`j!0 1 2 0 1 2 0 1 2 0")))))
+(deftest test-2-arg-at
+  (testing "call it like a function"
+    (is (= [1 3] (keval "@[1 2 3 4;0 2]")))
+    (is (= 8 (keval "@[{x+x};4]")))))
+(deftest test-3-arg-at
+  (testing "vector indexed with long"
+    (is (= [0 2 2 3] (keval "@[!4;1;{x*2}]"))))
+  (testing "vector indexed with vector"
+    (is (= [0 2 2 4] (keval "@[!4;1 3;{x+1}]"))))
+  (testing "vector repeatedly indexed with vector"
+    (is (= [1 3 3 3] (keval "@[!4;(0 1;1 2);{x+1}]"))))
+  (testing "dict indexed with atom"
+    (is (= (keval "`a`b`c!2 2 3") (keval "@[`a`b`c!1 2 3;`a;{x+1}]"))))
+  (testing "dict indexed with vector"
+    (is (= (keval "`a`b`c!2 2 4") (keval "@[`a`b`c!1 2 3;`a`c;{x+1}]"))))
+  (testing "dict indexed repeatedly with vector"
+    (is (= (keval "`a`b`c!3 3 4")
+           (keval "@[`a`b`c!1 2 3;(`a`b;`a`c);{x+1}]"))))
+  (testing "table indexed with long"
+    (is (= (keval "([]a:2 2 3)") (keval "@[([]a:1 2 3);0;{2*x}]"))))
+  (testing "table indexed with longs"
+    (is (= (keval "([]a:2 2 6)") (keval "@[([]a:1 2 3);0 2;{2*x}]"))))
+  (testing "table indexed with symbol"
+    (is (= (keval "([]a:2 4 6;b:10 20 30)")
+           (keval "@[([]a:1 2 3;b:10 20 30);`a;{2*x}]"))))
+  (testing "table indexed with symbols"
+    (is (= (keval "([]a:2 4 6;b:10 20 30;c:200 400 600)")
+           (keval "@[([]a:1 2 3;b:10 20 30;c:100 200 300);`a`c;{2*x}]"))))
+  (testing "table complex indexing"
+    (is (= (keval "([]a:4 4 6;b:20 20 30;c:200 200 300)")
+           (keval "@[([]a:1 2 3;b:10 20 30;c:100 200 300);(`a;0);{2*x}]")))))
+(deftest test-4-arg-at
+  (testing "vector indexed with long"
+    (is (= [0 2 2 3] (keval "@[!4;1;*;2]"))))
+  (testing "vector indexed with vector paired with atom"
+    (is (= [0 2 2 6] (keval "@[!4;1 3;*;2]"))))
+  (testing "vector indexed with matrix paired with atom"
+    (is (= [0 2 4 6] (keval "@[!4;(1 3;2 0);*;2]"))))
+  (testing "vector indexed with matrix paired with vector"
+    (is (= [0 2 8 6] (keval "@[!4;(1 3;2 0);*;2 4]"))))
+  (testing "vector indexed with matrix paired with matrix"
+    (is (= [0 2 12 12] (keval "@[!4;(1 3;2 0);*;(2 4;6 8)]"))))
+  (testing "dict indexed with ragged paired with atom"
+    (is (= (keval "`a`b`c!2 4 6")
+           (keval "@[`a`b`c!1 2 3;(`a`c;`b);*;2]"))))
+  (testing "tables"
+    (is (= (keval "([]a:500 10 15;b:10000 200 300;c:10000 200 300)")
+           (keval "@[([]a:1 2 3;b:10 20 30;c:100 200 300);(`a`b;0);*;(5 10;100)]")))))
+(deftest test-2-arg-dot
+  (testing "indexing vectors with vectors"
+    (is (= 2 (keval "1 2 3 4 .,1")))
+    (is (= [2 3] (keval "1 2 3 4 .,1 2")))
+    (is (= [[0 1 2] [6 7 8]] (keval "(0 1 2;3 4 5;6 7 8).,0 2")))
+    (is (= 4 (keval "(0 1 2;3 4 5;6 7 8). 1 1")))
+    (is (= [1 4] (keval "(0 1 2;3 4 5;6 7 8).(0 1;1)")))
+    (is (= [[0 2] [6 8]] (keval "(0 1 2;3 4 5;6 7 8).(0 2;0 2)"))))
+  (testing "eliding the first index yields columns"
+    (is (= [[0 2] [3 5] [6 8]] (keval "(0 1 2;3 4 5;6 7 8).(;0 2)"))))
+  (testing "indexing dicts of vectors"
+    (is (= 4 (keval "(`a`b`c!(0 1 2;3 4 5;6 7 8)).(`b;1)")))
+    (is (= [1 4] (keval "(`a`b`c!(0 1 2;3 4 5;6 7 8)).(`a`b;1)")))
+    (is (= [3 5] (keval "(`a`b`c!(0 1 2;3 4 5;6 7 8)).(`b;0 2)"))))
+  (testing "indexing tables"
+    (is (= 5 (keval "([]a:1 2 3;b:4 5 6).(`b;1)")))
+    (is (= 5 (keval "([]a:1 2 3;b:4 5 6).(1;`b)")))
+    (is (= [2 5] (keval "([]a:1 2 3;b:4 5 6).(`a`b;1)")))
+    (is (= [[1 3] [4 6]] (keval "([]a:1 2 3;b:4 5 6).(`a`b;0 2)"))))
+  (testing "applying functions"
+    (is (= 2 (keval "{2}.()")))
+    (is (= 2 (keval "{x}.,2")))
+    (is (= 3 (keval "{x+y}. 1 2")))
+    (is (= 3 (keval "+. 1 2")))
+    (is (= 4 (keval "{x+z}. 1 2 3")))))
+(deftest test-3-arg-dot
+  (testing "cross-product index"
+    (is (= (keval "(100 101 2;103 104 5;6 7 8)")
+           (keval ".[(0 1 2;3 4 5;6 7 8);(0 1;0 1);{x+100}]")))
+    (is (= (keval "(0 1 2;103 104 105;6 7 8)")
+           (keval ".[(0 1 2;3 4 5;6 7 8);(1;0 1 2);{x+100}]"))))
+  (testing "3d matrix"
+    (is (= (keval "((0 1;2 3);(4 5;6 49);(8 9;10 11))")
+           (keval ".[((0 1;2 3);(4 5;6 7);(8 9;10 11));1 1 1;{x*x}]")))))
+(deftest test-4-arg-dot
+  (testing "dict"
+    (is (= (keval "`a`b`c!(0 1 2;30 4 500;6 7 8)")
+           (keval ".[`a`b`c!(0 1 2;3 4 5;6 7 8);(`b;0 2);*;10 100]")))))
+(deftest test-join
+  (testing "monadic , envectors"
+    (is (= [1] (keval ",1")))
+    (is (= [[1 2 3]] (keval ",1 2 3"))))
+  (testing "dyadic joins"
+    (is (= [1 2 3 4] (keval "1 2,3 4"))))
+  (testing "joining dicts is a merge where rhs wins"
+    (is (= (keval "`a`b`c`e`d!1 10 20 5 30")
+           (keval "(`a`b`c`e!1 2 3 5),`b`c`d!10 20 30")))))
+(deftest test-deleting-columns
+  (testing "can delete a column"
+    (is (= (keval "([]a:1 2 3)")
+           (keval "delete b from ([]a:1 2 3;b:1 2 3)"))))
+  (testing "can delete multiple columns"
+    (is (= (keval "([]b:1 2 3)")
+           (keval "delete a,c from ([]a:1 2 3;b:1 2 3;c:1 2 3)"))))
+  (testing "can delete a key column"
+    (is (= (keval "([]b:1 2 3;c:1 2 3)")
+           (keval "delete a from ([a:1 2 3]b:1 2 3;c:1 2 3)"))))
+  (testing "deleting only non-keycols from a keyed table preserves keycols"
+    (is (= (keval "([a:1 2 3]c:1 2 3)")
+           (keval "delete b from ([a:1 2 3]b:1 2 3;c:1 2 3)")))
+    (is (= (keval "([]a:1 2 3;c:1 2 3)")
+           (keval "delete b from ([a:1 2 3;b:1 2 3]c:1 2 3)")))))
+(deftest test-deleting-rows
+  (testing "can delete all rows"
+    (is (= (keval "([]a:())") (keval "delete from([]a:1 2 3)"))))
+  (testing "can delete rows specified by where"
+    (is (= (keval "([]a:1 3)") (keval "delete from([]a:1 2 3)where a=2"))))
+  (testing "can delete rows from keyed tables"
+    (is (= (keval "([a:1 3]b:1 3)")
+           (keval "delete from ([a:1 2 3]b:1 2 3)where a=2")))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(deftest test-select
+  (testing "no agg required"
+    (is (= (keval "([]a:1 2 3)") (keval "select from([]a:1 2 3)"))))
+  (testing "id agg guesses result column to match original column"
+    (is (= (keval "([]a:1 2 3)") (keval "select a from([]a:1 2 3)"))))
+  (testing "works on keyed tables"
+    (is (= (keval "([a:`a`b]b:1 2)") (keval "select from([a:`a`b]b:1 2)")))))
+(deftest test-by
+  (testing "simple case"
+    (is (= (keval "([a:`a`b`c]b:3 5 7)")
+           (keval "select +/b by a from([]a:6#`a`b`c;b:!6)"))))
+  (testing "compound by clause"
+    (is (= (keval "([a:`a`a`b`b;b:`a`b`a`b];c:(0 4;1 5;2 6;3 7))")
+           (keval "select by a,b from([]a:8#`a`a`b`b;b:8#`a`b;c:!8)")))))
+(deftest test-keying-tables
+  (testing "can key by first n columns"
+    (is (= (keval "([a:`a`b`c]b:1 2 3)") (keval "1!([]a:`a`b`c;b:1 2 3)")))
+    (is (= (keval "([a:`a`b;b:1 2]c:3 4")
+           (keval "2!([]a:`a`b;b:1 2;c:3 4"))))
+  (testing "can key by col name(s)"
+    (is (= (keval "([a:`a`b`c]b:1 2 3)") (keval "`a!([]a:`a`b`c;b:1 2 3)")))
+    (is (= (keval "([a:`a`b;c:3 4]b:1 2") (keval "`a`c!([]a:`a`b;b:1 2;c:3 4")))))
+(deftest test-indexing-keyed-tables
+  (testing "can be done with a dict"
+    (is (= (keval "`b!1") (keval "([a:`a`b`c]b:1 2 3)`a!`a"))))
+  (testing "can be done with just the value of a dict"
+    (is (= (keval "`b!3") (keval "([a:`a`b`c]b:1 2 3)`c"))))
+  (testing "can be done with a table"
+    (is (= (keval "([]b:1 3)") (keval "([a:`a`b`c]b:1 2 3)([]a:`a`c)")))))
+(deftest test-where
+  (testing "works with bools"
+    (is (= [0 3] (keval "&1001b"))))
+  (testing "works with longs"
+    (is (= [1 2 2 3 3 3] (keval "&0 1 2 3")))))
+(deftest test-lj
+  (testing "uses rhs key col"
+    (is (= (keval "([]a:`a`b`c;b:1 2 3)")
+           (keval "([]a:`a`b`c)lj([a:`a`b`c]b:1 2 3)"))))
+  (testing "two key cols"
+    (is (= (keval "([]a:`a`b`c;b:1 2 3;c:10 20 30)")
+           (keval "([]a:`a`b`c;b:1 2 3)lj([a:`a`b`c;b:1 2 3]c:10 20 30)")))))
+(deftest test-xasc
+  (testing "sort on one col"
+    (is (= (keval "([]a:`a`b`c;b:3 2 1)")
+           (keval "`a xasc([]a:`c`b`a;b:1 2 3)"))))
+  (testing "sort on two cols"
+    (is (= (keval "([]a:`a`a`b`b`c`c;b:3 20 10 30 2 3)")
+           (keval "`a`b xasc([]a:`c`b`a`a`b`c;b:3 10 3 20 30 2)"))))
+  (testing "works on keyed tables"
+    (is (= (keval "([a:`a`a`b`b`c`c];b:3 20 10 30 2 3)")
+           (keval "`a`b xasc([a:`c`b`a`a`b`c]b:3 10 3 20 30 2)")))))
+(deftest test-destructuring-function-arguments
+  (testing "vector destructuring can use vector literal syntax"
+    (is (= 2 (keval "{[(x;y)]y}1 2")))
+    (is (= 3 (keval "{[(x;y);z]z}[1 2;3]")))
+    (is (= 3 (keval "{[x;(y;z)]z}[1;2 3]"))))
+  (testing "vector destructuring can use whitespace"
+    (is (= 2 (keval "{[x y]y}1 2")))
+    (is (= 3 (keval "{[x y;z]z}[1 2;3]")))
+    (is (= 3 (keval "{[x;y z]z}[1;2 3]")))
+    (is (= [1 1 2 3 5 8 13 21 34 55] (keval "*'0 1{[x y;z]y,x+y}\\!10"))))
+  (testing "dictionary destructuring uses !"
+    (is (= [3 4] (keval "{[x!y]y}`a`b!3 4")))
+    (is (= [3 4] (keval "{[x!y;z]y}[`a`b!3 4;5]")))
+    (is (= [:a :b] (keval "{[x;y!z]y}[6;`a`b!3 4]"))))
+  (testing "dictionary destructuring works on keyed tables"
+    (is (= (keval "([]q:1 2 3)") (keval "{[k!v]v}([p:`a`b`c]q:1 2 3)"))))
+  (testing "table destructuring can use table literal syntax"
+    (is (= [1 2 3] (keval "{[([]a;b)]b}([]p:`a`b`c;q:1 2 3)"))))
+  (testing "table destructuring can use spaces instead of ;"
+    (is (= [1 2 3] (keval "{[([]a b)]b}([]p:`a`b`c;q:1 2 3)"))))
+  (testing "keyed tables too"
+    (is (= [1 2 3] (keval "{[([a]b c)]c}([p:`a`b`c]q:`d`e`f;r:1 2 3)"))))
+  (testing "destructuring can use _ for values you don't need"
+    (is (= 2 (keval "{[_ _ a _ _]a}@!5"))))
+  (testing "destructuring can be incomplete"
+    (is (= 3 (keval "{[x y z]z}1 2 3 4")))
+    (is (= 0 (keval "{[a b!c d]c}`a`b`c`d!!4")))
+    (is (= 2 (keval "{[_ _ a]a}@!5"))))
+  (testing "destructuring is recursive"
+    (is (= 3 (keval "{[(a b;c d)]c}(1 2;3 4)")))
+    (is (= 1 (keval "{[a b!c d]c}`a`b!1 2")))
+    (is (= 2 (keval "{[_!_ a b]a*b}`a`b`c`d`e!!5")))
+    (is (= [1 2 3] (keval "{[([]a)!([]b)]b}([p:`a`b`c]q:1 2 3)")))))
+(deftest test-destructuring-assignments
+  (testing "vector destructuring can use vector literal syntax"
+    (is (= 2 (keval "{(a;b):1 2;b}[]"))))
+  (testing "vector destructuring can use whitespace but parens are required"
+    (is (= 2 (keval "{(a b):1 2;b}[]"))))
+  (testing "dictionary destructuring requires parens"
+    (is (= [:a :b] (keval "{(a!b):`a`b!1 2;a}[]"))))
+  (testing "table destructuring can use table literal syntax"
+    (is (= [1 2 3] (keval "{[]([]a;b):([]p:`a`b`c;q:1 2 3);b}[]"))))
+  (testing "table destructuring can use spaces instead of ;"
+    (is (= [1 2 3] (keval "{[]([]a b):([]p:`a`b`c;q:1 2 3);b}[]"))))
+  (testing "keyed tables too"
+    (is (= [1 2 3] (keval "{[]([a]b):([p:`a`b`c]q:1 2 3);b}[]")))))
+(deftest test-parsing-non-ambiguity
+  (testing "adverbed"
+    (is (= 1 (count (parses "f/"))))
+    (is (= 1 (count (parses "f/1 2 3"))))
+    (is (= 1 (count (parses "0 f/1 2 3"))))
+    (is (= 1 (count (parses "0 f//1 2 3"))))
+    (is (= 1 (count (parses "f//1 2 3")))))
+  (testing "assign"
+    (is (= 1 (count (parses "a:3"))))
+    (is (= 1 (count (parses "a:`a`b`c`d`e 1 2 3")))))
+  (testing "bools"
+    (is (= 1 (count (parses "0b"))))
+    (is (= 1 (count (parses "1b")))))
+  (testing "bool vector literals"
+    (is (= 1 (count (parses "010b"))))
+    (is (= 1 (count (parses "1001b")))))
+  (testing "call"
+    (is (= 1 (count (parses "`a`b`c[0]"))))
+    (is (= 1 (count (parses "`a`b`c[0 1]"))))
+    (is (= 1 (count (parses "{x}[0]")))))
+  (testing "chars"
+    (is (= 1 (count (parses "\"a\""))))
+    (is (= 1 (count (parses "\"\\\"\"")))))
+  (testing "char vector lterals"
+    (is (= 1 (count (parses "\"abc\""))))
+    (is (= 1 (count (parses "\"abc\\\"\"def")))))
+  (testing "dyop"
+    (is (= 1 (count (parses "1+2"))))
+    (is (= 1 (count (parses "1 +2"))))
+    (is (= 1 (count (parses "1+ 2"))))
+    (is (= 1 (count (parses "1 + 2")))))
+  (testing "floats"
+    (is (= 1 (count (parses "1."))))
+    (is (= 1 (count (parses "-1.")))))
+  (testing "float vector literals"
+    (is (= 1 (count (parses "1. 2 3"))))
+    (is (= 1 (count (parses "1 2. 3"))))
+    (is (= 1 (count (parses "-1 2. 3"))))
+    (is (= 1 (count (parses "1    2.    3")))))
+  (testing "ids"
+    (is (= 1 (count (parses "x"))))
+    (is (= 1 (count (parses "xyzzy")))))
+  (testing "juxt"
+    (is (= 1 (count (parses "`a`b`c`d`e 1"))))
+    (is (= 1 (count (parses "`a`b`c`d`e 1 2 3"))))
+    (is (= 1 (count (parses "x 1"))))
+    (is (= 1 (count (parses "x 1+2"))))
+    (is (= 1 (count (parses "{x}3"))))
+    (is (= 1 (count (parses "1{y}3"))))
+    (is (= 1 (count (parses "1{y}"))))) ; bind 1st arg
+  (testing "lambdas"
+    (is (= 1 (count (parses "{}"))))
+    (is (= 1 (count (parses "{x}"))))
+    (is (= 1 (count (parses "{[a]a}"))))
+    (is (= 1 (count (parses "`a`b`c{x y}0 1 2")))))
+  (testing "longs"
+    (is (= 1 (count (parses "1")))))
+  (testing "long vector literals"
+    (is (= 1 (count (parses "1 2 3"))))
+    (is (= 1 (count (parses "1    2    3")))))
+  (testing "monop"
+    (is (= 1 (count (parses "*1 2 3")))))
+  (testing "symbols"
+    (is (= 1 (count (parses "`a")))))
+  (testing "symbol vector literals"
+    (is (= 1 (count (parses "`a`b`c`d`e"))))))
+;; #?(:clj  these tests don't work in js due to no cljs.async.core/wait
+;;    (deftest "test-streams"
+ ;;          (testing "atomic ops"
+;; ;;                (keval "<=2*>=!3") => [0 2 4]
+;; ;;                (keval "<=1 2 3*>=!3") => [[0 0 0] [1 2 3] [2 4 6]])
+;;           ;; (keval "<=(>=!3)*>=!3") => one of the following:
+;;           ;; [[0 2 4] [0 0 2 4] [0 0 1 2 4]]
+;;           ;; How do we say this in midje?
+;; ;;          (testing "user-defined functions"
+;; ;;                (keval "<={x*x}@>=!3") => [0 1 4])
+;; ;;          (testing "first"
+;; ;;                (keval "<=*>=!3") => 0)
+;; ;;          (testing "take"
+;; ;;                (keval "<=0#>=!3") => []
+;; ;;                (keval "<=2#>=!3") => [0 1])
+;; ;;          (testing "take from the back"
+;; ;;                (keval "<=-1#>=!3") => [2]
+;; ;;                (keval "<=-3#>=!3") => [0 1 2])
+;; ;;          (testing "overtake"
+;; ;;                (keval "<=5#>=!3") => [0 1 2 0 1]
+;; ;;                (keval "<=-5#>=!3") => [1 2 0 1 2])
+;; ;;          (testing "drop"
+;; ;;                (keval "<=1_>=!3") => [1 2]
+;; ;;                (keval "<=3_>=!3") => []
+;; ;;                (keval "<=4_>=!3") => [])
+;; ;;          (testing "drop from the back"
+;; ;;                (keval "<=-1_>=!3") => [0 1]
+;; ;;                (keval "<=-3_>=!3") => []
+;; ;;                (keval "<=-4_>=!3") => [])
+;; ;;          (testing "vector literals with stream components"
+;; ;;                (keval "<=(1;>=!3)") => [[1 0] [1 1] [1 2]])
+;; ;;          (testing "indexing with @ with a stream on the rhs"
+;; ;;                (keval "<=(!5)@>=0 2 4") => [0 2 4])
+;; ;;          (testing "indexing with @ with a stream on the lhs"
+;; ;;                (keval "<=(>=(0 2 4;1 3 5))1") => [2 3])
+;; ;;          (testing "indexing with . with a stream on the rhs"
+;; ;;                (keval "<=(0 1;2 3).>=(0 1;1 1)") => [1 3])
+;; ;;          (testing "indexing with . with a stream on the lhs"
+;; ;;                (keval "<=(>=((0 1;2 3);(4 5;6 7))). 0 1") => [1 5])))
+;;   ))
+;; ;; gave up on this one: couldn't fix the <exprx> rule
+;; ;; (testing "select"
+;; ;;       (is (= 1 (count
+;; ;;        (parses
+;; ;;         "select +/a,+/b from([]a:,/3#/:1 2;b:6#10 20 30)where b<=20"))))))
+;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
