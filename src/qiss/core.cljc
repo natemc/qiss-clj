@@ -535,34 +535,28 @@
   (if (number? n)
     (make-keyed-table (ktake n (dict-key x)) (ktake n (dict-val x)))
     (take-from-table n (unkey-table x))))
-;;(declare on-next)
-;;(defn on-next [s n] ())
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn take-from-stream [n x]
-  ;; TODO: save up events so we can overtake if the stream
-  ;; closes before we get n events
   (let [[in out quit res] (stream-prologue x)]
-    (go-loop [i 0 r []]
-      (if (= i n)
+    (go-loop [w []] ;; window
+      (if (= (count w) n)
         (quit)
         (if-let [e (<! in)]
           (do (put! out e)
-              (recur (inc i) (conj r e)))
-          (do (when (< i n)
-                (doseq [j (range i n)]
-                  (put! out (r (mod j (count r))))))
+              (recur (conj w e)))
+          (do (doseq [i (range (count w) n)]
+                (put! out (w (mod i (count w)))))
               (quit)))))
     res))
 (defn take-last-from-stream [n x]
   (let [[in out quit res] (stream-prologue x)]
-    (go-loop [i []]
+    (go-loop [w []] ;; window
       (if-let [e (<! in)]
-        (if (< (count i) n)
-          (recur (conj i e))
-          (recur (conj (vec (drop 1 i)) e)))
-        (if (empty? i)
-          (quit)
-          (do (put! out (first i))
-              (recur (next i))))))
+        (recur (conj (if (< (count w) n) w (vec (drop 1 w))) e))
+        (do (when (not (empty? w))
+              (doseq [i (reverse (range n))]
+                (put! out (w (- (count w) 1 (mod i (count w)))))))
+            (quit))))
     res))
 (defn kcount [x]
   "#x (count)  returns 1 for atoms"
