@@ -513,7 +513,8 @@
   "n#x where n is an integer and x is a vector"
   (if (<= 0 n)
     (mapv #(x (mod % (count x))) (range n))
-    (vec (take-last (- n) x)))) ; TODO neg overtake
+    (mapv #(x (- (count x) 1 (mod % (count x))))
+          (reverse (range (- n))))))
 (defn take-from-dict [n x]
   "n#x where n is an integer, keyword, or vector of keywords, and x is a dict"
   (cond (number? n) (make-dict (ktake n (dict-key x)) (ktake n (dict-val x)))
@@ -540,13 +541,28 @@
   ;; TODO: save up events so we can overtake if the stream
   ;; closes before we get n events
   (let [[in out quit res] (stream-prologue x)]
-    (go-loop [i 0]
+    (go-loop [i 0 r []]
       (if (= i n)
         (quit)
         (if-let [e (<! in)]
           (do (put! out e)
-              (recur (inc i)))
-          (quit))))
+              (recur (inc i) (conj r e)))
+          (do (when (< i n)
+                (doseq [j (range i n)]
+                  (put! out (r (mod j (count r))))))
+              (quit)))))
+    res))
+(defn take-last-from-stream [n x]
+  (let [[in out quit res] (stream-prologue x)]
+    (go-loop [i []]
+      (if-let [e (<! in)]
+        (if (< (count i) n)
+          (recur (conj i e))
+          (recur (conj (vec (drop 1 i)) e)))
+        (if (empty? i)
+          (quit)
+          (do (put! out (first i))
+              (recur (next i))))))
     res))
 (defn kcount [x]
   "#x (count)  returns 1 for atoms"
@@ -566,7 +582,9 @@
             (dict? y)        (take-from-dict n y)
             (table? y)       (take-from-table n y)
             (keyed-table? y) (take-from-keyed-table n y)
-            (stream? y)      (take-from-stream n y)
+            (stream? y)      (if (< n 0)
+                               (take-last-from-stream (- n) y)
+                               (take-from-stream n y))
             :else            (err "nyi: # on " y)))))
 (defn pound
   "#x (count) and x#y (take)"
@@ -2126,6 +2144,19 @@
 (facts "about right-to-left"
        (fact "no operator precedence"
              (keval "10*2+3") => 50))
+(facts "about #"
+       (fact "n#container => take 1st n"
+             (keval "3#!5") => [0 1 2]
+             (keval "2#`a`b`c!1 2 3") => (keval "`a`b!1 2")
+             (keval "2#([]a:`a`b`c`d;b:1 2 3 4)") => (keval "([]a:`a`b;b:1 2)")
+             (keval "1#([]a:`a`b`c;b:1 2 3)") => (keval "([]a:,`a;b:,1)"))
+       (fact "(-n)# container => take last n"
+             (keval "-2#!5") => [3 4]
+             (keval "-2#`a`b`c!1 2 3") => (keval "`b`c!2 3")
+             (keval "-2#([]a:`a`b`c`d;b:1 2 3 4)") => (keval "([]a:`c`d;b:3 4)"))
+       (fact "n#x where n>#x => overtake"
+             (keval "5#!3") => [0 1 2 0 1]
+             (keval "-5#!3") => [1 2 0 1 2]))
 (facts "about _"
        (fact "n _ container => drop 1st n"
              (keval "2_!5") => [2 3 4]
@@ -2492,6 +2523,45 @@
              (keval "{[]([]a b):([]p:`a`b`c;q:1 2 3);b}[]") => [1 2 3])
        (fact "keyed tables too"
              (keval "{[]([a]b):([p:`a`b`c]q:1 2 3);b}[]") => [1 2 3]))
+#?(:clj ;; these tests don't work in js due to no cljs.async.core/wait
+   (facts "about streams"
+          (fact "atomic ops"
+                (keval "<=2*>=!3") => [0 2 4]
+                (keval "<=1 2 3*>=!3") => [[0 0 0] [1 2 3] [2 4 6]])
+                ;; (keval "<=(>=!3)*>=!3") => one of the following:
+                ;; [[0 2 4] [0 0 2 4] [0 0 1 2 4]]
+                ;; How do we say this in midje?
+          (fact "user-defined functions"
+                (keval "<={x*x}@>=!3") => [0 1 4])
+          (fact "first"
+                (keval "<=*>=!3") => 0)
+          (fact "take"
+                (keval "<=0#>=!3") => []
+                (keval "<=2#>=!3") => [0 1])
+          (fact "take from the back"
+                (keval "<=-1#>=!3") => [2]
+                (keval "<=-3#>=!3") => [0 1 2])
+          (fact "overtake"
+                (keval "<=5#>=!3") => [0 1 2 0 1]
+                (keval "<=-5#>=!3") => [1 2 0 1 2])
+          (fact "drop"
+                (keval "<=1_>=!3") => [1 2]
+                (keval "<=3_>=!3") => []
+                (keval "<=4_>=!3") => [])
+          (fact "drop from the back"
+                (keval "<=-1_>=!3") => [0 1]
+                (keval "<=-3_>=!3") => []
+                (keval "<=-4_>=!3") => [])
+          (fact "vector literals with stream components"
+                (keval "<=(1;>=!3)") => [[1 0] [1 1] [1 2]])
+          (fact "indexing with @ with a stream on the rhs"
+                (keval "<=(!5)@>=0 2 4") => [0 2 4])
+          (fact "indexing with @ with a stream on the lhs"
+                (keval "<=(>=(0 2 4;1 3 5))1") => [2 3])
+          (fact "indexing with . with a stream on the rhs"
+                (keval "<=(0 1;2 3).>=(0 1;1 1)") => [1 3])
+          (fact "indexing with . with a stream on the lhs"
+                (keval "<=(>=((0 1;2 3);(4 5;6 7))). 0 1") => [1 5])))
 ;; gave up on this one: couldn't fix the <exprx> rule
 ;; (fact "select"
 ;;       (count
