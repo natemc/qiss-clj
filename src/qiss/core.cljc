@@ -20,6 +20,21 @@
                       [instaparse.viz :as instav])
             (:gen-class)]))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Transducers
+(defn mapt [f] ;; function to apply to each ingested item
+  (fn ([rf]    ;; reducing function, e.g., conj.  rf is the process
+       (fn ([] (rf)) ;; identity
+         ([x] (rf x)) ;; completion
+         ([x y] (rf x (f y))))))) ;; apply f to y and reduce into x
+(defn filtert [p] ;; predicate
+  (fn ([rf]       ;; reducing function
+       (fn ([] (rf)) ;; identity
+         ([x] (rf x)) ;; completion
+         ([x y] (if (p y) (rf x y) x)))))) ;; include y if p y
+(defn tduce [xform f init coll]
+  (let [xf (xform f)]
+    (xf (reduce xf init coll))))
 #?(:cljs (enable-console-print!)) ;; println -> js/console.log
 #?(:cljs (defn on-js-reload [])
 ;;           (swap! genv update-in [:__figwheel_counter] inc)))
@@ -64,7 +79,9 @@
 (defn index-of
   "The first index in x where e appears, or (count x) if e does not
   exist in x"
-  [x e] #?(:clj  (let [i (.indexOf x e)] (if (< i 0) (count x) i))
+  [x e]
+  (when (:stream e) (err "nyi"))
+  #?(:clj  (let [i (.indexOf x e)] (if (< i 0) (count x) i))
            :cljs (loop [i 0 p x]
                    (if (or (empty? p) (= e (first p)))
                      i
@@ -583,6 +600,13 @@
   ([x y] (ktake x y)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; $ operator
+(declare stringify)
+(defn dollar
+  ([x] (vec (stringify x)))
+  ([x y] (err "nyi: dyadic $")))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; ? operator
 (defn msome [p & c]
   "like some but the predicate p takes multiple args"
@@ -989,6 +1013,7 @@
           :* {:f times :text "*" :rank [1 2] :stream-aware [1]}
           :% {:f fdiv :text "%" :rank [1 2]}
           :# {:f pound :text "#" :rank [1 2] :stream-aware [2]}
+          :$ {:f dollar :text "$" :rank [1 2]}
           (keyword ",") {:f join :text "," :rank [1 2]}
           :& {:f amp :text "&" :rank [1 2] :stream-aware [1]}
           :| {:f pipe :text "|" :rank [1 2]}
@@ -1121,13 +1146,17 @@
 (defn index [x i]
   "The elements of x specified by i"
   (cond (= :hole i)      x
+        ;;        (and (map? i) (:where i))
         (table? x)       (index-table x i)
         (keyed-table? x) (index-keyed-table x i)
         (dict? i)        (make-dict (dict-key i) (index x (dict-val i)))
         (vector? i)      (mapv (partial index x) i)
         (coll? i)        (reduce index x i) ;; TODO: fix
         (vector? x)      (x i)
-        :else            ((dict-val x) (index-of (dict-key x) i))))
+        (dict? x)        ((dict-val x) (index-of (dict-key x) i))
+        ;;; object? doesn't work; it just tests if the ctor is Object
+        :else            #?(:clj  (err "can't index" x "with" i)
+                            :cljs (aget x (name i)))))
 (defn index-deep [x i]
   "The elements of x specified by i, where x is nested and the
   dimensions of i create a cross-product index over x's dimensions"
@@ -1671,6 +1700,8 @@
               :lexpr     (fn [& x] (vec (cons :expr x)))
               :lid       (fn [& x] (vec (cons :id x)))
               :ljuxt     (fn [& x] (vec (cons :juxt x)))
+              :loneat    (fn [& x] (vec (cons :at x)))
+              :lonedot   (fn [& x] (vec (cons :dot x)))
               :elhs      (fn [& x] (vec (cons :lhs x)))
               :lelhs     (fn [& x] (vec (cons :lhs x)))
               :llhs      (fn [& x] (vec (cons :lhs x)))
@@ -1873,8 +1904,14 @@
                          :event event
                          :sub (fn [] (async/tap m (chan)))}))))
 #?(:cljs (defn ksel [s] (mapv #({:element %}) (dom/sel (apply str s)))))
-#?(:cljs (defn ksel1 [s] {:element (dom/sel1 (apply str s))}))
-
+#?(:cljs (defn ksel1 [s]
+           {:element (dom/sel1
+                      (if (keyword? s)
+                        (str "#" (name s))
+                        (apply str s)))}))
+#?(:cljs (defn text
+           ([e] (dom/text (:element e)))
+           ([e t] (dom/set-text! (:element e) (apply str t)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Timer
 (defn now []
@@ -1951,7 +1988,8 @@
                               :wcsv   {:f wcsv :rank [2]}}
                        :cljs {:ev     {:f ev :rank [2]}
                               :sel    {:f ksel :rank [1]}
-                              :sel1   {:f ksel1 :rank [1]}})))
+                              :sel1   {:f ksel1 :rank [1]}
+                              :text   {:f text :rank [2]}})))
 
 ;; (def builtin (kload builtin "src/qiss/qiss.qiss"))
 
@@ -1983,6 +2021,7 @@
    #?(:clj  (load-code (slurp "src/qiss/qiss.qiss"))
       :cljs (let [q (qiss-elements)
                   r (make-array (count q))]
+              (null! "found" (count q) "qisses to load...")
               (doseq [[i e] (map list (range (count q)) q)]
                 (let [s (.-src e)]
                   (if (= "" s) ;; no src attr => code is in tag's text
@@ -1990,7 +2029,7 @@
                     (xhr/send s (fn [v] (aset r i (response-text v))
                                   (when (every? some? r)
                                     (doseq [c r] (load-code c))
-                                    (null! "code loaded"))))))))))
+                                    (null! "qisses loaded"))))))))))
   ([x]
    (set-genv (reduce #(let [[ne r] (resolve-full-expr x %1 %2)] ne)
                      @genv
