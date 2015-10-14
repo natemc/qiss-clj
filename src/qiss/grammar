@@ -20,8 +20,8 @@ valhs      = !dalhs <'('> ws? (arg|hole) (ws? <';'> ws? (arg|hole))* ws? <')'>
            | <'('> ws? did (ws did)+ ws? <')'>
 assign     = alhs ws? <':'> ws? rhs
 lassign    = lid ws? <':'> ws? lrhs
-at         = <'@'> ws? rhs | elhs ws? <'@'> ws? rhs
-lat        = <'@'> ws? lrhs | lelhs ws? <'@'> ws? lrhs
+at         = <loneat> | <'@'> ws? rhs | elhs ws? <'@'> ws? rhs
+lat        = <loneat> | <'@'> ws? lrhs | lelhs ws? <'@'> ws? lrhs
 bool       = #'[01]' <'b'>
 bools      = #'[01][01]+' <'b'>
 by         = <'by'> ws? aggsx
