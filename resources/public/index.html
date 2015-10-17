@@ -5,7 +5,9 @@
     <script src='qiss/qiss.qiss' type='text/qiss'></script>
     <!-- Embedding qiss code directly in an HTML file -->
     <script type='text/qiss'>
-       show`click ev sel1`go;
+      show`click ev sel1`go;
+      (sel1`left`right)text\:$`clientX of`mousemove ev sel1`box;
+      (sel1`result)text str{x@&0=x mod 2}`clientX of`mousemove ev sel1`box;
     </script>
 <!--      sel1["#result"],/:`click ev sel1"#go" -->
 <!--      sel1["#result"],/:{x;"<p>foo</p>"}'`click ev sel1"#go" -->
@@ -15,11 +17,16 @@
     <h1>qisses</h1>
     <div id="app">
       <div id='box' style='height:400px;width:100%;'>
+	<div id='left' style='float:left;height:inherit;width:50%;'>
+	</div>
+	<div id='right' style='float:left;height:inherit;width:50%;'>
+	</div>
       </div>
       <form>
         <input id='go' type='button' value='Go!'/>
       </form>
-      <div id='result'/>
+      <div id='result'>
+      </div>
     </div>
     <!-- We must load qiss.js at the bottom so that all the qiss
             elements exist when we startup the interpreter -->

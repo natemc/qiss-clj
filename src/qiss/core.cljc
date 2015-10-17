@@ -80,7 +80,7 @@
   "The first index in x where e appears, or (count x) if e does not
   exist in x"
   [x e]
-  (when (:stream e) (err "nyi"))
+;;  (when (:stream e) (err "nyi"))
   #?(:clj  (let [i (.indexOf x e)] (if (< i 0) (count x) i))
            :cljs (loop [i 0 p x]
                    (if (or (empty? p) (= e (first p)))
@@ -201,7 +201,7 @@
 ;; Helper for writing stream processing functions.
 ;; Creates all the plumbing, a quit function that closes
 ;; all necessary channels, and a result you can return.
-(defn stream-prologue [s]
+(defn stream-prologue [s] ; stream or (coll of) streams
   (let [in   (if (stream? s)
                ((:sub s))
                (mapv #((:sub %)) s))
@@ -1146,7 +1146,9 @@
 (defn index [x i]
   "The elements of x specified by i"
   (cond (= :hole i)      x
-        ;;        (and (map? i) (:where i))
+        (and (map? i) (contains? i :where)) (do (null! "***" x i)
+                                                (if (:where i) x nil))
+        
         (table? x)       (index-table x i)
         (keyed-table? x) (index-keyed-table x i)
         (dict? i)        (make-dict (dict-key i) (index x (dict-val i)))
@@ -1249,22 +1251,20 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn resolve-adverbed [tu e x]
   "Find the value of x, and adverbed expr"
-  (if (contains? x :lhs) ; eval must be right to left!
-    (if (contains? x :rhs)
-      (let [[e2 r] (kresolve tu e  (:rhs x))
-            [e3 o] (kresolve tu e2 (:verb x))
-            [e4 l] (kresolve tu e3 (:lhs x))
-            m      (adverbs (keyword (:adverb x)))]
-        [e4 ((m o) e l r)])
-      (err "nyi: bind lhs of adverbed expr (partial)"))
-    (if (contains? x :rhs)
-      (let [[e2 r] (kresolve tu e  (:rhs x))
-            [e3 o] (kresolve tu e2 (:verb x))
-            m      (adverbs (keyword (:adverb x)))]
-        [e3 ((m o) e r)])
-      (let [[e2 o] (kresolve tu e (:verb x))
-            m      (adverbs (keyword (:adverb x)))]
-        [e2 (merge o {:f (m o) :pass-global-env true})]))))
+  (let [m (adverbs (keyword (:adverb x)))]
+    (if (contains? x :lhs) ; eval must be right to left!
+      (if (contains? x :rhs)
+        (let [[e2 r] (kresolve tu e  (:rhs x))
+              [e3 o] (kresolve tu e2 (:verb x))
+              [e4 l] (kresolve tu e3 (:lhs x))]
+          (invoke e4 (merge o {:f (m o) :pass-global-env true}) [l r]))
+        (err "nyi: bind lhs of adverbed expr (partial)"))
+      (if (contains? x :rhs)
+        (let [[e2 r] (kresolve tu e  (:rhs x))
+              [e3 o] (kresolve tu e2 (:verb x))]
+          (invoke e3 (merge o {:f (m o) :pass-global-env true}) [r]))
+        (let [[e2 o] (kresolve tu e (:verb x))]
+          [e2 (merge o {:f (m o) :pass-global-env true})])))))
 
 (defn resolve-assign [tu e x]
   "Resolve the assignment specified by x"
@@ -1854,6 +1854,42 @@
   (let [[in out quit res] (stream-prologue s)]
     ;; Collect events from the input streams and remember them in a.
     ;; When an input stream closes, mark it in d until all are done.
+    (go-loop [a (vec (repeat (count in) nil)) ;; args
+              d (vec (repeat (count in) false))] ;; done
+      ;; this was an attempt to grab all hot events at once
+      ;; doesn't work
+      ;; next, let's try removing things from in each time
+      ;; that will mess up the indexes, so we'll need to adjust them
+      (let [u (loop [acc [] ch in]
+                (if (empty? ch)
+                  acc
+                  (let [[v p] (async/alts! ch :default :got-em-all)]
+                    (if (= :got-em-all v)
+                      (null! "!!!" acc)
+                      (recur (null! "---" (conj acc [v p]))
+                             (removev ch (index-of ch p)))))))
+            [na nd] (loop [aa a dd d x u]
+                      (if (empty? x)
+                        [aa dd]
+                        (let [[v p] (first x)
+                              i     (null! "***" (index-of in p))]
+                          (if (some? (null! v))
+                            (recur (assoc aa i v) dd (next x))
+                            (if (nil? (aa i)) ;; closed before started => abort
+                              [nil (vec repeat (count in) true)] ;; force quit
+                              (recur aa (assoc dd i true) (next x)))))))]
+        (if (every? some? nd)
+          (quit)
+          (do
+            (when (every? some? na) ;; need full arg set b4 1st call
+              (let [r (apply f na)]
+                (when (some? r) (put! out r))))
+            (recur na nd)))))
+    res))
+(defn make-stream-distinct2 [f s]
+  (let [[in out quit res] (stream-prologue s)]
+    ;; Collect events from the input streams and remember them in a.
+    ;; When an input stream closes, mark it in d until all are done.
     (go-loop [a (mapv (fn [x] nil) in)    ;; args
               d (mapv (fn [x] false) in)] ;; done
       (let [[v j] (async/alts! in)
@@ -1893,6 +1929,36 @@
                              (map list (map count (dict-val g)) e))]
                (apply f a)))
          (dict-key g)))))))
+;; (defn make-stream2 [f s]
+;;   (if-not (= 1 (count s))
+;;     (err "nyi: make-stream2")
+;;     (let [in ((:sub s))
+;;           cb (atom [])]
+;;       (go-loop [e (<! in)]
+;;         (if (nil? e)
+;;           (async/close! in)
+;;           (let
+;;           (doseq [g cb]
+;;       {:snapshot true
+;;        :sub (fn [c] (swap! cb conj c))})))
+(def event-sources (atom [])) ;; pair of arrays: ch -> [subs]
+;; We'll add a special ch at the first position for waking up the
+;; go loop to process changes to the subcriptions.  We can pass the
+;; subscription change info in the channel.  Setting this up will
+;; give event-loop something to do at startup.
+(defn event-loop []
+  (go-loop [es @event-sources]
+    (let [[e c] (async/alts! (es 0))
+          i     (index-of es c)]
+      (if (nil? e)
+        (do (swap! event-sources
+                   (fn [x] (mapv #(removev (%1 0) i) [0 1])))
+            (async/close! c))
+        (do (doseq [s ((es 1) i)]
+              ;; now we have to find all the things s subscribes to
+              ;; and get their current values.
+              (s e))
+            (recur @event-sources))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; DOM
 #?(:cljs (defn ev [event ele]
@@ -1903,12 +1969,28 @@
                          :stream true
                          :event event
                          :sub (fn [] (async/tap m (chan)))}))))
+#?(:cljs (defn ev2 [event ele]
+           (let [ch   (chan)
+                 subs (atom [])]
+             (dom/listen! (:element ele) event #(put! ch %))
+             (go-loop [e (<! ch)]
+               (if (nil? e)
+                 (async/close! ch)
+                 (do (doseq [s subs] (s e))
+                     (recur (<! ch)))))
+             (merge ele {:on-done (fn [] (async/close! ch))
+                         :stream true
+                         :event event
+                         :sub (fn [s] (swap! subs conj s))}))))
+#?(:cljs (defn kstring? [s] (every? #(and (string? %) (= 1 (count %))) s)))
 #?(:cljs (defn ksel [s] (mapv #({:element %}) (dom/sel (apply str s)))))
 #?(:cljs (defn ksel1 [s]
-           {:element (dom/sel1
-                      (if (keyword? s)
-                        (str "#" (name s))
-                        (apply str s)))}))
+           (if (and (coll? s) (not (kstring? s)))
+             (mapv ksel1 s)
+             {:element (dom/sel1
+                        (cond (keyword? s) (str "#" (name s))
+                              (kstring? s) (apply str s)
+                              :else        (err "sel1 cannot take" s)))})))
 #?(:cljs (defn text
            ([e] (dom/text (:element e)))
            ([e t] (dom/set-text! (:element e) (apply str t)))))
