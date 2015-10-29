@@ -624,7 +624,9 @@
 ;; $ operator
 (declare stringify)
 (defn dollar
-  ([x] (vec (stringify x)))
+  ([x] (if (coll? x)
+         (mapv dollar x)
+         (vec (stringify x))))
   ([x y] (err "nyi: dyadic $")))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1635,7 +1637,9 @@
         kw (apply max (map count ks))
         f  (str "%" kw "s| %s")]
     (str/join "\n" (map #?(:clj #(format f %1 %2)
-                           :cljs #(gstring/format f %1 %2))  ks (mapv stringify (dict-val x))))))
+                           :cljs #(gstring/format f %1 %2))
+                        ks
+                        (mapv stringify (dict-val x))))))
 (defn table-as-strings [x]
   (let [h (mapv name (cols x)) ; col header
         n (min (:rows viewport) (count (first (dict-val x)))) ; TODO: fix
@@ -1839,10 +1843,8 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Streams
-;; Streams are implemented using core.async.  The go macro really makes
-;; implementing this stuff much easier than doing it ourselves.
-;; One drawback is we can't pass nil, which is another thing to keep in mind
-;; whenever we get around to dealing with nulls in qiss.
+;; Streams are implemented as observables; you subscribe and pass in
+;; a map of functions: on-next and on-done (and someday on-error).
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Stream transforms
 ;; When a function is applied to a set of arguments (via invoke)
@@ -1952,14 +1954,11 @@
                          :sub     #(swap! subs conj %)
                          :unsub   #(swap! subs except %)}))))
 #?(:cljs (defn kstring? [s] (every? #(and (string? %) (= 1 (count %))) s)))
-#?(:cljs (defn ksel [s] (mapv #({:element %}) (dom/sel (apply str s)))))
-#?(:cljs (defn ksel1 [s]
-           (if (and (coll? s) (not (kstring? s)))
-             (mapv ksel1 s)
-             {:element (dom/sel1
-                        (cond (keyword? s) (str "#" (name s))
-                              (kstring? s) (apply str s)
-                              :else        (err "sel1 cannot take" s)))})))
+#?(:cljs (defn kdom [s]
+           (cond (and (coll? s) (not (kstring? s))) (mapv kdom s)
+                 (keyword? s) {:element (dom/sel1 (str "#" (name s)))}
+                 (kstring? s) (mapv (fn [x] {:element x}) (dom/sel (apply str s)))
+                 :else        (err "invalid argument to dom:" s))))
 #?(:cljs (defn text
            ([e] (dom/text (:element e)))
            ([e t] (dom/set-text! (:element e) (apply str t)))))
@@ -2010,6 +2009,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Testing event source
 (defn into-stream [x]
+  ;; this is no good but I'll fix it when I write a test that fails
   (let [ch   (async/to-chan (if (coll? x) x [x]))
         subs (atom [])
         push (fn []
@@ -2061,9 +2061,8 @@
                               :rcsvh  {:f rcsvh :rank [2]}
                               :read   {:f read-lines :rank [1]}
                               :wcsv   {:f wcsv :rank [2]}}
-                       :cljs {:ev     {:f ev :rank [2]}
-                              :sel    {:f ksel :rank [1]}
-                              :sel1   {:f ksel1 :rank [1]}
+                       :cljs {:dom    {:f kdom :rank [1]}
+                              :ev     {:f ev :rank [2]}
                               :text   {:f text :rank [2]}})))
 
 ;; (def builtin (kload builtin "src/qiss/qiss.qiss"))
@@ -2100,7 +2099,7 @@
               (doseq [[i e] (map list (range (count q)) q)]
                 (let [s (.-src e)]
                   (if (= "" s) ;; no src attr => code is in tag's text
-                    (aset r i (str/trim (.-text e)))
+                    (aset r i (.-text e))
                     (xhr/send s (fn [v] (aset r i (response-text v))
                                   (when (every? some? r)
                                     (doseq [c r] (load-code c))
