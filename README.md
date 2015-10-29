@@ -1,15 +1,12 @@
 # qiss
 
-qiss is short and simple: a q-like programming language for the
-JVM.  Like all APL derivatives, qiss derives its expressiveness from
-the following features:
+qiss is short and simple: a k/q-like programming language for the JVM and JavaScript engines.  Like all APL derivatives, qiss derives its expressiveness from the following features:
 
 * Automatic vectorization
 * Precedence-less right-to-left evaluation of expressions
 * Syntax that requires minimal punctuation
 
-The interpreter is written in clojure, and it works (modulo platform limitations) in
-ClojureScript so we can write in qisses (qiss on EcmaScript), too.
+qiss is a toy interpreter whose primary purpose is for me to explore ideas (e.g., what would FRP look like in a single-page browser app if k had built-in FRP support?); no attempt has been made to make it robust or efficient.  The interpreter is written in clojure, and it works (modulo platform limitations) in ClojureScript so we can write in qisses (qiss on EcmaScript), too.
 
 ## Installation
 
@@ -384,12 +381,11 @@ qiss$
 
 ### qisses in the browser
 
-To get things started, run the fig script in the qiss directory.  Next, go to http://localhost:3449 in your browser.  Lastly, view the web page source to see you qiss has been embedded in a script tag in the page.
+To get things started, run the fig script in the qiss directory.  Next, go to http://localhost:3449 in your browser.  Lastly, view the web page source to see how qiss has been embedded in a script tag in the page.
 
 ### Bugs
 
-Unbounded!  There is much work to do.  These are some of the most
-pressing issues:
+Unbounded!  There is much work to do.  These are some of the most pressing issues:
 
 * ,' on tables
 * fix grammar so loading/running scripts isn't so fragile
@@ -410,21 +406,14 @@ things.)
 * get rid of :pass-global-env 
 * if special form
 * date and time types
-* string, casting and parsing with $ 
+* casting and parsing with $ 
 * better console output
-* vector conditional form of ? (or maybe if automatically vectorizes)
+* vector conditional form of ? (or maybe the if form automatically vectorizes)
 * more ascii file I/O options
-* be smart about indentation to reduce the need for ;
+* be smart about indentation to reduce the need for ; (or use \ after whitespace as line-continuation)
 * learn APL and J to steal ideas
 * promote longs to doubles for =
 * fuzzy comparison of doubles
 * over and scan on state transition matrices
-* experiment with make-array etc
-* threads just to see what's possible?
-
-## License
-
-Copyright © 2015 FIXME
-
-Distributed under the Eclipse Public License either version 1.0 or (at
-your option) any later version.
+* experiment with make-array etc instead of using clojure vectors
+* threads just to see what's possible - expose clojure's stm
