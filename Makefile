@@ -9,6 +9,11 @@ upload: images
 super-nuke: nuke
 	-docker rmi qiss/minimal
 
+docker: minimal-image
+	-docker run -it --rm -p 3449:3449 -v .:/qiss/home qiss/minimal:latest 
+
+dockerfigwheel: minimal-image
+	-docker run -it --rm -p 3449:3449 -v .:/qiss/home qiss/minimal:latest bash -c "lein figwheel docker"
 
 # Cleanup with fangs
 nuke:

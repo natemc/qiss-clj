@@ -31,6 +31,20 @@
 ;;                                   :optimizations :whitespace ;; fig doesn't like
 ;;                                   :pretty-print true
                                    :source-map-timestamp true}}
+                       ;; invoke me via - 'lein figwheel docker' from inside the container
+                       ;; see - http://blog.nickol.us/2015/07/20/using-figwheel-with-docker/
+                       {:id "docker"
+                        :figwheel { :on-jsload "qiss.core/on-js-reload"
+                                    :websocket-host "192.168.99.100" }
+                        :source-paths ["src"]
+                        :compiler {:asset-path "js/compiled/out"
+                                   :main qiss.core
+                                   :output-dir "resources/public/js/compiled/out"
+                                   :output-to "resources/public/js/compiled/qiss.js"
+;;                                   :optimizations :whitespace ;; fig doesn't like
+;;                                   :pretty-print true
+                                   :source-map-timestamp true}}
+
                        {:id "opt"
                         :source-paths ["src"]
                         :compiler {:main qiss.core

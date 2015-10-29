@@ -1,6 +1,16 @@
-qissdev:
+qissrepl:
+ command: lein run
  build: .
  ports:
   - "8888:8888"
+ volumes:
+  - .:/qiss/home
+
+qissonbrowser:
+ command: lein figwheel docker
+ build: .
+ ports:
+  - "3449:3449"
+  - "7888:7888"
  volumes:
   - .:/qiss/home
