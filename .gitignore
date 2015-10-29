@@ -10,6 +10,7 @@
 /clojurescript/node_modules
 /clojurescript/out
 /target
+qiss.iml
 pom.xml
 pom.xml.asc
 *~

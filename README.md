@@ -6,11 +6,11 @@ qiss is short and simple: a k/q-like programming language for the JVM and JavaSc
 * Precedence-less right-to-left evaluation of expressions
 * Syntax that requires minimal punctuation
 
-qiss is a toy interpreter whose primary purpose is for me to explore ideas (e.g., what would FRP look like in a single-page browser app if k had built-in FRP support?); no attempt has been made to make it robust or efficient.  The interpreter is written in clojure, and it works (modulo platform limitations) in ClojureScript so we can write in qisses (qiss on EcmaScript), too.
+qiss is a toy interpreter whose primary purpose is for us to explore ideas (e.g., what would FRP look like in a single-page browser app if k had built-in FRP support?); no attempt has been made to make it robust or efficient.  The interpreter is written in clojure, and it works (modulo platform limitations) in ClojureScript so we can write in qisses (qiss on EcmaScript), too.
 
 ## Installation
 
-### Make sure you have the following installed:
+### Make sure you have the following installed (or see Docker section below):
   * a recent (>= SE 8) [JDK from Oracle](http://www.oracle.com/technetwork/java/javase/downloads/index.html)
   * git
   * [Leiningen](http://leiningen.org/)
@@ -31,6 +31,16 @@ clojure libraries needed by qiss, so it may take a minute.
 
 ```
 qiss$ rlwrap lein run 
+```
+
+## Docker
+
+If you are new to leiningren and wish to jump right in to the qiss REPL in
+a single command, the provided Dockerfile along with the Makefile will 
+construct a container with the complete stack on your behalf.
+
+```
+qiss$ make docker
 ```
 
 ## Options
@@ -391,6 +401,15 @@ In the following example, every is a monadic function that produces a stream of 
 dom[`result]text str every 2000;
 ```
 
+## qiss in the browser via Docker
+
+Our Docker container runs the very same figwheel setup above.  Note that if your container is running on a ip address different from the host, 
+don't forget to edit the project.clj file to reflect this and point your browser to the container's ip address (say http://192.168.99.100:3449) 
+to invoke the figwheel prompt.
+
+```
+qiss$ make dockerfigwheel
+```
 
 
 ### Bugs
