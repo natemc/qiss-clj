@@ -371,7 +371,7 @@ foobar
 §)(,"foo"),,"bar" / to make a pair of strings, enlist them first
 ["foo" "bar"]
 §)"foo"="foo" / atomic =
-["true" "true" "true"]
+[true true true]
 §)"foo"~"foo" / use ~ (match) to compare strings as a unit
 true
 §)/ exit
