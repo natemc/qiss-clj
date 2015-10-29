@@ -5,21 +5,33 @@
     <script src='qiss/qiss.qiss' type='text/qiss'></script>
     <!-- Embedding qiss code directly in an HTML file -->
     <script type='text/qiss'>
-       show`click ev sel1`go;
+      / FRP without all the ceremony.  Events are time-varying values.
+      / They automatically propagate through call chains.
+      show`click ev dom`go;      / dom with sym => single element by ID
+      dom[`result]text str every 2000;
+      / dom with string => collection of elements via CSS
+      (dom".cx"){x text'$y*1+!x}`clientX of`mousemove ev dom`box;
+      / The following don't work yet...
+      / (dom`result)text str{x@&0=x mod 2}`clientX of`mousemove ev dom`box;
+      / dom[`result],/:`click ev dom`go;
+      / dom[`result],/:{x;"<p>foo</p>"}'`click ev dom`go;
     </script>
-<!--      sel1["#result"],/:`click ev sel1"#go" -->
-<!--      sel1["#result"],/:{x;"<p>foo</p>"}'`click ev sel1"#go" -->
     <title>qisses</title>
   </head>
   <body>
     <h1>qisses</h1>
     <div id="app">
       <div id='box' style='height:400px;width:100%;'>
+	<div class='cx' id='left' style='float:left;height:inherit;width:50%;'>
+	</div>
+	<div class='cx' id='right' style='float:left;height:inherit;width:50%;'>
+	</div>
       </div>
       <form>
         <input id='go' type='button' value='Go!'/>
       </form>
-      <div id='result'/>
+      <div id='result'>
+      </div>
     </div>
     <!-- We must load qiss.js at the bottom so that all the qiss
             elements exist when we startup the interpreter -->

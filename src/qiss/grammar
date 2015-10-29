@@ -72,9 +72,9 @@ lexpr      = lexprx   (* limited expression: , is not join *)
            / svl
 (*           / <comment> *)
 (* It can't be this simple.  Python doesn't have juxt *)
-<exprsx>   = (exprx|hole) (ws? <';'> ws? (exprx|hole))* ws?
+<exprsx>   = ws? (exprx|hole) (ws? <';'> ws? (exprx|hole))* ws?
 	   (* | indent exprsx dedent *)
-file       = <#'/.*\n'>? exprs
+file       = <#'[ \t]*/.*\n'>* exprs
 float      = !floatsx #'-?([0-9]*\.[0-9]+|[0-9]+\.[0-9]*)([eE][-+]?[0-9]+)?'
 floats     = &(floatx | (longx ws)+ floatx) floatsx
 <floatsx>  = #'-?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?(([ \n\r\t]+)+-?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?)+'

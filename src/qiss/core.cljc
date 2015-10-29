@@ -1,6 +1,6 @@
 (ns qiss.core
   #?(:cljs (:require-macros [cljs.core.async.macros :refer [go go-loop]]))
-  #?(:cljs (:require [cljs.core.async :as async :refer [chan put! <!]]
+  #?(:cljs (:require [cljs.core.async :as async :refer [chan put! <! >!]]
                      [clojure.browser.repl :as brepl]
                      [clojure.string :as str]
                      [dommy.core :as dom :refer-macros [sel sel1]]
@@ -12,7 +12,7 @@
 
   #?@(:clj [(:require [clojure-csv.core :as csv]
                       [clojure.core.async :as async
-                         :refer [chan go go-loop put! <! <!!]]
+                         :refer [chan go go-loop put! <! >! <!!]]
                       [clojure.java.io :as io]
                       [clojure.stacktrace :as st] ;; handy from the repl
                       [clojure.string :as str]
@@ -22,6 +22,7 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Transducers
+;; NOT USED.  These are just here to think about.
 (defn mapt [f] ;; function to apply to each ingested item
   (fn ([rf]    ;; reducing function, e.g., conj.  rf is the process
        (fn ([] (rf)) ;; identity
@@ -35,6 +36,7 @@
 (defn tduce [xform f init coll]
   (let [xf (xform f)]
     (xf (reduce xf init coll))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 #?(:cljs (enable-console-print!)) ;; println -> js/console.log
 #?(:cljs (defn on-js-reload [])
 ;;           (swap! genv update-in [:__figwheel_counter] inc)))
@@ -80,7 +82,7 @@
   "The first index in x where e appears, or (count x) if e does not
   exist in x"
   [x e]
-  (when (:stream e) (err "nyi"))
+;;  (when (:stream e) (err "nyi"))
   #?(:clj  (let [i (.indexOf x e)] (if (< i 0) (count x) i))
            :cljs (loop [i 0 p x]
                    (if (or (empty? p) (= e (first p)))
@@ -123,14 +125,22 @@
 (defn lambda-rank [x] (:rank x))
 (defn lambda-text [x] (:text x))
 (defn lose-env [x] (if (lambda? x) (dissoc x :env) x))
+(defn snapshot? [x] (:snapshot x))
+(defn snapshot-value [x] (:value x))
+(defn make-snapshot [x] {:snapshot true :value x})
 (defn stream? [x] (:stream x))
 (defn stream-aware? [x r] ;; lambda, rank
   (and (:stream-aware x) (some #{r} (:stream-aware x))))
 (defn table? [x] (and (map? x) (:k x) (:v x) (:t x)))
 (defn add-to-dict [d k v] (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
 (defn catv "concat x and y into a vector" [x y] (vec (concat x y)))
-(defn removev "remove the ith element of v" [v i]
-  (catv (subvec v 0 i) (subvec v (+ 1 i) (count v))))
+(defn removev "remove the ith element(s) of v" [v i]
+  (if (vector? i)
+    (loop [x v j (sort i) k 0 r []]
+      (cond (empty? x)      r
+            (= k (first j)) (recur (next x) (next j) (inc k) r)
+            :else           (recur (next x) j (inc k) (conj r (first x)))))
+    (catv (subvec v 0 i) (subvec v (+ 1 i) (count v)))))
 (defn remove-from-dict [d k]
   "Remove the elements of d's key and value corresponding to key element k"
   (let [i (index-of (:k d) k)]
@@ -201,7 +211,7 @@
 ;; Helper for writing stream processing functions.
 ;; Creates all the plumbing, a quit function that closes
 ;; all necessary channels, and a result you can return.
-(defn stream-prologue [s]
+(defn stream-prologue [s] ; stream or (coll of) streams
   (let [in   (if (stream? s)
                ((:sub s))
                (mapv #((:sub %)) s))
@@ -210,8 +220,9 @@
         quit (if (stream? s)
                (fn [] (doseq [p [in out]] (async/close! p)))
                (fn [] (doseq [p (conj in out)] (async/close! p))))
-        res  {:stream true
-              :sub (fn [] (async/tap m (chan)))}]
+        res  {:depends-on s
+              :stream     true
+              :sub        (fn [] (async/tap m (chan)))}]
     [in out quit res]))
 ;; This is just an example to show how to use
 ;; stream-prologue to write a stream processing function.
@@ -237,7 +248,7 @@
   (let [p (if (coll? y) #(some #{%} y) #(= % y))]
     (vec (remove p x))))
 (defn in "true for those elements of x that exist in y" [x y]
-  (if (coll? x)
+  (if (vector? x)
     (mapv #(in % y) x)
     (if (some #{x} y) true false)))
 (defn inter
@@ -375,11 +386,21 @@
         (do (put! out {:where e})
             (recur (<! in)))))
     res))
+(defn where-from-stream2 [x]
+  (let [[in out quit res] (stream-prologue x)]
+    (go-loop [e (<! in)]
+      (if (nil? e)
+        (quit)
+        (do (put! out {:where e})
+            (recur (<! in)))))
+    res))
 (defn amp
   "&x (where)      and    x&y (atomic min)"
   ([x]  (if (stream? x)
-          (where-from-stream x)
-          (where x)))
+          (err "wtf: amp got stream")
+          (if (snapshot? x)
+            (err "yay! amp got snapshot")
+            (where x))))
   ([x y] (promote-bools (fn [& b] (and b)) min x y)))
 (defn div "atomic integer division" [x y] ((atomize quot) x y))
 (declare group)
@@ -502,7 +523,7 @@
                                             (let [j (index-of k g)]
                                               (assoc v j (conj (v j) i))))
                                           ;; couldn't make nested transients work
-                                          (vec (replicate (count k) []))
+                                          (vec (repeat (count k) []))
                                           (map vector (iterate inc 0) x))))
         (dict? x)   (index (dict-key x) (group (dict-val x)))
         :else       (err "can't group " x)))
@@ -603,7 +624,9 @@
 ;; $ operator
 (declare stringify)
 (defn dollar
-  ([x] (vec (stringify x)))
+  ([x] (if (coll? x)
+         (mapv dollar x)
+         (vec (stringify x))))
   ([x y] (err "nyi: dyadic $")))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1015,7 +1038,7 @@
           :# {:f pound :text "#" :rank [1 2] :stream-aware [2]}
           :$ {:f dollar :text "$" :rank [1 2]}
           (keyword ",") {:f join :text "," :rank [1 2]}
-          :& {:f amp :text "&" :rank [1 2] :stream-aware [1]}
+          :& {:f amp :text "&" :rank [1 2]} ;; :stream-aware [1]}
           :| {:f pipe :text "|" :rank [1 2]}
           :_ {:f under :text "_" :rank [1 2] :stream-aware [2]}
           := {:f eq :text "=" :rank [1 2]}
@@ -1146,7 +1169,9 @@
 (defn index [x i]
   "The elements of x specified by i"
   (cond (= :hole i)      x
-        ;;        (and (map? i) (:where i))
+        (and (map? i) (contains? i :where)) (do (null! "***" x i)
+                                                (if (:where i) x nil))
+        
         (table? x)       (index-table x i)
         (keyed-table? x) (index-keyed-table x i)
         (dict? i)        (make-dict (dict-key i) (index x (dict-val i)))
@@ -1249,22 +1274,20 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn resolve-adverbed [tu e x]
   "Find the value of x, and adverbed expr"
-  (if (contains? x :lhs) ; eval must be right to left!
-    (if (contains? x :rhs)
-      (let [[e2 r] (kresolve tu e  (:rhs x))
-            [e3 o] (kresolve tu e2 (:verb x))
-            [e4 l] (kresolve tu e3 (:lhs x))
-            m      (adverbs (keyword (:adverb x)))]
-        [e4 ((m o) e l r)])
-      (err "nyi: bind lhs of adverbed expr (partial)"))
-    (if (contains? x :rhs)
-      (let [[e2 r] (kresolve tu e  (:rhs x))
-            [e3 o] (kresolve tu e2 (:verb x))
-            m      (adverbs (keyword (:adverb x)))]
-        [e3 ((m o) e r)])
-      (let [[e2 o] (kresolve tu e (:verb x))
-            m      (adverbs (keyword (:adverb x)))]
-        [e2 (merge o {:f (m o) :pass-global-env true})]))))
+  (let [m (adverbs (keyword (:adverb x)))]
+    (if (contains? x :lhs) ; eval must be right to left!
+      (if (contains? x :rhs)
+        (let [[e2 r] (kresolve tu e  (:rhs x))
+              [e3 o] (kresolve tu e2 (:verb x))
+              [e4 l] (kresolve tu e3 (:lhs x))]
+          (invoke e4 (merge o {:f (m o) :pass-global-env true}) [l r]))
+        (err "nyi: bind lhs of adverbed expr (partial)"))
+      (if (contains? x :rhs)
+        (let [[e2 r] (kresolve tu e  (:rhs x))
+              [e3 o] (kresolve tu e2 (:verb x))]
+          (invoke e3 (merge o {:f (m o) :pass-global-env true}) [r]))
+        (let [[e2 o] (kresolve tu e (:verb x))]
+          [e2 (merge o {:f (m o) :pass-global-env true})])))))
 
 (defn resolve-assign [tu e x]
   "Resolve the assignment specified by x"
@@ -1345,7 +1368,8 @@
                  a
                  {:env e
                   :pass-global-env true
-                  :stream-aware (:rank a)
+                  ;; TODO give in and use clojure meta
+;;                  :stream-aware (:rank a)
                   :text t})]
     [e (assoc w :f (feval tu w))]))
 (defn vec-with-streams [v]
@@ -1613,7 +1637,9 @@
         kw (apply max (map count ks))
         f  (str "%" kw "s| %s")]
     (str/join "\n" (map #?(:clj #(format f %1 %2)
-                           :cljs #(gstring/format f %1 %2))  ks (mapv stringify (dict-val x))))))
+                           :cljs #(gstring/format f %1 %2))
+                        ks
+                        (mapv stringify (dict-val x))))))
 (defn table-as-strings [x]
   (let [h (mapv name (cols x)) ; col header
         n (min (:rows viewport) (count (first (dict-val x)))) ; TODO: fix
@@ -1817,10 +1843,8 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Streams
-;; Streams are implemented using core.async.  The go macro really makes
-;; implementing this stuff much easier than doing it ourselves.
-;; One drawback is we can't pass nil, which is another thing to keep in mind
-;; whenever we get around to dealing with nulls in qiss.
+;; Streams are implemented as observables; you subscribe and pass in
+;; a map of functions: on-next and on-done (and someday on-error).
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Stream transforms
 ;; When a function is applied to a set of arguments (via invoke)
@@ -1830,55 +1854,61 @@
 ;; containing a formula: the cell updates whenever any input to
 ;; the formula changes.
 (defn make-monadic-stream [f s]
-  (let [[in out quit res] (stream-prologue s)]
-    (go-loop [e (<! in)] ;; arg from stream's channel
-      (if (nil? e)
-        (quit)
-        (do (let [r (f e)]
-              (when (some? r)
-                (put! out r)))
-            (recur (<! in)))))
-    res))
+  (let [g       (if (stream-aware? f 1) f #(f (snapshot-value %)))
+        subs    (atom [])
+        on-done (fn [] (doseq [s @subs] ((:on-done s))))
+        on-next (fn [ssi] ;; snapshot in
+                  (let [sso (make-snapshot (g ssi))]
+                    (doseq [s @subs] ((:on-next s) sso))))
+        obs     {:on-done on-done :on-next on-next}]
+    ((:sub s) obs)
+    {:stream true
+     :sub    #(swap! subs conj %)
+     :unsub  #(swap! subs except %)}))
 (defn make-monadic-stream-dup [f s n]
-  (let [[in out quit res] (stream-prologue s)]
-    (go-loop [e (<! in)] ;; event from stream's channel
-      (if (nil? e)
-        (quit)
-        (do (let [r (apply f (repeat n e))]
-              (when (some? r)
-                (put! out r)))
-            (recur (<! in)))))
-    res))
+  (let [g       (if (stream-aware? f n)
+                  (fn [x] (apply f (repeat n x)))
+                  (fn [x] (apply f (repeat n (snapshot-value x)))))
+        subs    (atom [])
+        on-done (fn [] (doseq [s @subs] ((:on-done s))))
+        on-next (fn [ssi] ;; snapshot in
+                  (let [sso (make-snapshot (g ssi))]
+                    (doseq [s @subs] (s sso))))
+        obs     {:on-done on-done :on-next on-next}]
+    ((:sub s) obs)
+    {:stream true
+     :sub    #(swap! subs conj %)
+     :unsub  #(swap! subs except %)}))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn make-stream-distinct [f s]
-  (let [[in out quit res] (stream-prologue s)]
-    ;; Collect events from the input streams and remember them in a.
-    ;; When an input stream closes, mark it in d until all are done.
-    (go-loop [a (mapv (fn [x] nil) in)    ;; args
-              d (mapv (fn [x] false) in)] ;; done
-      (let [[v j] (async/alts! in)
-            i     (index-of in j)]
-        (if (some? v)
-          (let [p (assoc a i v)] ;; p is the curr inputs from all in
-            (when (every? some? p) ;; need full arg set b4 1st call
-              (let [r (apply f p)]
-                (when (some? r) (put! out r))))
-            (recur p d))
-          (if (nil? (a i)) ;; closed before started => abort
-            (quit)
-            (let [dd (assoc d i true)] ;; mark k done
-              (if (every? some? dd)
-                (quit)
-                (recur a dd))))))) ;; til all done
-    res))
+  (let [a    (atom (mapv (fn [x] nil) s)) ;; args
+        d    (atom (mapv (fn [x] nil) s)) ;; done TODO
+        g    (if (stream-aware? f (count s))
+               #(apply f %)
+               #(apply f (mapv snapshot-value %)))
+        subs (atom [])]
+    (doseq [[i in] (map-indexed vector s)]
+      (let [on-done (fn []
+                      (swap! d assoc i true)
+                      (let [p @d]
+                        (when (every? some? p)
+                          (doseq [s @subs] ((:on-done s))))))
+            on-next (fn [ssi] ;; snapshot in
+                      (swap! a assoc i ssi)
+                      (let [p @a] ;; p is the curr inputs from all s
+                        (when (every? some? p) ;; need full arg set b4 1st call
+                          (let [sso (make-snapshot (g p))]
+                            (doseq [s @subs] (s sso))))))
+            obs     {:on-done on-done :on-next on-next}]
+        ((:sub in) obs)))
+    {:stream true
+     :sub    #(swap! subs conj %)
+     :unsub  #(swap! subs except %)}))
 ;; This is too complicated :-/
-;; Do we need to support arbitrarily nested structures containing
-;; streams?  Or can we avoid that situation by creating streams
-;; as we go so by the time we get here it's streams all the way down?
 ;; f is a function of (count s) arguments; s is a vec of streams.
 ;; make-stream will create a stream that will call f every time
 ;; any element of s changes and push the results of f.
-(defn make-stream [f s]
+(defn make-stream [f s] ;; function and stream args
   (if (= 1 (count s))
     (make-monadic-stream f (first s))
     (let [g (group s)]
@@ -1892,23 +1922,43 @@
                              []
                              (map list (map count (dict-val g)) e))]
                (apply f a)))
-         (dict-key g)))))))
+           (dict-key g)))))))
+(def event-sources (atom [])) ;; pair of arrays: ch -> [subs]
+;; We'll add a special ch at the first position for waking up the
+;; go loop to process changes to the subcriptions.  We can pass the
+;; subscription change info in the channel.  Setting this up will
+;; give event-loop something to do at startup.
+(defn event-loop []
+  (go-loop [es @event-sources]
+    (let [[e c] (async/alts! (es 0))
+          i     (index-of es c)]
+      (if (nil? e)
+        (do (swap! event-sources
+                   (fn [x] (mapv #(removev (%1 0) i) [0 1])))
+            (async/close! c))
+        (do (doseq [s ((es 1) i)]
+              ;; now we have to find all the things s subscribes to
+              ;; and get their current values.
+              (s e))
+            (recur @event-sources))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; DOM
 #?(:cljs (defn ev [event ele]
-           (let [out (chan)
-                 m   (async/mult out)]
-             (dom/listen! (:element ele) event #(put! out %))
-             (merge ele {:on-done (fn [] (async/close! out))
-                         :stream true
-                         :event event
-                         :sub (fn [] (async/tap m (chan)))}))))
-#?(:cljs (defn ksel [s] (mapv #({:element %}) (dom/sel (apply str s)))))
-#?(:cljs (defn ksel1 [s]
-           {:element (dom/sel1
-                      (if (keyword? s)
-                        (str "#" (name s))
-                        (apply str s)))}))
+           (let [subs (atom [])
+                 cb   (fn [e] (let [ss (make-snapshot e)]
+                                (doseq [s @subs] ((:on-next s) ss))))]
+             (dom/listen! (:element ele) event cb)
+             (merge ele {:on-done (fn [] (dom/unlisten! (:element ele) event cb))
+                         :stream  true
+                         :event   event
+                         :sub     #(swap! subs conj %)
+                         :unsub   #(swap! subs except %)}))))
+#?(:cljs (defn kstring? [s] (every? #(and (string? %) (= 1 (count %))) s)))
+#?(:cljs (defn kdom [s]
+           (cond (and (coll? s) (not (kstring? s))) (mapv kdom s)
+                 (keyword? s) {:element (dom/sel1 (str "#" (name s)))}
+                 (kstring? s) (mapv (fn [x] {:element x}) (dom/sel (apply str s)))
+                 :else        (err "invalid argument to dom:" s))))
 #?(:cljs (defn text
            ([e] (dom/text (:element e)))
            ([e t] (dom/set-text! (:element e) (apply str t)))))
@@ -1924,44 +1974,69 @@
   #?(:clj  (future-cancel x)
            :cljs (js/clearInterval x)))
 (defn every [t] ;; milliseconds
-  (let [out (chan)
-        m   (async/mult out)]
-    ;; TODO: call on-done when there are no references left
-    {:on-done (fn [] (async/close! out))
-     :stream true
-     :sub (fn [] (async/tap m (chan)))
-     ;; TODO: add try/catch and on-error
-     :timer-id (set-timer (fn [] (put! out (now))) t)}))
+  (let [subs (atom [])
+        on-done (fn [] (doseq [s @subs] ((:on-done s))))
+        on-next (fn [e] (let [ss (make-snapshot e)]
+                          (doseq [s @subs] ((:on-next s) ss))))
+        id      (set-timer (fn [] (on-next (now))) t)]
+    {:on-done  (fn [] (stop-timer id) (on-done))
+     :stream   true
+     :sub      #(swap! subs conj %)
+     :unsub    #(swap! subs except %)
+     :timer-id id}))
 (defn stop [x]
   (when-let [t (:timer-id x)] (stop-timer t))
   (when-let [d (:on-done x)]  (d)))
-(defn throttle [t s] ; millis, stream
+(defn throttle [t s] ;; milliseconds, stream
   "Sample s every t milliseconds"
-  (let [[in out quit res] (stream-prologue s)
-        latest            (atom nil)
-        push-latest       (fn [] (let [x @latest]
-                                   (when (some? x)
-                                     (put! out x)
-                                     (reset! latest nil))))]
-    (go-loop [e (<! in)]
-      (if (nil? e)
-        (quit)
-        (do (reset! latest e)
-            (recur (<! in)))))
-    (merge res
-           {:on-done  quit
-            :timer-id (set-timer push-latest t)})))
+  (let [subs     (atom [])
+        latest   (atom nil)
+        on-timer (fn [] (let [e @latest]
+                          (when (some? e)
+                            (let [ss (make-snapshot e)]
+                              (doseq [s @subs] ((:on-next s) ss))))))
+        id      (set-timer on-timer t)
+        on-done  (fn []
+                   (stop-timer id)
+                   (doseq [s @subs] ((:on-done s))))
+        on-next  (fn [ss] (reset! latest (snapshot-value ss)))
+        obs      {:on-done on-done :on-next on-next}]
+    ((:sub s) obs)
+    {:stream   true
+     :sub      #(swap! subs conj %)
+     :unsub    #(swap! subs except %)
+     :timer-id id}))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Testing event source
 (defn into-stream [x]
-  (let [c (if (coll? x) x [x])]
+  ;; this is no good but I'll fix it when I write a test that fails
+  (let [ch   (async/to-chan (if (coll? x) x [x]))
+        subs (atom [])
+        push (fn []
+               (go-loop [e (<! ch)]
+                 (if (nil? e)
+                   (do
+                     (async/close! ch)
+                     (doseq [s @subs] ((:on-done s))))
+                   (let [ss (make-snapshot e)]
+                     (doseq [s @subs] ((:on-next s) ss))
+                     (recur (<! ch))))))]
     {:stream true
-     :sub (fn [] (async/to-chan c))}))
+     :sub    (fn [s]
+               (swap! subs conj s)
+               (if (= 1 (count @subs))
+                 (push)))
+     :unsub  #(swap! subs except %)}))
 (defn wait [x]
   (if (not (stream? x))
     x
-    #?(:clj  (let [r (<!! (async/into [] ((:sub x))))]
-               (if (:extract x) (first r) r))
+    #?(:clj  (let [ch      (chan)
+                   on-done (fn [] (async/close! ch))
+                   on-next (fn [ss] (put! ch (snapshot-value ss)))
+                   obs     {:on-done on-done :on-next on-next}]
+               ((:sub x) obs)
+               (let [r (<!! (async/into [] ch))]
+                 (if (:extract x) (first r) r)))
        :cljs (err "nyi: no wait since cljs.core.async lacks <!!"))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1986,9 +2061,8 @@
                               :rcsvh  {:f rcsvh :rank [2]}
                               :read   {:f read-lines :rank [1]}
                               :wcsv   {:f wcsv :rank [2]}}
-                       :cljs {:ev     {:f ev :rank [2]}
-                              :sel    {:f ksel :rank [1]}
-                              :sel1   {:f ksel1 :rank [1]}
+                       :cljs {:dom    {:f kdom :rank [1]}
+                              :ev     {:f ev :rank [2]}
                               :text   {:f text :rank [2]}})))
 
 ;; (def builtin (kload builtin "src/qiss/qiss.qiss"))
@@ -2025,7 +2099,7 @@
               (doseq [[i e] (map list (range (count q)) q)]
                 (let [s (.-src e)]
                   (if (= "" s) ;; no src attr => code is in tag's text
-                    (aset r i (str/trim (.-text e)))
+                    (aset r i (.-text e))
                     (xhr/send s (fn [v] (aset r i (response-text v))
                                   (when (every? some? r)
                                     (doseq [c r] (load-code c))
