@@ -383,6 +383,16 @@ qiss$
 
 To get things started, run the fig script in the qiss directory.  Next, go to http://localhost:3449 in your browser.  Lastly, view the web page source to see how qiss has been embedded in a script tag in the page.
 
+Event streams in qisses are like time-varying values (see http://conal.net/fran/tutorial.htm).  Any expression involving a stream (time-varying value) produces another stream (time-varying value).  That way, chaining a sequence of callbacks looks just like any other qisses expression.  Not only do we make async code look sync, we dispense with a special set of functions and syntax for streams.
+
+In the following example, every is a monadic function that produces a stream of times.  Whenever the value of that stream changes, it forces re-evaluation of all the expressions that depend on it so that they are consistent (hence, the functional part of FRP).
+
+```
+dom[`result]text str every 2000;
+```
+
+
+
 ### Bugs
 
 Unbounded!  There is much work to do.  These are some of the most pressing issues:
