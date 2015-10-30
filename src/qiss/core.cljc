@@ -2112,8 +2112,8 @@
            (println "Welcome to qiss.  qiss is short and simple.")
            (loop [e e]
              (do ;; (print "e ") (println e)
-               ;;        (print "\u00b3)") (flush))
-               (print "\u00a7)") (flush))
+               (print "qiss)") (flush))
+;;               (print "\u00a7)") (flush))
              (if-let [line (read-line)]
                (if (or (empty? line) (= \/ (first line))) ; skip comments
                  (recur e)
