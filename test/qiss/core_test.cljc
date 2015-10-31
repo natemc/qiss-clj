@@ -523,17 +523,19 @@
   (testing "drop from the back"
     (is (= [0 1] (keval "<=-1_>=!3")))
     (is (= [] (keval "<=-3_>=!3")))
-    (is (= [] (keval "<=-4_>=!3")))))
-;; ;;          (testing "vector literals with stream components"
-;; ;;                (keval "<=(1;>=!3)") => [[1 0] [1 1] [1 2]])
-;; ;;          (testing "indexing with @ with a stream on the rhs"
-;; ;;                (keval "<=(!5)@>=0 2 4") => [0 2 4])
-;; ;;          (testing "indexing with @ with a stream on the lhs"
-;; ;;                (keval "<=(>=(0 2 4;1 3 5))1") => [2 3])
-;; ;;          (testing "indexing with . with a stream on the rhs"
-;; ;;                (keval "<=(0 1;2 3).>=(0 1;1 1)") => [1 3])
-;; ;;          (testing "indexing with . with a stream on the lhs"
-;; ;;                (keval "<=(>=((0 1;2 3);(4 5;6 7))). 0 1") => [1 5])))
+    (is (= [] (keval "<=-4_>=!3"))))
+  (testing "vector literals with stream components"
+    (is (= [[1 0] [1 1] [1 2]] (keval "<=(1;>=!3)"))))
+  (testing "indexing with @ with a stream on the rhs"
+    (is (= [0 2 4] (keval "<=(!5)@>=0 2 4"))))
+  (testing "indexing via @ with a stream on the lhs"
+    (is (= [2 3] (keval "<=(>=(0 2 4;1 3 5))@1"))))
+  (testing "indexing via juxt with a stream on the lhs"
+    (is (= [2 3] (keval "<=(>=(0 2 4;1 3 5))1"))))
+  (testing "indexing with . with a stream on the rhs"
+    (is (= [1 3] (keval "<=(0 1;2 3).>=(0 1;1 1)"))))
+  (testing "indexing with . with a stream on the lhs"
+    (is (= [1 5] (keval "<=(>=((0 1;2 3);(4 5;6 7))). 0 1")))))
 ;;           ;; (keval "<=(>=!3)*>=!3") => one of the following:
 ;;           ;; [[0 2 4] [0 0 2 4] [0 0 1 2 4]]
 ;;           ;; How do we say this?
