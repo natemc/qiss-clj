@@ -503,19 +503,19 @@
   (testing "atomic ops work on streams"
     (is (= [0 2 4] (keval "<=2*>=!3")))
     (is (= [[0 0 0] [1 2 3] [2 4 6]] (keval "<=1 2 3*>=!3"))))
-  (testing "user-defined functions"
+  (testing "user-defined functions work on streams"
     (is (= [0 1 4] (keval "<={x*x}@>=!3"))))
-  (testing "first"
+  (testing "first works on streams"
     (is (= 0 (keval "<=*>=!3"))))
-  (testing "take"
+  (testing "take on a stream creates a stream that stops after n events"
     (is (= [] (keval "<=0#>=!3")))
-    (is (= [0 1] (keval "<=2#>=!3")))))
-;; ;;          (testing "take from the back"
-;; ;;                (keval "<=-1#>=!3") => [2]
-;; ;;                (keval "<=-3#>=!3") => [0 1 2])
-;; ;;          (testing "overtake"
-;; ;;                (keval "<=5#>=!3") => [0 1 2 0 1]
-;; ;;                (keval "<=-5#>=!3") => [1 2 0 1 2])
+    (is (= [0 1] (keval "<=2#>=!3"))))
+  (testing "take from the back on a stream works via a new stream"
+    (is (= [2] (keval "<=-1#>=!3")))
+    (is (= [0 1 2] (keval "<=-3#>=!3"))))
+  (testing "overtake from a stream works"
+    (is (= [0 1 2 0 1] (keval "<=5#>=!3")))
+    (is (= [1 2 0 1 2] (keval "<=-5#>=!3")))))
 ;; ;;          (testing "drop"
 ;; ;;                (keval "<=1_>=!3") => [1 2]
 ;; ;;                (keval "<=3_>=!3") => []

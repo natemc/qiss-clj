@@ -581,30 +581,48 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn take-from-stream [n x]
   (let [subs    (atom [])
-        i       (atom 0)
+        w       (atom []) ; window
         on-done (fn []
+                  (let [ww @w]
+                    (doseq [j (range (count ww) n)]
+                      (doseq [s @subs] ((:on-next s) (ww (mod j (count ww)))))))
                   (doseq [s @subs] ((:on-done s)))
                   (reset! subs nil))
         on-next (fn [ss]
-                  (let [j (swap! i (fn [k] (+ 1 (min (count x) k))))]
-                    (when (<= j n)
-                      (doseq [s @subs] ((:on-next s) ss))
-                      (when (= j n) (on-done)))))]
+                  (let [ww (swap! w (fn [oldw]
+                                      (if (< (count oldw) n)
+                                        (conj oldw ss)
+                                        oldw)))]
+                    (doseq [s @subs] ((:on-next s) ss))
+                    (when (= (count ww) n) (on-done))))]
+    ((:sub x) {:on-done on-done :on-next on-next})
+    {:stream true
+     :sub    #(if (= n 0)
+                ((:on-done %))
+                (swap! subs conj %))
+     :unsub  #(swap! subs except %)}))
+(defn take-last-from-stream [n x]
+  (let [subs    (atom [])
+        w       (atom []) ; window
+        on-done (fn []
+                  (let [ww @w]
+                    (doseq [i (reverse (range n))]
+                      (doseq [s @subs]
+                        ((:on-next s) (ww (- (count ww)
+                                             1
+                                             (mod i (count ww))))))))
+                  (doseq [s @subs] ((:on-done s)))
+                  (reset! subs nil))
+        on-next (fn [ss]
+                  (swap! w (fn [ww]
+                             (conj (if (< (count ww) n)
+                                     ww
+                                     (vec (drop 1 ww)))
+                                   ss))))]
     ((:sub x) {:on-done on-done :on-next on-next})
     {:stream true
      :sub    #(swap! subs conj %)
      :unsub  #(swap! subs except %)}))
-(defn take-last-from-stream [n x]
-  (let [[in out quit res] (stream-prologue x)]
-    (go-loop [w []] ;; window
-      (let [e (<! in)]
-        (if (some? e)
-          (recur (conj (if (< (count w) n) w (vec (drop 1 w))) e))
-          (do (when (not (empty? w))
-                (doseq [i (reverse (range n))]
-                  (put! out (w (- (count w) 1 (mod i (count w)))))))
-              (quit)))))
-    res))
 (defn kcount [x]
   "#x (count)  returns 1 for atoms"
   (cond (vector? x)      (count x)
