@@ -504,12 +504,9 @@
     (is (= [0 2 4] (keval "<=2*>=!3")))
     (is (= [[0 0 0] [1 2 3] [2 4 6]] (keval "<=1 2 3*>=!3"))))
   (testing "user-defined functions"
-    (is (= [0 1 4] (keval "<={x*x}@>=!3")))))
-;;           ;; (keval "<=(>=!3)*>=!3") => one of the following:
-;;           ;; [[0 2 4] [0 0 2 4] [0 0 1 2 4]]
-;;           ;; How do we say this?
-;; ;;          (testing "first"
-;; ;;                (keval "<=*>=!3") => 0)
+    (is (= [0 1 4] (keval "<={x*x}@>=!3"))))
+  (testing "first"
+    (is (= 0 (keval "<=*>=!3")))))
 ;; ;;          (testing "take"
 ;; ;;                (keval "<=0#>=!3") => []
 ;; ;;                (keval "<=2#>=!3") => [0 1])
@@ -537,6 +534,9 @@
 ;; ;;                (keval "<=(0 1;2 3).>=(0 1;1 1)") => [1 3])
 ;; ;;          (testing "indexing with . with a stream on the lhs"
 ;; ;;                (keval "<=(>=((0 1;2 3);(4 5;6 7))). 0 1") => [1 5])))
+;;           ;; (keval "<=(>=!3)*>=!3") => one of the following:
+;;           ;; [[0 2 4] [0 0 2 4] [0 0 1 2 4]]
+;;           ;; How do we say this?
 ;;   ))
 ;; ;; gave up on this one: couldn't fix the <exprx> rule
 ;; ;; (testing "select"
