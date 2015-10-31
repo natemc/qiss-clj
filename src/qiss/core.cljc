@@ -1923,24 +1923,6 @@
                              (map list (map count (dict-val g)) e))]
                (apply f a)))
            (dict-key g)))))))
-(def event-sources (atom [])) ;; pair of arrays: ch -> [subs]
-;; We'll add a special ch at the first position for waking up the
-;; go loop to process changes to the subcriptions.  We can pass the
-;; subscription change info in the channel.  Setting this up will
-;; give event-loop something to do at startup.
-(defn event-loop []
-  (go-loop [es @event-sources]
-    (let [[e c] (async/alts! (es 0))
-          i     (index-of es c)]
-      (if (nil? e)
-        (do (swap! event-sources
-                   (fn [x] (mapv #(removev (%1 0) i) [0 1])))
-            (async/close! c))
-        (do (doseq [s ((es 1) i)]
-              ;; now we have to find all the things s subscribes to
-              ;; and get their current values.
-              (s e))
-            (recur @event-sources))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; DOM
 #?(:cljs (defn ev [event ele]
@@ -2131,8 +2113,8 @@
            (println "Welcome to qiss.  qiss is short and simple.")
            (loop [e e]
              (do ;; (print "e ") (println e)
-               ;;        (print "\u00b3)") (flush))
-               (print "\u00a7)") (flush))
+               (print "qiss)") (flush))
+;;               (print "\u00a7)") (flush))
              (if-let [line (read-line)]
                (if (or (empty? line) (= \/ (first line))) ; skip comments
                  (recur e)
