@@ -479,10 +479,10 @@
   "*x (first) and x*y (atomic multiplication)"
   ([x] (if-not (stream? x)
          (first x)
-         (let [subs (atom [])
+         (let [subs    (atom [])
                on-done (fn []
-                         ;; ((:unsub x) this) ;; we have a circular dep prob
-                         (doseq [s @subs] ((:on-done s))))
+                         (doseq [s @subs] ((:on-done s)))
+                         (reset! subs nil))
                on-next (fn [ss] ;; snapshot
                          (doseq [s @subs] ((:on-next s) ss))
                          (on-done))]
@@ -580,18 +580,20 @@
     (take-from-table n (unkey-table x))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn take-from-stream [n x]
-  (let [[in out quit res] (stream-prologue x)]
-    (go-loop [w []] ;; window
-      (if (= (count w) n)
-        (quit)
-        (let [e (<! in)]
-          (if (some? e)
-            (do (put! out e)
-                (recur (conj w e)))
-            (do (doseq [i (range (count w) n)]
-                  (put! out (w (mod i (count w)))))
-                (quit))))))
-    res))
+  (let [subs    (atom [])
+        i       (atom 0)
+        on-done (fn []
+                  (doseq [s @subs] ((:on-done s)))
+                  (reset! subs nil))
+        on-next (fn [ss]
+                  (let [j (swap! i (fn [k] (+ 1 (min (count x) k))))]
+                    (when (<= j n)
+                      (doseq [s @subs] ((:on-next s) ss))
+                      (when (= j n) (on-done)))))]
+    ((:sub x) {:on-done on-done :on-next on-next})
+    {:stream true
+     :sub    #(swap! subs conj %)
+     :unsub  #(swap! subs except %)}))
 (defn take-last-from-stream [n x]
   (let [[in out quit res] (stream-prologue x)]
     (go-loop [w []] ;; window
@@ -1867,12 +1869,13 @@
 (defn make-monadic-stream [f s]
   (let [g       (if (snapshot-aware? f 1) f #(f (snapshot-value %)))
         subs    (atom [])
-        on-done (fn [] (doseq [s @subs] ((:on-done s))))
+        on-done (fn []
+                  (doseq [s @subs] ((:on-done s)))
+                  (reset! subs nil))
         on-next (fn [ssi] ;; snapshot in
                   (let [sso (make-snapshot (g ssi))]
-                    (doseq [s @subs] ((:on-next s) sso))))
-        obs     {:on-done on-done :on-next on-next}]
-    ((:sub s) obs)
+                    (doseq [s @subs] ((:on-next s) sso))))]
+    ((:sub s) {:on-done on-done :on-next on-next})
     {:stream true
      :sub    #(swap! subs conj %)
      :unsub  #(swap! subs except %)}))
@@ -1881,12 +1884,13 @@
                   (fn [x] (apply f (repeat n x)))
                   (fn [x] (apply f (repeat n (snapshot-value x)))))
         subs    (atom [])
-        on-done (fn [] (doseq [s @subs] ((:on-done s))))
+        on-done (fn []
+                  (doseq [s @subs] ((:on-done s)))
+                  (reset! subs nil))
         on-next (fn [ssi] ;; snapshot in
                   (let [sso (make-snapshot (g ssi))]
-                    (doseq [s @subs] ((:on-next s) sso))))
-        obs     {:on-done on-done :on-next on-next}]
-    ((:sub s) obs)
+                    (doseq [s @subs] ((:on-next s) sso))))]
+    ((:sub s) {:on-done on-done :on-next on-next})
     {:stream true
      :sub    #(swap! subs conj %)
      :unsub  #(swap! subs except %)}))
@@ -1903,15 +1907,15 @@
                       (swap! d assoc i true)
                       (let [p @d]
                         (when (every? some? p)
-                          (doseq [s @subs] ((:on-done s))))))
+                          (doseq [s @subs] ((:on-done s)))
+                          (reset! subs nil))))
             on-next (fn [ssi] ;; snapshot in
                       (swap! a assoc i ssi)
                       (let [p @a] ;; p is the curr inputs from all s
                         (when (every? some? p) ;; need full arg set b4 1st call
                           (let [sso (make-snapshot (g p))]
-                            (doseq [s @subs] ((:on-next s) sso))))))
-            obs     {:on-done on-done :on-next on-next}]
-        ((:sub in) obs)))
+                            (doseq [s @subs] ((:on-next s) sso))))))]
+        ((:sub in) {:on-done on-done :on-next on-next})))
     {:stream true
      :sub    #(swap! subs conj %)
      :unsub  #(swap! subs except %)}))
@@ -2029,7 +2033,7 @@
           on-next (fn [ss] (swap! r conj (snapshot-value ss)))
           obs     {:on-done on-done :on-next on-next}]
       ((:sub x) obs)
-      (doseq [s @test-streams] ((:push-all s)))
+      (doseq [s @test-streams] ((:push-all s))) ;; TODO randomize
       (if (:extract x) (first @r) @r))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

@@ -506,10 +506,10 @@
   (testing "user-defined functions"
     (is (= [0 1 4] (keval "<={x*x}@>=!3"))))
   (testing "first"
-    (is (= 0 (keval "<=*>=!3")))))
-;; ;;          (testing "take"
-;; ;;                (keval "<=0#>=!3") => []
-;; ;;                (keval "<=2#>=!3") => [0 1])
+    (is (= 0 (keval "<=*>=!3"))))
+  (testing "take"
+    (is (= [] (keval "<=0#>=!3")))
+    (is (= [0 1] (keval "<=2#>=!3")))))
 ;; ;;          (testing "take from the back"
 ;; ;;                (keval "<=-1#>=!3") => [2]
 ;; ;;                (keval "<=-3#>=!3") => [0 1 2])
