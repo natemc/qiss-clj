@@ -1374,7 +1374,7 @@
                   :pass-global-env true
                   ;; TODO give in and use clojure meta
                   :snapshot-aware (:rank a)
-                  :stream-aware (:rank a)
+;;                  :stream-aware (:rank a)
                   :text t})]
     [e (assoc w :f (feval tu w))]))
 (defn vec-with-streams [v]
@@ -1996,21 +1996,23 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Testing event source
 (def test-streams (atom []))
-(defn into-stream [x]
-  ;; this is no good but I'll fix it when I write a test that fails
+(defn into-stream [x] ;; x is a vector of events to push
   (let [subs     (atom [])
+        i        (atom 0) ;; index of event in x to send next
         stream   {:stream true
                   :sub    (fn [s] (swap! subs conj s))
-                  :unsub  (fn [s] swap! subs except s)}
-        done     (fn []
-                   (doseq [s @subs] ((:on-done s)))
-                   (swap! test-streams except stream))
-        pub      (fn [e] (let [ss (make-snapshot e)]
-                           (doseq [s @subs] ((:on-next s) ss))))
-        push-all (fn []
-                   (doseq [e x] (pub e))
-                   (done))
-        r        (assoc stream :push-all push-all)]
+                  :unsub  (fn [s] (swap! subs except s))}
+        push     (fn []
+                   (let [j (swap! i (fn [k] (+ 1 (min (count x) k))))]
+                     (when (<= j (count x))
+                       (let [ss (make-snapshot (x (dec j)))]
+                         (doseq [s @subs] ((:on-next s) ss)))
+                       (when (= j (count x))
+                         (doseq [s @subs] ((:on-done s)))
+                         (swap! test-streams except stream)))
+                     (< j (count x)))) ;; more to send?
+        push-all (fn [] (loop [] (if (push) (recur))))
+        r        (assoc stream :push push :push-all push-all)]
     (swap! test-streams conj r)
     r))
 (defn wait [x]
