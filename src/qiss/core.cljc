@@ -2048,6 +2048,7 @@
                               :wcsv   {:f wcsv :rank [2]}}
                        :cljs {:dom    {:f kdom :rank [1]}
                               :ev     {:f ev :rank [2]}
+                              :eval   {:f eval :rank [1]}
                               :text   {:f text :rank [2]}})))
 
 ;; (def builtin (kload builtin "src/qiss/qiss.qiss"))
