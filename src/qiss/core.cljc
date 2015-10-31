@@ -126,6 +126,8 @@
 (defn lambda-text [x] (:text x))
 (defn lose-env [x] (if (lambda? x) (dissoc x :env) x))
 (defn snapshot? [x] (:snapshot x))
+(defn snapshot-aware? [x r] ;; lambda, rank
+  (and (:snapshot-aware x) (some #{r} (:snapshot-aware x))))
 (defn snapshot-value [x] (:value x))
 (defn make-snapshot [x] {:snapshot true :value x})
 (defn stream? [x] (:stream x))
@@ -245,7 +247,9 @@
         (bool? x) (if x 1 0)
         :else     x))
 (defn except "the elements in x not in y" [x y]
-  (let [p (if (coll? y) #(some #{%} y) #(= % y))]
+  (let [p (cond (vector? y) #(some #{%} y)
+                (dict?   y) #(some #{%} (dict-val y))
+                :else       #(= % y))]
     (vec (remove p x))))
 (defn in "true for those elements of x that exist in y" [x y]
   (if (vector? x)
@@ -1038,7 +1042,7 @@
           :# {:f pound :text "#" :rank [1 2] :stream-aware [2]}
           :$ {:f dollar :text "$" :rank [1 2]}
           (keyword ",") {:f join :text "," :rank [1 2]}
-          :& {:f amp :text "&" :rank [1 2]} ;; :stream-aware [1]}
+          :& {:f amp :text "&" :rank [1 2] :snapshot-aware [1]}
           :| {:f pipe :text "|" :rank [1 2]}
           :_ {:f under :text "_" :rank [1 2] :stream-aware [2]}
           := {:f eq :text "=" :rank [1 2]}
@@ -1369,7 +1373,8 @@
                  {:env e
                   :pass-global-env true
                   ;; TODO give in and use clojure meta
-;;                  :stream-aware (:rank a)
+                  :snapshot-aware (:rank a)
+                  :stream-aware (:rank a)
                   :text t})]
     [e (assoc w :f (feval tu w))]))
 (defn vec-with-streams [v]
@@ -1854,7 +1859,7 @@
 ;; containing a formula: the cell updates whenever any input to
 ;; the formula changes.
 (defn make-monadic-stream [f s]
-  (let [g       (if (stream-aware? f 1) f #(f (snapshot-value %)))
+  (let [g       (if (snapshot-aware? f 1) f #(f (snapshot-value %)))
         subs    (atom [])
         on-done (fn [] (doseq [s @subs] ((:on-done s))))
         on-next (fn [ssi] ;; snapshot in
@@ -1866,14 +1871,14 @@
      :sub    #(swap! subs conj %)
      :unsub  #(swap! subs except %)}))
 (defn make-monadic-stream-dup [f s n]
-  (let [g       (if (stream-aware? f n)
+  (let [g       (if (snapshot-aware? f n)
                   (fn [x] (apply f (repeat n x)))
                   (fn [x] (apply f (repeat n (snapshot-value x)))))
         subs    (atom [])
         on-done (fn [] (doseq [s @subs] ((:on-done s))))
         on-next (fn [ssi] ;; snapshot in
                   (let [sso (make-snapshot (g ssi))]
-                    (doseq [s @subs] (s sso))))
+                    (doseq [s @subs] ((:on-next s) sso))))
         obs     {:on-done on-done :on-next on-next}]
     ((:sub s) obs)
     {:stream true
@@ -1883,7 +1888,7 @@
 (defn make-stream-distinct [f s]
   (let [a    (atom (mapv (fn [x] nil) s)) ;; args
         d    (atom (mapv (fn [x] nil) s)) ;; done TODO
-        g    (if (stream-aware? f (count s))
+        g    (if (snapshot-aware? f (count s))
                #(apply f %)
                #(apply f (mapv snapshot-value %)))
         subs (atom [])]
@@ -1898,7 +1903,7 @@
                       (let [p @a] ;; p is the curr inputs from all s
                         (when (every? some? p) ;; need full arg set b4 1st call
                           (let [sso (make-snapshot (g p))]
-                            (doseq [s @subs] (s sso))))))
+                            (doseq [s @subs] ((:on-next s) sso))))))
             obs     {:on-done on-done :on-next on-next}]
         ((:sub in) obs)))
     {:stream true
@@ -1990,36 +1995,34 @@
      :timer-id id}))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Testing event source
+(def test-streams (atom []))
 (defn into-stream [x]
   ;; this is no good but I'll fix it when I write a test that fails
-  (let [ch   (async/to-chan (if (coll? x) x [x]))
-        subs (atom [])
-        push (fn []
-               (go-loop [e (<! ch)]
-                 (if (nil? e)
-                   (do
-                     (async/close! ch)
-                     (doseq [s @subs] ((:on-done s))))
-                   (let [ss (make-snapshot e)]
-                     (doseq [s @subs] ((:on-next s) ss))
-                     (recur (<! ch))))))]
-    {:stream true
-     :sub    (fn [s]
-               (swap! subs conj s)
-               (if (= 1 (count @subs))
-                 (push)))
-     :unsub  #(swap! subs except %)}))
+  (let [subs     (atom [])
+        stream   {:stream true
+                  :sub    (fn [s] (swap! subs conj s))
+                  :unsub  (fn [s] swap! subs except s)}
+        done     (fn []
+                   (doseq [s @subs] ((:on-done s)))
+                   (swap! test-streams except stream))
+        pub      (fn [e] (let [ss (make-snapshot e)]
+                           (doseq [s @subs] ((:on-next s) ss))))
+        push-all (fn []
+                   (doseq [e x] (pub e))
+                   (done))
+        r        (assoc stream :push-all push-all)]
+    (swap! test-streams conj r)
+    r))
 (defn wait [x]
   (if (not (stream? x))
     x
-    #?(:clj  (let [ch      (chan)
-                   on-done (fn [] (async/close! ch))
-                   on-next (fn [ss] (put! ch (snapshot-value ss)))
-                   obs     {:on-done on-done :on-next on-next}]
-               ((:sub x) obs)
-               (let [r (<!! (async/into [] ch))]
-                 (if (:extract x) (first r) r)))
-       :cljs (err "nyi: no wait since cljs.core.async lacks <!!"))))
+    (let [r       (atom [])
+          on-done (fn [] nil)
+          on-next (fn [ss] (swap! r conj (snapshot-value ss)))
+          obs     {:on-done on-done :on-next on-next}]
+      ((:sub x) obs)
+      (doseq [s @test-streams] ((:push-all s)))
+      (if (:extract x) (first @r) @r))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (def builtin-common {:cols     {:f cols :rank [1]}
@@ -2029,7 +2032,7 @@
                      :last     {:f klast :rank [1]}
                      :lj       {:f lj :rank [2]}
                      :mod      {:f kmod :rank [2]}
-                     :show     {:f show :rank [1]}
+                     :show     {:f show :rank [1] :snapshot-aware [1]}
                      :stop     {:f stop :rank [1] :stream-aware [1]}
                      :sv       {:f sv :rank [2]}
                      :throttle {:f throttle :rank [2] :stream-aware [2]}
