@@ -515,15 +515,15 @@
     (is (= [0 1 2] (keval "<=-3#>=!3"))))
   (testing "overtake from a stream works"
     (is (= [0 1 2 0 1] (keval "<=5#>=!3")))
-    (is (= [1 2 0 1 2] (keval "<=-5#>=!3")))))
-;; ;;          (testing "drop"
-;; ;;                (keval "<=1_>=!3") => [1 2]
-;; ;;                (keval "<=3_>=!3") => []
-;; ;;                (keval "<=4_>=!3") => [])
-;; ;;          (testing "drop from the back"
-;; ;;                (keval "<=-1_>=!3") => [0 1]
-;; ;;                (keval "<=-3_>=!3") => []
-;; ;;                (keval "<=-4_>=!3") => [])
+    (is (= [1 2 0 1 2] (keval "<=-5#>=!3"))))
+  (testing "drop"
+    (is (= [1 2] (keval "<=1_>=!3")))
+    (is (= [] (keval "<=3_>=!3")))
+    (is (= [] (keval "<=4_>=!3"))))
+  (testing "drop from the back"
+    (is (= [0 1] (keval "<=-1_>=!3")))
+    (is (= [] (keval "<=-3_>=!3")))
+    (is (= [] (keval "<=-4_>=!3")))))
 ;; ;;          (testing "vector literals with stream components"
 ;; ;;                (keval "<=(1;>=!3)") => [[1 0] [1 1] [1 2]])
 ;; ;;          (testing "indexing with @ with a stream on the rhs"

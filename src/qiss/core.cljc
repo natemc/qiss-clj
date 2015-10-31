@@ -726,25 +726,36 @@
   (let [i (mapv range (next (deltas (conj x (kcount y)))))]
     (index y (mapv (fn [p q] (mapv #(+ p %) q)) x i))))
 (defn drop-from-stream [n x]
-  (let [[in out quit res] (stream-prologue x)]
-    (go-loop [i n]
-      (let [e (<! in)]
-        (if (some? e)
-          (cond (< 0 i) (recur (dec i))
-                :else   (do (put! out e) (recur i)))
-          (quit))))
-    res))
+  (let [subs    (atom [])
+        i       (atom 0)
+        on-done (fn []
+                  (doseq [s @subs] ((:on-done s)))
+                  (reset! subs nil))
+        on-next (fn [ss]
+                  (let [j (swap! i #(+ 1 (min n %)))]
+                    (when (< n j)
+                      (doseq [s @subs] ((:on-next s) ss)))))]
+    ((:sub x) {:on-done on-done :on-next on-next})
+    {:stream true
+     :sub    #(swap! subs conj %)
+     :unsub  #(swap! subs except %)}))
 (defn drop-last-from-stream [n x]
-  (let [[in out quit res] (stream-prologue x)]
-    (go-loop [i []]
-      (let [e (<! in)]
-        (if (nil? e)
-          (quit)
-          (if (< (count i) n)
-            (recur (conj i e))
-            (do (put! out (first i))
-                (recur (conj (vec (drop 1 i)) e)))))))
-    res))
+  (let [subs    (atom [])
+        w       (atom []) ; window
+        on-done (fn []
+                  (doseq [s @subs] ((:on-done s)))
+                  (reset! subs nil))
+        on-next (fn [ss]
+                  (let [ww (swap! w (fn [oldw]
+                                      (if (<= (count oldw) n)
+                                        (conj oldw ss)
+                                        (conj (vec (drop 1 oldw)) ss))))]
+                    (when (< n (count ww))
+                      (doseq [s @subs] ((:on-next s) (first ww))))))]
+    ((:sub x) {:on-done on-done :on-next on-next})
+    {:stream true
+     :sub    #(swap! subs conj %)
+     :unsub  #(swap! subs except %)}))
 (defn kdrop [x y]
   "Remove the first x elements from y (negative x => drop from the back)"
   (let [o (if (<= 0 x) (partial drop x) (partial drop-last (- x)))]
