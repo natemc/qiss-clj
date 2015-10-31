@@ -479,12 +479,18 @@
   "*x (first) and x*y (atomic multiplication)"
   ([x] (if-not (stream? x)
          (first x)
-         (let [[in out quit res] (stream-prologue x)]
-           (go (let [e (<! in)]
-                 (if (some? e)
-                   (put! out e)))
-               (quit))
-           (merge res {:extract true})))) ;; hack for wait
+         (let [subs (atom [])
+               on-done (fn []
+                         ;; ((:unsub x) this) ;; we have a circular dep prob
+                         (doseq [s @subs] ((:on-done s))))
+               on-next (fn [ss] ;; snapshot
+                         (doseq [s @subs] ((:on-next s) ss))
+                         (on-done))]
+           ((:sub x) {:on-done on-done :on-next on-next})
+           {:extract true ;; hack for wait
+            :stream  true
+            :sub     #(swap! subs conj %)
+            :unsub   #(swap! subs except %)})))
   ([x y] ((atomize *) x y)))
 (defn vs [x y]
   "vector from string"
