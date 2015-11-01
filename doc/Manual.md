@@ -117,8 +117,10 @@ qiss)</code></pre>
 		<a name="Observable"/>
 		<tt>Observable</tt>  <b></b>
 <pre><code>
-> var mouseMoves = Observable.fromEvent(element, "mousemove");
-> var subcription = mouseMoves.forEach(console.log);
+> var mouseMoves = 
+     Observable.fromEvent(element, "mousemove");
+> var subcription = 
+     mouseMoves.forEach(console.log);
 > 
 </code></pre>
 	</td>
@@ -135,7 +137,8 @@ qiss)</code></pre>
 		<a name="Observable"/>
 		<tt>Expanded Observable.forEach</tt>  <b></b>
 <pre><code>
-> var mouseMoves = Observable.fromEvent(element, "mousemove");
+> var mouseMoves = 
+     Observable.fromEvent(element, "mousemove");
 > var subscription = 
      mouseMoves.forEach(
         // next data
@@ -160,7 +163,8 @@ qiss)</code></pre>
 		<a name="Observable"/>
 		<tt>Expanded Observable.forEach</tt>  <b></b>
 <pre><code>
-> var mouseMoves = Observable.fromEvent(element, "mousemove");
+> var mouseMoves = 
+     Observable.fromEvent(element, "mousemove");
 > var subscription = 
      mouseMoves.forEach({
         onNext: event => console.log(event),
