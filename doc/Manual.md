@@ -15,7 +15,7 @@ Events Reference
 	<td>
 		<a name="forEach"/>
 		<tt>forEach</tt> <b></b>
-<pre><code>> [1, 2, 3].forEach( x => console.log(x))
+<pre><code>> [1, 2, 3].forEach(x => console.log(x))
 > 1
 > 2
 > 3
@@ -37,7 +37,7 @@ qiss)
 	<td>
 		<a name="map"/>
 		<tt>map</tt> <b></b>
-<pre><code>> [1, 2, 3].map( x => x + 1 )
+<pre><code>> [1, 2, 3].map(x => x + 1)
 > [2, 3, 4]
 >
 </code></pre>
@@ -59,7 +59,7 @@ qiss)
 >
 	</td>
 	<td>
-		<tt>@&</tt> is <b>filter</b>
+		<tt>@&</tt> <b>at where</b> is equivalent to <b>filter</b>
 <pre><code>qiss){x@&x>1}1 2 3
 [2 3]
 qiss)</code></pre>
@@ -69,14 +69,14 @@ qiss)</code></pre>
 	<td>
 		<a name="concatAll"/>
 		<tt>concatAll</tt>  <b></b>
-<pre><code> > [ [1], [2, 3], [], [4] ].concatAll()
-> [ 1, 2, 3, 4]
+<pre><code> > [[1], [2, 3], [], [4]].concatAll()
+> [1, 2, 3, 4]
 >
 </code></pre>
 	</td>
 	<td>
-		<tt>,/ ("raze")</tt> is <b>concatAll</b>
-<pre><code>qiss) ,/(1;2 3;();4)
+		<tt>,/</tt> <b>join over</b> is equivalent to <b>concatAll</b>
+<pre><code>qiss),/(1;2 3;();4)
 [1 2 3 4]
 qiss)</code></pre>
 	</td>
