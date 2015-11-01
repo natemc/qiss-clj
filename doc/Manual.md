@@ -2,7 +2,7 @@ qiss Manual
 =========
 
 
-Events Reference
+qiss for JavaScript Programmers
 --------------
 
 
@@ -34,7 +34,7 @@ qiss)
 	</td>
 </tr>
 <tr>
-	<td>
+	<td valign="top">
 		<a name="map"/>
 		<tt>map</tt> <b></b>
 <pre><code>> [1, 2, 3].map(x => x + 1)
@@ -45,6 +45,11 @@ qiss)
 	<td>
 		<tt>'</tt> <b>each</b> is equivalent to <b>map</b>
 <pre><code>qiss){x+1}'1 2 3
+[2 3 4]
+qiss)
+</code></pre>
+		Many built-in operations are <i>atomic</i>, meaning they automatically vectorize:
+<pre><code>qiss)1+1 2 3
 [2 3 4]
 qiss)
 </code></pre>
