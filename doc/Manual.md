@@ -74,7 +74,7 @@ qiss)</code></pre>
 	<td>
 		<a name="concatAll"/>
 		<tt>concatAll</tt>  <b></b>
-<pre><code> > [[1], [2, 3], [], [4]].concatAll()
+<pre><code>> [[1], [2, 3], [], [4]].concatAll()
 > [1, 2, 3, 4]
 >
 </code></pre>
@@ -86,5 +86,105 @@ qiss)</code></pre>
 qiss)</code></pre>
 	</td>
 </tr>
+
+<tr>
+	<td>
+		<a name="iterator"/>
+		<tt>iterator</tt>  <b></b>
+<pre><code>> var iterator = [1, 2, 3].iterator();
+> console.log(iterator.next());
+> { value: 1, done: false }
+> console.log(iterator.next());
+> { value: 2, done: false }
+> console.log(iterator.next());
+> { value: 3, done: false }
+> console.log(iterator.next());
+> { done: true }
+> 
+</code></pre>
+	</td>
+	<td>
+		<tt></tt> <b></b> is equivalent to <b>iterator</b>  TODO
+<pre><code>qiss)show'1 2 3
+1
+qiss)</code></pre>
+	</td>
+</tr>
+
+
+<tr>
+	<td>
+		<a name="Observable"/>
+		<tt>Observable</tt>  <b></b>
+<pre><code>
+> var mouseMoves = Observable.fromEvent(element, "mousemove");
+> var subcription = mouseMoves.forEach(console.log);
+> 
+</code></pre>
+	</td>
+	<td>
+		<tt>event</tt> <b></b> is equivalent to <b>fromEvent</b>  
+<pre><code>qiss){show x}`mouseMoves event dom[`element] 
+qiss)</code></pre>
+	</td>
+</tr>
+
+
+<tr>
+	<td>
+		<a name="Observable"/>
+		<tt>Expanded Observable.forEach</tt>  <b></b>
+<pre><code>
+> var mouseMoves = Observable.fromEvent(element, "mousemove");
+> var subscription = 
+     mouseMoves.forEach(
+        // next data
+        event => console.log(event),
+        // error
+        error => console.error(error),
+        // completed
+        () => console.log("done"));
+> 
+</code></pre>
+	</td>
+	<td>
+		<tt>event</tt> <b></b> is equivalent to <b>fromEvent</b> TODO
+<pre><code>qiss)event[`mousemove; dom[`element]; {show x}; {[e] show e}; {show "done"}] 
+qiss)</code></pre>
+	</td>
+</tr>
+
+
+<tr>
+	<td>
+		<a name="Observable"/>
+		<tt>Expanded Observable.forEach</tt>  <b></b>
+<pre><code>
+> var mouseMoves = Observable.fromEvent(element, "mousemove");
+> var subscription = 
+     mouseMoves.forEach({
+        onNext: event => console.log(event),
+        onError: error => console.error(error),
+        onCompleted: () => console.log("done")
+     });
+> 
+</code></pre>
+	</td>
+	<td>
+		<tt>event</tt> <b></b> is equivalent to <b>fromEvent</b> TODO
+<pre><code>qiss)observableDict:(`onNext`onError`onCompleted)!({show x}; {[e] show e}; {show "done"})
+     :onNext| {show x}
+    :onError| {[e] show e}
+:onCompleted| {show "done"}
+qiss)event[`mousemove; dom[`element]; observableDict] 
+qiss)</code></pre>
+	</td>
+</tr>
+
+
+
 </table>
 
+JavaScript example credit:
+Jafar Husain
+https://frontendmasters.com/courses/asynchronous-javascript
