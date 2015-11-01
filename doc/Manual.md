@@ -24,7 +24,7 @@ Events Reference
 	</td>
 	<td>
 		<tt>'</tt> is <b>each</b>
-<pre><code>qiss){ show x }'1 2 3
+<pre><code>qiss)show'1 2 3
 1
 2
 3
@@ -43,7 +43,7 @@ qiss)
 	</td>
 	<td>
 		<tt>'</tt> <b>each</b> is equivalent to <b>map</b>
-<pre><code>qiss){x + 1}'1 2 3
+<pre><code>qiss){x+1}'1 2 3
 [2 3 4]
 qiss)
 </code></pre>
@@ -58,8 +58,8 @@ qiss)
 >
 	</td>
 	<td>
-		<tt>fby</tt> is <b>filter-by</b>  TODO
-<pre><code>qiss)( ; ) fby  1 2 3
+		<tt>@&</tt> is <b>filter</b>
+<pre><code>qiss){x@&x>1}1 2 3
 [2 3]
 qiss)</code></pre>
 	</td>
@@ -74,9 +74,9 @@ qiss)</code></pre>
 </code></pre>
 	</td>
 	<td>
-		<tt>raze</tt> is <b> flattens</b>
-<pre><code>qiss) raze (1 ; 2 3 ; ; 4)  TODO
-[ 1 2 3 4 ]
+		<tt>,/ ("raze")</tt> is <b>concatAll</b>
+<pre><code>qiss) ,/(1;2 3;();4)
+[1 2 3 4]
 qiss)</code></pre>
 	</td>
 </tr>
