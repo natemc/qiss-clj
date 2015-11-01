@@ -1,16 +1,17 @@
 # qiss
 
-qiss is short and simple: a k/q-like programming language for the JVM and JavaScript engines.  Like all APL derivatives, qiss derives its expressiveness from the following features:
+qiss is short and simple: a k/q-like programming language for the JVM and JavaScript engines.  Like all APL descendants, qiss derives its expressiveness from the following features:
 
-* Automatic vectorization
-* Precedence-less right-to-left evaluation of expressions
 * Syntax that requires minimal punctuation
+* Automatic vectorization
+* Uniform treatment of all types of maps (in qiss's case, vectors, dictionaries, tables, functions, and streams)
+* Precedence-less right-to-left evaluation of expressions
 
-qiss is a toy interpreter whose primary purpose is for us to explore ideas (e.g., what would FRP look like in a single-page browser app if k had built-in FRP support?); no attempt has been made to make it robust or efficient.  The interpreter is written in clojure, and it works (modulo platform limitations) in ClojureScript so we can write in qisses (qiss on EcmaScript), too.
+qiss is a toy interpreter whose primary purpose is to explore ideas (e.g., what would FRP look like in a single-page browser app if k had built-in FRP support?); no attempt has been made to make it robust or efficient.  The interpreter is written in clojure, and it works (modulo platform limitations) in ClojureScript so we can write in qisses (qiss on EcmaScript), too.
 
 ## Installation
 
-### Make sure you have the following installed (or see Docker section below):
+### Make sure you have the following installed (or see the Docker section below):
   * a recent (>= SE 8) [JDK from Oracle](http://www.oracle.com/technetwork/java/javase/downloads/index.html)
   * git
   * [Leiningen](http://leiningen.org/)
