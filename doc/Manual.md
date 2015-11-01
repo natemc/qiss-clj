@@ -136,13 +136,14 @@ qiss)</code></pre>
 		<tt>Expanded Observable.forEach</tt>  <b></b>
 <pre><code>
 > var mouseMoves = Observable.fromEvent(element, "mousemove");
-> var subcription = mouseMoves.forEach(console.log
-                 // next data
-                 event => console.log(event),
-                 // error
-                 error => console.error(error),
-                 // completed
-                 () => console.log("done"));
+> var subscription = 
+     mouseMoves.forEach(
+        // next data
+        event => console.log(event),
+        // error
+        error => console.error(error),
+        // completed
+        () => console.log("done"));
 > 
 </code></pre>
 	</td>
@@ -152,6 +153,34 @@ qiss)</code></pre>
 qiss)</code></pre>
 	</td>
 </tr>
+
+
+<tr>
+	<td>
+		<a name="Observable"/>
+		<tt>Expanded Observable.forEach</tt>  <b></b>
+<pre><code>
+> var mouseMoves = Observable.fromEvent(element, "mousemove");
+> var subscription = 
+     mouseMoves.forEach({
+        onNext: event => console.log(event),
+        onError: error => console.error(error),
+        onCompleted: () => console.log("done")
+     });
+> 
+</code></pre>
+	</td>
+	<td>
+		<tt>event</tt> <b></b> is equivalent to <b>fromEvent</b> TODO
+<pre><code>qiss)observableDict:(`onNext`onError`onCompleted)!({show x}; {[e] show e}; {show "done"})
+     :onNext| {show x}
+    :onError| {[e] show e}
+:onCompleted| {show "done"}
+qiss)event[`mousemove; dom[`element]; observableDict] 
+qiss)</code></pre>
+	</td>
+</tr>
+
 
 
 </table>
