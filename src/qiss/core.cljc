@@ -1967,6 +1967,9 @@
                              (map list (map count (dict-val g)) e))]
                (apply f a)))
            (dict-key g)))))))
+(defn done [e f s] ;; add f (in env e) as an on-done handler to stream s
+  ((:sub s) {:on-next (fn [e] nil) :on-done (lambda-callable e f)})
+  s)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; DOM
 #?(:cljs (defn ev [event ele]
@@ -2068,6 +2071,8 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (def builtin-common {:cols     {:f cols :rank [1]}
                      :div      {:f div :rank [2]}
+                     :done     {:f done :pass-global-env true :rank [2]
+                                :stream-aware[2]}
                      :every    {:f every :rank [1]}
                      :keys     {:f keycols :rank [1]}
                      :last     {:f klast :rank [1]}
