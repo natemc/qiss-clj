@@ -240,12 +240,29 @@
     res))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; handy code
+(declare invoke)
+(defn null!
+  "Like 0N! but variadic, e.g., (null! msg thing) => thing"
+  [& x]
+  ;; when printing functions, don't print the whole env
+  (apply println (map lose-env x))
+  (last x))
+
 (defn all? "is every x truthy?" [x] (if (every? (fn [x] x) x) true false))
 (defn any? "is any x truthy?" [x] (if (some (fn [x] x) x) true false))
 (defn bool-to-long "convert x, if boolean, to long" [x]
   (cond (coll? x) (mapv bool-to-long x)
         (bool? x) (if x 1 0)
         :else     x))
+(defn compose [f g] ;; compose f and g
+  "Compose two qiss functions"
+  {:f       (fn [e & x]
+              (let [[e2 y] (invoke e g x)]
+                (last (invoke e2 f [y]))))
+   :pass-global-env true
+   :formals (:formals g)
+   :rank    (:rank g)
+   :text    (str (:text f) "comp" (:text g))})
 (defn except "the elements in x not in y" [x y]
   (let [p (cond (vector? y) #(some #{%} y)
                 (dict?   y) #(some #{%} (dict-val y))
@@ -271,12 +288,6 @@
           (if (= (count x) i)
             i
             (- (count x) (+ 1 i)))))
-(defn null!
-  "Like 0N! but variadic, e.g., (null! msg thing) => thing"
-  [& x]
-  ;; when printing functions, don't print the whole env
-  (apply println (map lose-env x))
-  (last x))
 (defn push [x v]
   "Prepend x to v"
   (vec (cons x (map identity v))))
@@ -1392,18 +1403,19 @@
   ;; assert (can-be-dyadic x)
   (assoc x :rank [2]))
 (defn resolve-juxt [tu e x]
-  "Resolve the juxt expr specified by x"
+  "Resolve two expressions next to each other without punctuation"
   (let [[e2 rhs] (kresolve tu e (:rhs x))
         [e3 lhs] (kresolve tu e2 (:lhs x))]
     (cond
       (:second rhs)       (invoke e3 rhs [lhs (:second rhs)])  ; 1 in 1 2 3
-      (can-be-dyadic rhs) (invoke e3 (force-dyadic rhs) [lhs]) ; 1+
+      (and (can-be-dyadic rhs)
+           (not (can-be-dyadic lhs))) (invoke e3 (force-dyadic rhs) [lhs]) ; 1+
       (:second lhs)       (invoke e3 lhs [(:second lhs) rhs])  ; (in 1 2 3)1 2
       (can-be-dyadic lhs) [e3 (merge lhs {:second rhs})]       ; {x+y}3
       :else               (invoke e3 lhs [rhs]))))             ; {x}3
 
-(defn resolve-lambda [tu t e x]
-  "Resolve the {} specified by x"
+(defn resolve-lambda [tu text e x]
+  "Create a lambda from an AST"
   (let [a (args x)
         w (merge x   ;; TODO: write lambda ctor
                  a
@@ -1412,7 +1424,7 @@
                   ;; TODO give in and use clojure meta
                   :snapshot-aware (:rank a)
 ;;                  :stream-aware (:rank a)
-                  :text t})]
+                  :text text})]
     [e (assoc w :f (feval tu w))]))
 (defn vec-with-streams [v]
   (let [f (fn [& x] ;; fill stream elements of v using x
@@ -2070,6 +2082,7 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (def builtin-common {:cols     {:f cols :rank [1]}
+                     :comp     {:f compose :rank [2]}
                      :div      {:f div :rank [2]}
                      :done     {:f done :pass-global-env true :rank [2]
                                 :stream-aware[2]}
