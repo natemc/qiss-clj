@@ -88,6 +88,15 @@ qiss)</code></pre>
 </tr>
 
 <tr>
+    <td>
+       <b></b>
+    </td>
+    <td>
+       <b>some features below not yet implemented and/or subject to change</b>
+    </td>
+</tr>
+
+<tr>
 	<td>
 		<a name="iterator"/>
 		<tt>iterator</tt>  <b></b>
@@ -104,7 +113,7 @@ qiss)</code></pre>
 </code></pre>
 	</td>
 	<td>
-		<tt></tt> <b></b> is equivalent to <b>iterator</b>  TODO
+		<tt>'</tt> <b>each</b> is equivalent to <b>iterator</b>  <b>TODO - feature not yet implemented </b>
 <pre><code>qiss)show'1 2 3
 1
 qiss)</code></pre>
@@ -151,7 +160,7 @@ qiss)</code></pre>
 </code></pre>
 	</td>
 	<td>
-		<tt>event</tt> <b></b> is equivalent to <b>fromEvent</b> TODO
+		<tt>event</tt> <b></b> is equivalent to <b>fromEvent</b> <b><b><b>TODO - feature not yet implemented </b> </b> </b>
 <pre><code>qiss)event[`mousemove; dom[`element]; {show x}; {[e] show e}; {show "done"}] 
 qiss)</code></pre>
 	</td>
@@ -175,7 +184,7 @@ qiss)</code></pre>
 </code></pre>
 	</td>
 	<td>
-		<tt>event</tt> <b></b> is equivalent to <b>fromEvent</b> TODO
+		<tt>event</tt> <b></b> is equivalent to <b>fromEvent</b> <b>TODO - feature not yet implemented </b>
 <pre><code>qiss)observableDict:(`onNext`onError`onCompleted)!({show x}; {[e] show e}; {show "done"})
      :onNext| {show x}
     :onError| {[e] show e}
@@ -185,18 +194,18 @@ qiss)</code></pre>
 	</td>
 </tr>
 
-
-
-
 <tr>
 	<td>
 		<a name="Observable Composition"/>
 		<tt>Observable Composition</tt>  <b></b>
 <pre><code>
 var getElementDrags = elmt => {
-   elmt.mouseDowns = Observable.fromEvent(elmt, "mousedown");
-   elmt.mouseUps = Observable.fromEvent(elmt, "mouseup");
-   elmt.mouseMoves = Observable.fromEvent(elmt, "mousemove");
+   elmt.mouseDowns = 
+      Observable.fromEvent(elmt, "mousedown");
+   elmt.mouseUps = 
+      Observable.fromEvent(elmt, "mouseup");
+   elmt.mouseMoves = 
+      Observable.fromEvent(elmt, "mousemove");
    return elmt.mouseDowns.
       map(mouseDown =>
          document.mouseMoves.
@@ -208,7 +217,7 @@ getElementDrags(image).
 </code></pre>
 	</td>
 	<td>
-		<tt>event</tt> <b></b> is equivalent to <b>fromEvent</b> TODO
+		<tt>event</tt> <b></b> is equivalent to <b>fromEvent</b> <b>TODO - feature not yet implemented </b>
 <pre><code>
 qiss)elmt.mouseDowns:`mousedown event elmt;
 qiss)elmt.mouseUps:`mouseup event elmt;
@@ -220,8 +229,39 @@ qiss){[pos] image.position:pos}'getElementDrags image
 </tr>
 
 
+<tr>
+	<td>
+		<a name="Observable Composition 2"/>
+		<tt>Observable Composition 2</tt>  <b></b>
+<pre><code>
+var searchResultSets = 
+   keyPresses.
+      throttle(250).
+      map(key =>
+         getJSON("/searchResults?q=" + input.value).
+            retry(3)).
+      switchLatest();
+      
+searchResultSets.forEach(
+   resultSet => updateSearchResults(resultSet),
+   error => showMessage("the server appears to be down."));
+</code></pre>
+	</td>
+	<td>
+		<tt>event</tt> <b></b> is equivalent to <b>fromEvent</b> <b>TODO - feature not yet implemented </b>
+<pre><code>
+qiss)observableDict:(`onNext`onError)!({[resultSet] updateSearchResultSet[resultSet]}; {[e] show "the server appears to be down."})
+qiss)keyPresses:event[`keydown; elmt; observableDict]
+qiss)searchResultSets:switchLatest 3 retry {[key] getJSON["/searchResults?q=",input.value]}'250 throttle keyPresses
+qiss)searchResultSets[]
+qiss)
+</code></pre>
+	</td>
+</tr>
+
+
 </table>
 
-JavaScript example credit:
-Jafar Husain
+JavaScript code credit: </br>
+Jafar Husain </br>
 https://frontendmasters.com/courses/asynchronous-javascript
