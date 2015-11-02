@@ -53,6 +53,7 @@ qiss)
 [2 3 4]
 qiss)
 </code></pre>
+
 	</td>
 </tr>
 <tr>
@@ -68,7 +69,22 @@ qiss)
 <pre><code>qiss){x@&x>1}1 2 3
 [2 3]
 qiss)</code></pre>
+It's helpful to break down the right-to-left sequence of function applications 
+<pre><code>
+qiss){x>1}1 2 3      / boolean filter
+[false true true]
+qiss){&x>1}1 2 3     / where transforms bools to indexes
+[1 2]
+qiss){x[&x>1]}1 2 3  / @ is equivalent to applying the index with [ ]
+[2 3]
+qiss)
+</code></pre>
+
+
 	</td>
+
+	
+	
 </tr>
 <tr>
 	<td>
