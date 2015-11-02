@@ -1,8 +1,6 @@
-qiss Manual
+qiss for JavaScript Programmers
 =========
 
-
-qiss for JavaScript Programmers
 --------------
 
 
