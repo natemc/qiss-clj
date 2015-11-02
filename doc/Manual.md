@@ -117,8 +117,10 @@ qiss)</code></pre>
 		<a name="Observable"/>
 		<tt>Observable</tt>  <b></b>
 <pre><code>
-> var mouseMoves = Observable.fromEvent(element, "mousemove");
-> var subcription = mouseMoves.forEach(console.log);
+> var mouseMoves = 
+     Observable.fromEvent(element, "mousemove");
+> var subcription = 
+     mouseMoves.forEach(console.log);
 > 
 </code></pre>
 	</td>
@@ -135,7 +137,8 @@ qiss)</code></pre>
 		<a name="Observable"/>
 		<tt>Expanded Observable.forEach</tt>  <b></b>
 <pre><code>
-> var mouseMoves = Observable.fromEvent(element, "mousemove");
+> var mouseMoves = 
+     Observable.fromEvent(element, "mousemove");
 > var subscription = 
      mouseMoves.forEach(
         // next data
@@ -160,7 +163,8 @@ qiss)</code></pre>
 		<a name="Observable"/>
 		<tt>Expanded Observable.forEach</tt>  <b></b>
 <pre><code>
-> var mouseMoves = Observable.fromEvent(element, "mousemove");
+> var mouseMoves = 
+     Observable.fromEvent(element, "mousemove");
 > var subscription = 
      mouseMoves.forEach({
         onNext: event => console.log(event),
@@ -181,6 +185,39 @@ qiss)</code></pre>
 	</td>
 </tr>
 
+
+
+
+<tr>
+	<td>
+		<a name="Observable Composition"/>
+		<tt>Observable Composition</tt>  <b></b>
+<pre><code>
+var getElementDrags = elmt => {
+   elmt.mouseDowns = Observable.fromEvent(elmt, "mousedown");
+   elmt.mouseUps = Observable.fromEvent(elmt, "mouseup");
+   elmt.mouseMoves = Observable.fromEvent(elmt, "mousemove");
+   return elmt.mouseDowns.
+      map(mouseDown =>
+         document.mouseMoves.
+            takeUntil(document.mouseUps)).
+      concatAll();
+};
+getElementDrags(image).
+   forEach(pos => image.position = pos);
+</code></pre>
+	</td>
+	<td>
+		<tt>event</tt> <b></b> is equivalent to <b>fromEvent</b> TODO
+<pre><code>
+qiss)elmt.mouseDowns:`mousedown event elmt;
+qiss)elmt.mouseUps:`mouseup event elmt;
+qiss)elmt.mouseMoves:`mousemove event elmt;
+qiss)getElementDrags:{,/{[mouseDown] (document`mouseUps)#(document`mouseMoves))}'elmt.mouseDowns} 
+qiss){[pos] image.position:pos}'getElementDrags image
+</code></pre>
+	</td>
+</tr>
 
 
 </table>
