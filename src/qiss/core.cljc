@@ -125,18 +125,27 @@
 (defn lambda-rank [x] (:rank x))
 (defn lambda-text [x] (:text x))
 (declare stream?)
+(defn map-snippet [n orig]
+  (reduce (fn [m k] (assoc m k (lose-env (k orig))))
+          {}
+          (take n (keys orig))))
 (defn lose-env [x]
-  (if (stream? x)
-    {:stream true}
-    (if (lambda? x) (dissoc x :env) x)))
+  (cond (vector? x) (mapv lose-env x)
+        (stream? x) {:stream true}
+        (lambda? x) (assoc x :env (lose-env (:env x)))
+        (and (map? x) (< 5 (count x))) (map-snippet 2 x)
+        :else       x))
+;;    (if (lambda? x) (dissoc x :env) x)))
 (defn snapshot? [x] (:snapshot x))
 (defn snapshot-aware? [x r] ;; lambda, rank
   (and (:snapshot-aware x) (some #{r} (:snapshot-aware x))))
 (defn snapshot-value [x] (:value x))
 (defn make-snapshot [x]
-  (if (snapshot? x)
-    (err "oops - snapshotting a snapshot")
-    {:snapshot true :value x}))
+  ;; sometimes you make a snapshot but you already have one:
+  ;; {x}@>=!3 / lambdas are snapshot-aware in case their innards are
+  (if (snapshot? x) x {:snapshot true :value x}))
+(defn swallow [] (assoc (make-snapshot nil) :swallow true))
+(defn swallow? [x] (:swallow x))
 (defn stream? [x] (:stream x))
 (defn stream-aware? [x r] ;; lambda, rank
   (and (:stream-aware x) (some #{r} (:stream-aware x))))
@@ -216,35 +225,6 @@
         (number? x)  (key-table-by-long x y)
         (keyword? x) (key-table-by-colname x y)
         :else        (err "nyi" x "!" y)))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Helper for writing stream processing functions.
-;; Creates all the plumbing, a quit function that closes
-;; all necessary channels, and a result you can return.
-(defn stream-prologue [s] ; stream or (coll of) streams
-  (let [in   (if (stream? s)
-               ((:sub s))
-               (mapv #((:sub %)) s))
-        out  (chan)
-        m    (async/mult out)
-        quit (if (stream? s)
-               (fn [] (doseq [p [in out]] (async/close! p)))
-               (fn [] (doseq [p (conj in out)] (async/close! p))))
-        res  {:depends-on s
-              :stream     true
-              :sub        (fn [] (async/tap m (chan)))}]
-    [in out quit res]))
-;; This is just an example to show how to use
-;; stream-prologue to write a stream processing function.
-(defn process-stream [s h]
-  (let [[in out quit res] (stream-prologue s)]
-    (go-loop [e (<! in)]
-      (if (nil? e) ;; beware if-let and when-let
-        (quit)     ;; we want to test for non-nil, not truthiness
-        (do (let [r (h e)]
-              (when (some? r)
-                (put! out r)))
-            (recur (<! in)))))
-    res))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; handy code
 (declare invoke)
@@ -402,26 +382,10 @@
                         (of a (if b 1 0))
                         (of a b))))]
     ((atomize f) x y)))
-(defn where-from-stream [x]
-  (let [[in out quit res] (stream-prologue x)]
-    (go-loop [e (<! in)]
-      (if (nil? e)
-        (quit)
-        (do (put! out {:where e})
-            (recur (<! in)))))
-    res))
-(defn where-from-stream2 [x]
-  (let [[in out quit res] (stream-prologue x)]
-    (go-loop [e (<! in)]
-      (if (nil? e)
-        (quit)
-        (do (put! out {:where e})
-            (recur (<! in)))))
-    res))
 (defn amp
   "&x (where)      and    x&y (atomic min)"
   ([x]  (if (snapshot? x)
-          (if (null! "where on snapshot" x) true false)
+          (make-snapshot (if (snapshot-value x) true false))
           (where x)))
   ([x y] (promote-bools (fn [& b] (and b)) min x y)))
 (defn div "atomic integer division" [x y] ((atomize quot) x y))
@@ -1228,9 +1192,7 @@
 (defn index [x i]
   "The elements of x specified by i"
   (cond (= :hole i)      x
-        (and (map? i) (contains? i :where)) (do (null! "***" x i)
-                                                (if (:where i) x nil))
-        
+        (snapshot? i)    (if (snapshot-value i) x (swallow))
         (table? x)       (index-table x i)
         (keyed-table? x) (index-keyed-table x i)
         (dict? i)        (make-dict (dict-key i) (index x (dict-val i)))
@@ -1307,7 +1269,7 @@
                             i
                             (make-stream e {:f (fn [& x] x) :rank (count i)} i))]))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn invoke-inner [e f a]
+(defn invoke [e f a]
   "Apply f to a. If f is not a lambda, index f at depth using a"
   (if (not (lambda? f))
     (if (and (vector? f) (some #{:hole} f)) ;; (;4)3 => (3;4)
@@ -1322,17 +1284,20 @@
         (invoke-with-streams e f a)
         (if (and (not (snapshot-aware? f (count a)))
                  (some snapshot? a))
-          [e (apply (lambda-callable e f)
-                    (mapv #(if (snapshot? %) (snapshot-value %) %) a))]
+          [e (make-snapshot (apply (lambda-callable e f)
+                                   (mapv #(if (snapshot? %)
+                                            (snapshot-value %)
+                                            %)
+                                         a)))]
           [e (apply (lambda-callable e f) a)]))
       (invoke-partial e f a))))
-(defn invoke [e f a]
-  (null! "invoke"
-         (if (:text f) (:text f) (lambda-callable e f))
-         a)
-  (let [[e r] (invoke-inner e f a)]
-    (null! "->" r)
-    [e r]))
+;; (defn invoke [e f a]
+;;   (null! "invoke"
+;;          (if (:text f) (:text f) (lambda-callable e f))
+;;          a)
+;;   (let [[e r] (invoke-inner e f a)]
+;;     (null! "->" r)
+;;     [e r]))
 (defn is-callable "Can x be invoked" [x] (instance? clojure.lang.IFn x))
 (defn can-only-be-monadic
   "Can x be invoked with 1 argument and no other number of arguments?"
@@ -1669,9 +1634,10 @@
           (= t :float   ) [e (parse-double v)]
           (= t :floats  ) [e (parse-double (str/split v #"[ \n\r\t]+"))]
           (= t :hole    ) [e :hole] ;; nil ?
-          (= t :id      ) (if-let [u ((keyword v) e)]
-                            [e u]
-                            (err v "not found in scope"))
+          (= t :id      ) (let [u ((keyword v) e)]
+                            (if-not (nil? u)
+                              [e u]
+                              (err v "not found in scope")))
           (= t :juxt    ) (resolve-juxt tu e v)
           (= t :lambda  ) (resolve-lambda tu
                                           (apply (partial subs tu) (instav/span x))
@@ -1695,8 +1661,7 @@
   "Resolve x in the context of e.  If x resolves to an ambivalent
   expression and one argument is present, execute it"
   (let [[e2 r] (kresolve tu e x)]
-    (if (and (= :juxt (first x)) (:second r)
-             (can-be-monadic r))
+    (if (and (= :juxt (first x)) (:second r) (can-be-monadic r))
       (invoke e2 r [(:second r)])
       [e2 r])))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1928,7 +1893,6 @@
 ;; containing a formula: the cell updates whenever any input to
 ;; the formula changes.
 (defn make-monadic-stream [e f s]
-  (null! (if (snapshot-aware? f 1) "---" "+++") (:text f))
   (let [g       (lambda-callable e f)
         h       (if (snapshot-aware? f 1) g #(g (snapshot-value %)))
         subs    (atom [])
@@ -1937,13 +1901,13 @@
                   (reset! subs nil))
         on-next (fn [ssi] ;; snapshot in
                   (let [sso (make-snapshot (h ssi))]
-                    (doseq [s @subs] ((:on-next s) sso))))]
+                    (when-not (swallow? sso)
+                      (doseq [s @subs] ((:on-next s) sso)))))]
     ((:sub s) {:on-done on-done :on-next on-next})
     {:stream true
      :sub    #(swap! subs conj %)
      :unsub  #(swap! subs except %)}))
 (defn make-monadic-stream-dup [e f s n]
-  (null! (if (snapshot-aware? f 1) "\\\\\\" "///") (keys f))
   (let [g       (lambda-callable e f)
         h       (if (snapshot-aware? f n)
                   (fn [x] (apply g (repeat n x)))
@@ -1954,7 +1918,8 @@
                   (reset! subs nil))
         on-next (fn [ssi] ;; snapshot in
                   (let [sso (make-snapshot (h ssi))]
-                    (doseq [s @subs] ((:on-next s) sso))))]
+                    (when-not (swallow? sso)
+                      (doseq [s @subs] ((:on-next s) sso)))))]
     ((:sub s) {:on-done on-done :on-next on-next})
     {:stream true
      :sub    #(swap! subs conj %)
@@ -1980,7 +1945,8 @@
                       (let [p @a] ;; p is the curr inputs from all s
                         (when (every? some? p) ;; need full arg set b4 1st call
                           (let [sso (make-snapshot (h p))]
-                            (doseq [s @subs] ((:on-next s) sso))))))]
+                            (when-not (swallow? sso)
+                              (doseq [s @subs] ((:on-next s) sso)))))))]
         ((:sub in) {:on-done on-done :on-next on-next})))
     {:stream true
      :sub    #(swap! subs conj %)
@@ -2088,7 +2054,7 @@
         push     (fn []
                    (let [j (swap! i (fn [k] (+ 1 (min (count x) k))))]
                      (when (<= j (count x))
-                       (let [ss (make-snapshot (null! "!!!" (x (dec j))))]
+                       (let [ss (make-snapshot (x (dec j)))]
                          (doseq [s @subs] ((:on-next s) ss)))
                        (when (= j (count x))
                          (doseq [s @subs] ((:on-done s)))
@@ -2103,7 +2069,7 @@
     x
     (let [r       (atom [])
           on-done (fn [] nil)
-          on-next (fn [ss] (swap! r conj (null! "^^^" (snapshot-value ss))))
+          on-next (fn [ss] (swap! r conj (snapshot-value ss)))
           obs     {:on-done on-done :on-next on-next}]
       ((:sub x) obs)
       (doseq [s @test-streams] ((:push-all s))) ;; TODO randomize

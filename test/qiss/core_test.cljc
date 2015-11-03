@@ -536,7 +536,9 @@
   (testing "indexing with . with a stream on the rhs"
     (is (= [1 3] (keval "<=(0 1;2 3).>=(0 1;1 1)"))))
   (testing "indexing with . with a stream on the lhs"
-    (is (= [1 5] (keval "<=(>=((0 1;2 3);(4 5;6 7))). 0 1")))))
+    (is (= [1 5] (keval "<=(>=((0 1;2 3);(4 5;6 7))). 0 1"))))
+  (testing "@& can filter on a stream"
+    (is (= [0 2] (keval "<={x@&0=x mod 2}@>=!3")))))
 ;;           ;; (keval "<=(>=!3)*>=!3") => one of the following:
 ;;           ;; [[0 2 4] [0 0 2 4] [0 0 1 2 4]]
 ;;           ;; How do we say this?
