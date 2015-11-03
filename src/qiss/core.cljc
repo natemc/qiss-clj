@@ -124,12 +124,19 @@
 (defn lambda-formals [x] (:formals x))
 (defn lambda-rank [x] (:rank x))
 (defn lambda-text [x] (:text x))
-(defn lose-env [x] (if (lambda? x) (dissoc x :env) x))
+(declare stream?)
+(defn lose-env [x]
+  (if (stream? x)
+    {:stream true}
+    (if (lambda? x) (dissoc x :env) x)))
 (defn snapshot? [x] (:snapshot x))
 (defn snapshot-aware? [x r] ;; lambda, rank
   (and (:snapshot-aware x) (some #{r} (:snapshot-aware x))))
 (defn snapshot-value [x] (:value x))
-(defn make-snapshot [x] {:snapshot true :value x})
+(defn make-snapshot [x]
+  (if (snapshot? x)
+    (err "oops - snapshotting a snapshot")
+    {:snapshot true :value x}))
 (defn stream? [x] (:stream x))
 (defn stream-aware? [x r] ;; lambda, rank
   (and (:stream-aware x) (some #{r} (:stream-aware x))))
@@ -241,11 +248,13 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; handy code
 (declare invoke)
+(defonce DEBUG false)
 (defn null!
   "Like 0N! but variadic, e.g., (null! msg thing) => thing"
   [& x]
-  ;; when printing functions, don't print the whole env
-  (apply println (map lose-env x))
+  (if DEBUG
+    ;; when printing functions, don't print the whole env
+    (apply println (map lose-env x)))
   (last x))
 
 (defn all? "is every x truthy?" [x] (if (every? (fn [x] x) x) true false))
@@ -411,11 +420,9 @@
     res))
 (defn amp
   "&x (where)      and    x&y (atomic min)"
-  ([x]  (if (stream? x)
-          (err "wtf: amp got stream")
-          (if (snapshot? x)
-            (err "yay! amp got snapshot")
-            (where x))))
+  ([x]  (if (snapshot? x)
+          (if (null! "where on snapshot" x) true false)
+          (where x)))
   ([x y] (promote-bools (fn [& b] (and b)) min x y)))
 (defn div "atomic integer division" [x y] ((atomize quot) x y))
 (declare group)
@@ -1258,7 +1265,7 @@
         min-rank (apply min (lambda-rank f))
         args     (cond (> (count a) max-rank) (err "rank")
                        (< (count a) min-rank)
-                       ;; add holes i-f needed
+                       ;; add holes if needed
                        (concat a (repeat (- min-rank (count a)) :hole))
                        :else a)
         formals (mapv #(keyword (str/join ["a" (str %)]))
@@ -1291,14 +1298,16 @@
         [e2 g] (if (= (count a) (count s))
                  [e f]
                  (invoke-partial e f b))]
-    [e2 (make-stream (lambda-callable e g) s)]))
+    [e2 (make-stream e g s)]))
 (defn index-from-streams [e c i]
+  "Turn indexing with streams to invoking . with streams"
   (invoke-with-streams e
                        (:dot ops)
                        [c (if-not (some stream? i)
                             i
-                            (make-stream (fn [& x] x) i))]))
-(defn invoke [e f a]
+                            (make-stream e {:f (fn [& x] x) :rank (count i)} i))]))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn invoke-inner [e f a]
   "Apply f to a. If f is not a lambda, index f at depth using a"
   (if (not (lambda? f))
     (if (and (vector? f) (some #{:hole} f)) ;; (;4)3 => (3;4)
@@ -1311,8 +1320,19 @@
       (if (and (not (stream-aware? f (count a)))
                (some stream? a))
         (invoke-with-streams e f a)
-        [e (apply (lambda-callable e f) a)])
+        (if (and (not (snapshot-aware? f (count a)))
+                 (some snapshot? a))
+          [e (apply (lambda-callable e f)
+                    (mapv #(if (snapshot? %) (snapshot-value %) %) a))]
+          [e (apply (lambda-callable e f) a)]))
       (invoke-partial e f a))))
+(defn invoke [e f a]
+  (null! "invoke"
+         (if (:text f) (:text f) (lambda-callable e f))
+         a)
+  (let [[e r] (invoke-inner e f a)]
+    (null! "->" r)
+    [e r]))
 (defn is-callable "Can x be invoked" [x] (instance? clojure.lang.IFn x))
 (defn can-only-be-monadic
   "Can x be invoked with 1 argument and no other number of arguments?"
@@ -1426,7 +1446,7 @@
 ;;                  :stream-aware (:rank a)
                   :text text})]
     [e (assoc w :f (feval tu w))]))
-(defn vec-with-streams [v]
+(defn vec-with-streams [e v]
   (let [f (fn [& x] ;; fill stream elements of v using x
             (loop [i v j x r []]
               (if (empty? i)
@@ -1434,7 +1454,7 @@
                 (if (stream? (first i))
                   (recur (next i) (next j) (conj r (first j)))
                   (recur (next i) j (conj r (first i)))))))]
-    (make-stream f (filterv stream? v))))
+    (make-stream e {:f f} (filterv stream? v))))
 (defn resolve-vec [tu e x]
   "Resolve the (...;...) expr specified by x"
   (let [[e2 r] (reduce (fn [[e r] i]
@@ -1448,7 +1468,7 @@
     ;; We can handle streams and holes at the same time,
     ;; but I don't know if that makes any sense.
     (if (some stream? r)
-      [e2 (vec-with-streams r)]
+      [e2 (vec-with-streams e2 r)]
       [e2 (vec r)])))
 
 (defn resolve-monop [tu e x]
@@ -1907,41 +1927,46 @@
 ;; as its stream arguments change.  It's like a spreadsheet cell
 ;; containing a formula: the cell updates whenever any input to
 ;; the formula changes.
-(defn make-monadic-stream [f s]
-  (let [g       (if (snapshot-aware? f 1) f #(f (snapshot-value %)))
+(defn make-monadic-stream [e f s]
+  (null! (if (snapshot-aware? f 1) "---" "+++") (:text f))
+  (let [g       (lambda-callable e f)
+        h       (if (snapshot-aware? f 1) g #(g (snapshot-value %)))
         subs    (atom [])
         on-done (fn []
                   (doseq [s @subs] ((:on-done s)))
                   (reset! subs nil))
         on-next (fn [ssi] ;; snapshot in
-                  (let [sso (make-snapshot (g ssi))]
+                  (let [sso (make-snapshot (h ssi))]
                     (doseq [s @subs] ((:on-next s) sso))))]
     ((:sub s) {:on-done on-done :on-next on-next})
     {:stream true
      :sub    #(swap! subs conj %)
      :unsub  #(swap! subs except %)}))
-(defn make-monadic-stream-dup [f s n]
-  (let [g       (if (snapshot-aware? f n)
-                  (fn [x] (apply f (repeat n x)))
-                  (fn [x] (apply f (repeat n (snapshot-value x)))))
+(defn make-monadic-stream-dup [e f s n]
+  (null! (if (snapshot-aware? f 1) "\\\\\\" "///") (keys f))
+  (let [g       (lambda-callable e f)
+        h       (if (snapshot-aware? f n)
+                  (fn [x] (apply g (repeat n x)))
+                  (fn [x] (apply g (repeat n (snapshot-value x)))))
         subs    (atom [])
         on-done (fn []
                   (doseq [s @subs] ((:on-done s)))
                   (reset! subs nil))
         on-next (fn [ssi] ;; snapshot in
-                  (let [sso (make-snapshot (g ssi))]
+                  (let [sso (make-snapshot (h ssi))]
                     (doseq [s @subs] ((:on-next s) sso))))]
     ((:sub s) {:on-done on-done :on-next on-next})
     {:stream true
      :sub    #(swap! subs conj %)
      :unsub  #(swap! subs except %)}))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn make-stream-distinct [f s]
+(defn make-stream-distinct [e f s]
   (let [a    (atom (mapv (fn [x] nil) s)) ;; args
         d    (atom (mapv (fn [x] nil) s)) ;; done TODO
-        g    (if (snapshot-aware? f (count s))
-               #(apply f %)
-               #(apply f (mapv snapshot-value %)))
+        g    (lambda-callable e f)
+        h    (if (snapshot-aware? f (count s))
+               #(apply g %)
+               #(apply g (mapv snapshot-value %)))
         subs (atom [])]
     (doseq [[i in] (map-indexed vector s)]
       (let [on-done (fn []
@@ -1954,7 +1979,7 @@
                       (swap! a assoc i ssi)
                       (let [p @a] ;; p is the curr inputs from all s
                         (when (every? some? p) ;; need full arg set b4 1st call
-                          (let [sso (make-snapshot (g p))]
+                          (let [sso (make-snapshot (h p))]
                             (doseq [s @subs] ((:on-next s) sso))))))]
         ((:sub in) {:on-done on-done :on-next on-next})))
     {:stream true
@@ -1964,21 +1989,25 @@
 ;; f is a function of (count s) arguments; s is a vec of streams.
 ;; make-stream will create a stream that will call f every time
 ;; any element of s changes and push the results of f.
-(defn make-stream [f s] ;; function and stream args
+(defn make-stream [e f s] ;; env, function and stream args
   (if (= 1 (count s))
-    (make-monadic-stream f (first s))
+    (make-monadic-stream e f (first s))
     (let [g (group s)]
       (if (= (count s) (kcount g))
-        (make-stream-distinct f s)
+        (make-stream-distinct e f s)
         (if (= 1 (kcount g))
-          (make-monadic-stream-dup f (first s) (count s))
-          (make-stream-distinct
-           (fn [& e] ;; assert (= (count e) (kcount g))
-             (let [a (reduce (fn [v [n x]] (catv v (repeat n x)))
-                             []
-                             (map list (map count (dict-val g)) e))]
-               (apply f a)))
-           (dict-key g)))))))
+          (make-monadic-stream-dup e f (first s) (count s))
+          (let [g (lambda-callable e f)
+                h (if (snapshot-aware? f (count s))
+                    #(apply g %)
+                    #(apply g (mapv snapshot-value %)))]
+            (make-stream-distinct
+             (fn [& e] ;; assert (= (count e) (kcount g))
+               (let [a (reduce (fn [v [n x]] (catv v (repeat n x)))
+                               []
+                               (map list (map count (dict-val g)) e))]
+                 (h a)))
+             (dict-key g))))))))
 (defn done [e f s] ;; add f (in env e) as an on-done handler to stream s
   ((:sub s) {:on-next (fn [e] nil) :on-done (lambda-callable e f)})
   s)
@@ -2059,7 +2088,7 @@
         push     (fn []
                    (let [j (swap! i (fn [k] (+ 1 (min (count x) k))))]
                      (when (<= j (count x))
-                       (let [ss (make-snapshot (x (dec j)))]
+                       (let [ss (make-snapshot (null! "!!!" (x (dec j))))]
                          (doseq [s @subs] ((:on-next s) ss)))
                        (when (= j (count x))
                          (doseq [s @subs] ((:on-done s)))
@@ -2074,7 +2103,7 @@
     x
     (let [r       (atom [])
           on-done (fn [] nil)
-          on-next (fn [ss] (swap! r conj (snapshot-value ss)))
+          on-next (fn [ss] (swap! r conj (null! "^^^" (snapshot-value ss))))
           obs     {:on-done on-done :on-next on-next}]
       ((:sub x) obs)
       (doseq [s @test-streams] ((:push-all s))) ;; TODO randomize

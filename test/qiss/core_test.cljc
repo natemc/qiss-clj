@@ -504,7 +504,8 @@
     (is (= [0 2 4] (keval "<=2*>=!3")))
     (is (= [[0 0 0] [1 2 3] [2 4 6]] (keval "<=1 2 3*>=!3"))))
   (testing "user-defined functions work on streams"
-    (is (= [0 1 4] (keval "<={x*x}@>=!3"))))
+    (is (= [0 1 4] (keval "<={x*x}@>=!3")))
+    (is (= [0 2 6] (keval "<={x+x*x}@>=!3"))))
   (testing "first works on streams"
     (is (= 0 (keval "<=*>=!3"))))
   (testing "take on a stream creates a stream that stops after n events"
