@@ -510,7 +510,8 @@
     (is (= 0 (keval "<=*>=!3"))))
   (testing "take on a stream creates a stream that stops after n events"
     (is (= [] (keval "<=0#>=!3")))
-    (is (= [0 1] (keval "<=2#>=!3"))))
+    (is (= [0 1] (keval "<=2#>=!3")))
+    (is (= [0 1] (keval "<={2#x}>=!3"))))
   (testing "take from the back on a stream works via a new stream"
     (is (= [2] (keval "<=-1#>=!3")))
     (is (= [0 1 2] (keval "<=-3#>=!3"))))

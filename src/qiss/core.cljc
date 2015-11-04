@@ -2076,11 +2076,21 @@
       (if (:extract x) (first @r) @r))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(declare genv)
+(defn set-genv [e]
+  (swap! genv (fn [x y] y) e))
+(defn keval
+  ([x] (let [[e r] (resolve-full-expr x @genv (second (parse x)))]
+         (set-genv e)
+         (lose-env r)))
+  ([e x] (lose-env (last (resolve-full-expr x e (second (parse x)))))))
+
 (def builtin-common {:cols     {:f cols :rank [1]}
                      :comp     {:f compose :rank [2]}
                      :div      {:f div :rank [2]}
                      :done     {:f done :pass-global-env true :rank [2]
                                 :stream-aware[2]}
+                     :eval     {:f #(keval (apply str %)) :rank [1]}
                      :every    {:f every :rank [1]}
                      :keys     {:f keycols :rank [1]}
                      :last     {:f klast :rank [1]}
@@ -2102,21 +2112,12 @@
                               :wcsv   {:f wcsv :rank [2]}}
                        :cljs {:dom    {:f kdom :rank [1]}
                               :ev     {:f ev :rank [2]}
-                              :eval   {:f eval :rank [1]}
                               :text   {:f text :rank [2]}})))
 
-;; (def builtin (kload builtin "src/qiss/qiss.qiss"))
+(def genv (atom builtin))
 
 (defn eval-no-env [x] (last (kresolve x {} (second (parse x)))))
 
-(def genv (atom builtin))
-(defn set-genv [e]
-  (swap! genv (fn [x y] y) e))
-(defn keval
-  ([x] (let [[e r] (resolve-full-expr x @genv (second (parse x)))]
-         (set-genv e)
-         (lose-env r)))
-  ([e x] (lose-env (last (resolve-full-expr x e (second (parse x)))))))
 (defn krun
   ([x] (show (keval x)))
   ([e x] (show (keval e x))))
