@@ -139,11 +139,14 @@
 (defn snapshot? [x] (:snapshot x))
 (defn snapshot-aware? [x r] ;; lambda, rank
   (and (:snapshot-aware x) (some #{r} (:snapshot-aware x))))
+(defn snapshot-final? [x] (:final x))
 (defn snapshot-value [x] (:value x))
 (defn make-snapshot [x]
   ;; sometimes you make a snapshot but you already have one:
   ;; {x}@>=!3 / lambdas are snapshot-aware in case their innards are
   (if (snapshot? x) x {:snapshot true :value x}))
+(defn make-snapshot-final [x]
+  (assoc (make-snapshot x) :final true))
 (defn swallow [] (assoc (make-snapshot nil) :swallow true))
 (defn swallow? [x] (:swallow x))
 (defn stream? [x] (:stream x))
@@ -457,22 +460,12 @@
          (keyed-table? x) (make-keyed-table (dict-key x) (tilde (dict-val x)))
          :else            (if (= 0 x) true (not x))))
   ([x y] (= x y))) ;; match
+(defn first-from-snapshot [x]
+  (assoc (make-snapshot-final x) :extract true))
 (defn times
   "*x (first) and x*y (atomic multiplication)"
-  ([x] (if-not (stream? x)
-         (first x)
-         (let [subs    (atom [])
-               on-done (fn []
-                         (doseq [s @subs] ((:on-done s)))
-                         (reset! subs nil))
-               on-next (fn [ss] ;; snapshot
-                         (doseq [s @subs] ((:on-next s) ss))
-                         (on-done))]
-           ((:sub x) {:on-done on-done :on-next on-next})
-           {:extract true ;; hack for wait
-            :stream  true
-            :sub     #(swap! subs conj %)
-            :unsub   #(swap! subs except %)})))
+  ([x] (cond (snapshot? x) (first-from-snapshot x)
+             :else         (first x)))
   ([x y] ((atomize *) x y)))
 (defn vs [x y]
   "vector from string"
@@ -623,6 +616,8 @@
             (dict? y)        (take-from-dict n y)
             (table? y)       (take-from-table n y)
             (keyed-table? y) (take-from-keyed-table n y)
+            ;; this is no good
+;;            (snapshot? y)    (take-from-snapshot n y)
             (stream? y)      (if (< n 0)
                                (take-last-from-stream (- n) y)
                                (take-from-stream n y))
@@ -1056,7 +1051,7 @@
           :dot {:f dot :pass-global-env true :text "." :rank [1 2 3 4]}
           :+ {:f plus :text "+" :rank [1 2]}
           :- {:f minus :text "-" :rank [1 2]}
-          :* {:f times :text "*" :rank [1 2] :stream-aware [1]}
+          :* {:f times :text "*" :rank [1 2] :snapshot-aware [1]}
           :% {:f fdiv :text "%" :rank [1 2]}
           :# {:f pound :text "#" :rank [1 2] :stream-aware [2]}
           :$ {:f dollar :text "$" :rank [1 2]}
@@ -1895,37 +1890,55 @@
 (defn make-monadic-stream [e f s]
   (let [g       (lambda-callable e f)
         h       (if (snapshot-aware? f 1) g #(g (snapshot-value %)))
+        obs     (atom nil)
         subs    (atom [])
         on-done (fn []
-                  (doseq [s @subs] ((:on-done s)))
-                  (reset! subs nil))
+                  (doseq [sub @subs] ((:on-done sub)))
+                  (reset! subs nil)
+                  ((:unsub s) @obs))
         on-next (fn [ssi] ;; snapshot in
                   (let [sso (make-snapshot (h ssi))]
                     (when-not (swallow? sso)
-                      (doseq [s @subs] ((:on-next s) sso)))))]
-    ((:sub s) {:on-done on-done :on-next on-next})
-    {:stream true
-     :sub    #(swap! subs conj %)
-     :unsub  #(swap! subs except %)}))
+                      (doseq [s @subs] ((:on-next s) sso)))
+                    (when (snapshot-final? sso)
+                      (on-done))))
+        r       {:on-done on-done
+                 :on-next on-next
+                 :stream  true
+                 :sub     #(swap! subs conj %)
+                 :unsub   #(when (= [] (swap! subs except %))
+                             ((:unsub s) @obs))}]
+    ((:sub s) (reset! obs r))
+    r))
 (defn make-monadic-stream-dup [e f s n]
   (let [g       (lambda-callable e f)
         h       (if (snapshot-aware? f n)
                   (fn [x] (apply g (repeat n x)))
                   (fn [x] (apply g (repeat n (snapshot-value x)))))
+        obs     (atom nil)
         subs    (atom [])
         on-done (fn []
-                  (doseq [s @subs] ((:on-done s)))
-                  (reset! subs nil))
+                  (doseq [sub @subs] ((:on-done sub)))
+                  (reset! subs nil)
+                  ((:unsub s) @obs))
         on-next (fn [ssi] ;; snapshot in
                   (let [sso (make-snapshot (h ssi))]
                     (when-not (swallow? sso)
-                      (doseq [s @subs] ((:on-next s) sso)))))]
-    ((:sub s) {:on-done on-done :on-next on-next})
-    {:stream true
-     :sub    #(swap! subs conj %)
-     :unsub  #(swap! subs except %)}))
+                      (doseq [s @subs] ((:on-next s) sso)))
+                    (when (snapshot-final? sso)
+                      (on-done))))
+        r       {:on-done on-done
+                 :on-next on-next
+                 :stream  true
+                 :sub     #(swap! subs conj %)
+                 :unsub   #(when (= [] (swap! subs except %))
+                             ((:unsub s) @obs))}]
+    ((:sub s) (reset! obs r))
+    r))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn make-stream-distinct [e f s]
+  ;; TODO make this work like the others when we get final snapshots
+  ;; and unsub calls
   (let [a    (atom (mapv (fn [x] nil) s)) ;; args
         d    (atom (mapv (fn [x] nil) s)) ;; done TODO
         g    (lambda-callable e f)
@@ -1934,7 +1947,8 @@
                #(apply g (mapv snapshot-value %)))
         subs (atom [])]
     (doseq [[i in] (map-indexed vector s)]
-      (let [on-done (fn []
+      (let [o       (atom nil)
+            on-done (fn []
                       (swap! d assoc i true)
                       (let [p @d]
                         (when (every? some? p)
@@ -1988,7 +2002,8 @@
                          :stream  true
                          :event   event
                          :sub     #(swap! subs conj %)
-                         :unsub   #(swap! subs except %)}))))
+                         :unsub   #(when (= [] (swap! subs except %))
+                                     (dom/unlisten! (:element ele) event cb))}))))
 #?(:cljs (defn kstring? [s] (every? #(and (string? %) (= 1 (count %))) s)))
 #?(:cljs (defn kdom [s]
            (cond (and (coll? s) (not (kstring? s))) (mapv kdom s)
@@ -2018,7 +2033,8 @@
     {:on-done  (fn [] (stop-timer id) (on-done))
      :stream   true
      :sub      #(swap! subs conj %)
-     :unsub    #(swap! subs except %)
+     :unsub    #(when (= [] (swap! subs except %))
+                  (stop-timer id))
      :timer-id id}))
 (defn stop [x]
   (when-let [t (:timer-id x)] (stop-timer t))
@@ -2048,9 +2064,8 @@
 (defn into-stream [x] ;; x is a vector of events to push
   (let [subs     (atom [])
         i        (atom 0) ;; index of event in x to send next
-        stream   {:stream true
-                  :sub    (fn [s] (swap! subs conj s))
-                  :unsub  (fn [s] (swap! subs except s))}
+        stream   (atom {})
+        on-done  (fn [] (swap! test-streams except @stream))
         push     (fn []
                    (let [j (swap! i (fn [k] (+ 1 (min (count x) k))))]
                      (when (<= j (count x))
@@ -2058,27 +2073,33 @@
                          (doseq [s @subs] ((:on-next s) ss)))
                        (when (= j (count x))
                          (doseq [s @subs] ((:on-done s)))
-                         (swap! test-streams except stream)))
+                         (on-done)))
                      (< j (count x)))) ;; more to send?
         push-all (fn [] (loop [] (if (push) (recur))))
-        r        (assoc stream :push push :push-all push-all)]
+        r        {:push     push
+                  :push-all push-all
+                  :stream   true
+                  :sub      #(swap! subs conj %)
+                  :unsub    #(swap! subs except %)}]
     (swap! test-streams conj r)
-    r))
+    (reset! stream r)))
 (defn wait [x]
-  (if (not (stream? x))
+  (if-not (stream? x)
     x
-    (let [r       (atom [])
+    (let [extract (atom false)
+          r       (atom [])
           on-done (fn [] nil)
-          on-next (fn [ss] (swap! r conj (snapshot-value ss)))
+          on-next #(let [v (snapshot-value %)]
+                     (when (:extract %) (reset! extract true))
+                     (swap! r conj v))
           obs     {:on-done on-done :on-next on-next}]
       ((:sub x) obs)
       (doseq [s @test-streams] ((:push-all s))) ;; TODO randomize
-      (if (:extract x) (first @r) @r))))
+      (if @extract (first @r) @r))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (declare genv)
-(defn set-genv [e]
-  (swap! genv (fn [x y] y) e))
+(defn set-genv [e] (reset! genv e))
 (defn keval
   ([x] (let [[e r] (resolve-full-expr x @genv (second (parse x)))]
          (set-genv e)
