@@ -388,7 +388,9 @@
 (defn amp
   "&x (where)      and    x&y (atomic min)"
   ([x]  (if (snapshot? x)
-          (make-snapshot (if (snapshot-value x) true false))
+          (if (snapshot-value x)
+            (make-snapshot true)
+            (swallow))
           (where x)))
   ([x y] (promote-bools (fn [& b] (and b)) min x y)))
 (defn div "atomic integer division" [x y] ((atomize quot) x y))
@@ -1187,7 +1189,7 @@
 (defn index [x i]
   "The elements of x specified by i"
   (cond (= :hole i)      x
-        (snapshot? i)    (if (snapshot-value i) x (swallow))
+        (snapshot? i)    (if (swallow? i) i x)
         (table? x)       (index-table x i)
         (keyed-table? x) (index-keyed-table x i)
         (dict? i)        (make-dict (dict-key i) (index x (dict-val i)))
@@ -1694,10 +1696,10 @@
 (defn stringify-table [x]
   (str/join "\n" (table-as-strings x)))
 (defn stringify-vector [x]
-  (if (and (< 0 (count x)) (char? (first x)))
-    (str/join x)
-    (str/join " " (mapv stringify x))))
-;;    (str (mapv stringify x))))
+  (cond (= 0 (count x))   "()"
+        (char? (first x)) (str/join x)
+        (= 1 (count x))   (str "," (stringify (first x)))
+        :else             (str/join " " (mapv stringify x))))
 (defn stringify [x]
   (cond (vector? x)      (stringify-vector x)
         (dict? x)        (stringify-dict x)
@@ -1732,12 +1734,13 @@
             (if (< 0 (count x))
               (cond (char? (first x))   (str "\"" (str/join x) "\"")
                     (vector? (first x)) (mapv self x)
-                    :else               x)
+                    (= 1 (count x))     (str "," (str x))
+                    :else               (str/join " " (mapv str x)))
               "[]"))]
     (println (s x))))
 
 (defn show [x]
-  (cond (vector? x)      (show-vector x)
+  (cond (vector? x)      (println (stringify-vector x))
         (dict? x)        (show-dict x)
         (table? x)       (show-table x)
         (keyed-table? x) (show-keyed-table x)
@@ -1982,6 +1985,7 @@
                     #(apply g %)
                     #(apply g (mapv snapshot-value %)))]
             (make-stream-distinct
+             e
              (fn [& e] ;; assert (= (count e) (kcount g))
                (let [a (reduce (fn [v [n x]] (catv v (repeat n x)))
                                []
