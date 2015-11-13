@@ -507,19 +507,21 @@
     (is (= [0 1 4] (keval "<={x*x}@>=!3")))
     (is (= [0 2 6] (keval "<={x+x*x}@>=!3"))))
   (testing "first works on streams"
-    (is (= 0 (keval "<=*>=!3"))))
+    (is (= 0 (keval "<=*>=!3")))
+    (is (= 0 (keval "<={*x}@>=!3"))))
   (testing "take on a stream creates a stream that stops after n events"
     (is (= [] (keval "<=0#>=!3")))
     (is (= [0 1] (keval "<=2#>=!3")))
-    (is (= [0 1] (keval "<={2#x}>=!3"))))
+    (is (= [0 1] (keval "<={2#x}@>=!3"))))
   (testing "take from the back on a stream works via a new stream"
     (is (= [2] (keval "<=-1#>=!3")))
     (is (= [0 1 2] (keval "<=-3#>=!3"))))
   (testing "overtake from a stream works"
     (is (= [0 1 2 0 1] (keval "<=5#>=!3")))
     (is (= [1 2 0 1 2] (keval "<=-5#>=!3"))))
-  (testing "drop"
+  (testing "drop from a stream does"
     (is (= [1 2] (keval "<=1_>=!3")))
+    (is (= [1 2] (keval "<={1_x}@>=!3")))
     (is (= [] (keval "<=3_>=!3")))
     (is (= [] (keval "<=4_>=!3"))))
   (testing "drop from the back"
