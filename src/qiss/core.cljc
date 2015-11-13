@@ -832,11 +832,24 @@
   "Create a dyadic function from f (which must be dyadic) that loops
   over its rhs argument"
   (fn [e x y]
-    (let [p (partial (lambda-callable e f) x)]
-      (when (stream? y) (null! "!!!!!!!!!!!"))
-;;      (if (and (= 1 (count y)) (stream? (first y)))
-;;        (install-multi-event-handler p (first y))
-      (mapv p y))))
+    (let [g (lambda-callable e f)
+          h (if (snapshot-aware? f 2)
+              g
+              (fn [x y]
+                (let [lhs (if (snapshot? x) (snapshot-value x) x)]
+                  (if (snapshot? y)
+                    (derive-snapshot y (g lhs (snapshot-value y)))
+                    (let [r (mapv (partial g lhs) y)]
+                      (if (snapshot? x)
+                        (derive-snapshot x r)
+                        r))))))]
+      (h x y))))
+;;           p (partial h x)]
+;;       (if (snapshot? y)
+;;         (derive-snapshot y)
+;; ;;      (if (and (= 1 (count y)) (stream? (first y)))
+;; ;;        (install-multi-event-handler p (first y))
+;;       (mapv p y))))
 (defn over [f]
   "Create a dyadic function from f (which must be dyadic) that
   performs a reduce (aka fold left) over its rhs argument"
@@ -1076,7 +1089,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (def ops {
           (keyword "~") {:f tilde  :text "~" :rank [1 2]}
-          :! {:f bang :text "!" :rank [1 2] :snapshot-aware [1]}
+          :! {:f bang :text "!" :rank [1 2]} ;; :snapshot-aware [1]}
           :at {:f at :pass-global-env true :text "@" :rank [1 2 3 4]}
           :dot {:f dot :pass-global-env true :text "." :rank [1 2 3 4]
                 :snapshot-aware [2]}
@@ -1221,7 +1234,7 @@
         (snapshot? i)    (let [v (snapshot-value i)]
                                (if (= true v)
                                  x
-                                 (index x v))) ;;(swallow? i) i x) ;; isn't swallow check redundant?
+                                 (index x v)))
         (table? x)       (index-table x i)
         (keyed-table? x) (index-keyed-table x i)
         (dict? i)        (make-dict (dict-key i) (index x (dict-val i)))
@@ -1309,28 +1322,27 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn invoke [e f a]
   "Apply f to a. If f is not a lambda, index f at depth using a"
-  (null! "fff" f)
-;;  (when (= '(2 0) a) (err "FUCK!!!!!!!"))
   (if (not (lambda? f))
     (cond (and (vector? f) (some #{:hole} f)) ;; (;4)3 => (3;4)
           [e (fill-vector-holes f a)]
           (or (stream? f) (stream? a) (some stream? a))
           (index-from-streams e f a)
           :else [e (index-deep f a)])
-    (if (and (not (some #{:hole} (null! "args" a)))
+    (if (and (not (some #{:hole} a))
              (some #{(count a)} (lambda-rank f)))
       (if (and (not (stream-aware? f (count a)))
-               (null! "some stream?" (some stream? a)))
-        (invoke-with-streams e (null! "invoking-with-streams" f) a)
+               (some stream? a))
+        (invoke-with-streams e f a)
         (if (and (not (snapshot-aware? f (count a)))
                  (some snapshot? a))
           ;; TODO We need to find the source!
-          (do (err "nyi: invoking non-snapshot-aware function with snapshots via invoke")
-              [e (make-snapshot (apply (lambda-callable e f)
-                                       (mapv #(if (snapshot? %)
-                                                (snapshot-value %)
-                                                %)
-                                         a)))])
+          (err
+           "nyi: invoking non-snapshot-aware function with snapshots via invoke")
+              ;; [e (make-snapshot (apply (lambda-callable e f)
+              ;;                          (mapv #(if (snapshot? %)
+              ;;                                   (snapshot-value %)
+              ;;                                   %)
+              ;;                            a)))])
           [e (apply (lambda-callable e f) a)]))
       (invoke-partial e f a))))
 ;; (defn invoke [e f a]
@@ -1364,7 +1376,6 @@
         (let [[e2 r] (kresolve tu e  (:rhs x))
               [e3 o] (kresolve tu e2 (:verb x))
               [e4 l] (kresolve tu e3 (:lhs x))]
-          (null! "invoking adverbed on" l r)
           (invoke e4 (make o) [l r]))
         (err "nyi: bind lhs of adverbed expr (partial)"))
       (if (contains? x :rhs)
@@ -1756,6 +1767,7 @@
         (table? x)       (stringify-table x)
         (keyed-table? x) (stringify-keyed-table x)
         (lambda? x)      (stringify-lambda x)
+        (snapshot? x)    (stringify (snapshot-value x))
         :else            (str x)))
   
 (defn show-dict [x]
@@ -1795,6 +1807,7 @@
         (table? x)       (show-table x)
         (keyed-table? x) (show-keyed-table x)
         (lambda? x)      (show-lambda x)
+        (snapshot? x)    (show (snapshot-value x))
         :else            (println x)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; parser initialization
@@ -1942,9 +1955,7 @@
 ;; the formula changes.
 (defn make-monadic-stream [e f s]
   (let [g       (lambda-callable e f)
-        h       (if (snapshot-aware? f 1)
-                  g
-                  (fn [x] (null! (keys f)) (g (snapshot-value x))))
+        h       (if (snapshot-aware? f 1) g #(g (snapshot-value %)))
         obs     (atom nil)
         subs    (atom [])
         on-done (fn []
@@ -1954,7 +1965,6 @@
         on-next (fn [ssi] ;; snapshot in
                   (let [sso (derive-snapshot ssi (h ssi))]
                     (when-not (swallow? sso)
-                      (null! "sso" sso)
                       (doseq [s @subs] ((:on-next s) sso)))
                     (when (snapshot-final? sso)
                       (on-done))))
@@ -2013,9 +2023,9 @@
                   (fn [ssi] ;; snapshot in
                     (let [p (swap! a assoc i ssi)] ;; p is all current inputs
                       (when (every? some? p)
-                        (let [fuck (mapv (fn [i] (:event (p i)))
-                                         (srcmap (snapshot-source ssi)))]
-                          (when (apply = fuck)
+                        (let [q (mapv (fn [i] (:event (p i)))
+                                      (srcmap (snapshot-source ssi)))]
+                          (when (apply = q)
                             (let [sso (derive-snapshot ssi (f p))]
                               (when-not (swallow? sso)
                                 (doseq [s @subs] ((:on-next s) sso))))))))))
