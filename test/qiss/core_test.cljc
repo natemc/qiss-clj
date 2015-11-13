@@ -541,11 +541,10 @@
   (testing "indexing with . with a stream on the lhs"
     (is (= [1 5] (keval "<=(>=((0 1;2 3);(4 5;6 7))). 0 1"))))
   (testing "@& can filter on a stream"
-    (is (= [0 2] (keval "<={x@&0=x mod 2}@>=!3")))))
-;;           ;; (keval "<=(>=!3)*>=!3") => one of the following:
-;;           ;; [[0 2 4] [0 0 2 4] [0 0 1 2 4]]
-;;           ;; How do we say this?
-;;   ))
+    (is (= [0 2] (keval "<={x@&0=x mod 2}@>=!3"))))
+  (testing "multiple streams in the same computation works"
+    (is (some #{(keval "<=(>=!3)*>=!3")}
+              [[0 2 4] [0 1 2 4] [0 0 2 4] [0 0 1 2 4] [0 0 0 2 4]]))))
 ;; ;; gave up on this one: couldn't fix the <exprx> rule
 ;; ;; (testing "select"
 ;; ;;       (is (= 1 (count

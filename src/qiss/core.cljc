@@ -142,6 +142,7 @@
 (defn snapshot? [x] (:snapshot x))
 (defn snapshot-aware? [x r] ;; lambda, rank
   (and (:snapshot-aware x) (some #{r} (:snapshot-aware x))))
+(defn snapshot-event [x] (:event x))
 (defn snapshot-final? [x] (:final x))
 (defn snapshot-source [x] (:source x))
 (defn snapshot-time [x] (:time x))
@@ -253,7 +254,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; handy code
 (declare invoke)
-(defonce DEBUG true)
+(defonce DEBUG false)
 (defn null!
   "Like 0N! but variadic, e.g., (null! msg thing) => thing"
   [& x]
@@ -505,6 +506,7 @@
              (vector? x)      (til-count x)
              (dict? x)        (dict-key x)
              (keyed-table? x) (dict-key x)
+             (snapshot? x)    (snapshot-time x)
              :else (err "nyi: monadic ! on" x)))
   ([x y] (cond (table? y)               (key-table x y)
                (keyed-table? y)         (key-table x (unkey-table y))
@@ -831,6 +833,7 @@
   over its rhs argument"
   (fn [e x y]
     (let [p (partial (lambda-callable e f) x)]
+      (when (stream? y) (null! "!!!!!!!!!!!"))
 ;;      (if (and (= 1 (count y)) (stream? (first y)))
 ;;        (install-multi-event-handler p (first y))
       (mapv p y))))
@@ -1073,7 +1076,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (def ops {
           (keyword "~") {:f tilde  :text "~" :rank [1 2]}
-          :! {:f bang :text "!" :rank [1 2]}
+          :! {:f bang :text "!" :rank [1 2] :snapshot-aware [1]}
           :at {:f at :pass-global-env true :text "@" :rank [1 2 3 4]}
           :dot {:f dot :pass-global-env true :text "." :rank [1 2 3 4]
                 :snapshot-aware [2]}
@@ -1215,7 +1218,10 @@
 (defn index [x i]
   "The elements of x specified by i"
   (cond (= :hole i)      x
-        (snapshot? i)    (if (swallow? i) i x)
+        (snapshot? i)    (let [v (snapshot-value i)]
+                               (if (= true v)
+                                 x
+                                 (index x v))) ;;(swallow? i) i x) ;; isn't swallow check redundant?
         (table? x)       (index-table x i)
         (keyed-table? x) (index-keyed-table x i)
         (dict? i)        (make-dict (dict-key i) (index x (dict-val i)))
@@ -1223,6 +1229,7 @@
         (coll? i)        (reduce index x i) ;; TODO: fix
         (vector? x)      (x i)
         (dict? x)        ((dict-val x) (index-of (dict-key x) i))
+        (snapshot? x)    (derive-snapshot x (index (snapshot-value x) i))
         ;;; object? doesn't work; it just tests if the ctor is Object
         :else            #?(:clj  (err "can't index" x "with" i)
                             :cljs (aget x (name i)))))
@@ -1269,6 +1276,9 @@
            :exprs [[:call [:target [:raw f]] (push :actuals passing)]]
            :pass-global-env true
            :rank [(count formals)]
+           :snapshot-aware (if (snapshot-aware? f (count args))
+                             [(count formals)]
+                             [])
            :text (:text f)
            :env e}]
     [e (assoc w :f (feval "<synthesized partial>" w))]))
@@ -1299,17 +1309,19 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn invoke [e f a]
   "Apply f to a. If f is not a lambda, index f at depth using a"
+  (null! "fff" f)
+;;  (when (= '(2 0) a) (err "FUCK!!!!!!!"))
   (if (not (lambda? f))
     (cond (and (vector? f) (some #{:hole} f)) ;; (;4)3 => (3;4)
           [e (fill-vector-holes f a)]
           (or (stream? f) (stream? a) (some stream? a))
           (index-from-streams e f a)
           :else [e (index-deep f a)])
-    (if (and (not (some #{:hole} a))
+    (if (and (not (some #{:hole} (null! "args" a)))
              (some #{(count a)} (lambda-rank f)))
       (if (and (not (stream-aware? f (count a)))
-               (some stream? a))
-        (invoke-with-streams e f a)
+               (null! "some stream?" (some stream? a)))
+        (invoke-with-streams e (null! "invoking-with-streams" f) a)
         (if (and (not (snapshot-aware? f (count a)))
                  (some snapshot? a))
           ;; TODO We need to find the source!
@@ -1341,20 +1353,26 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn resolve-adverbed [tu e x]
   "Find the value of x, and adverbed expr"
-  (let [m (adverbs (keyword (:adverb x)))]
+  (let [m    (adverbs (keyword (:adverb x)))
+        make (fn [o]
+               (merge o {:f (m o)
+                         :pass-global-env true
+                         :snapshot-aware [2]
+                         :text (str (:text o) (:adverb x))}))]
     (if (contains? x :lhs) ; eval must be right to left!
       (if (contains? x :rhs)
         (let [[e2 r] (kresolve tu e  (:rhs x))
               [e3 o] (kresolve tu e2 (:verb x))
               [e4 l] (kresolve tu e3 (:lhs x))]
-          (invoke e4 (merge o {:f (m o) :pass-global-env true}) [l r]))
+          (null! "invoking adverbed on" l r)
+          (invoke e4 (make o) [l r]))
         (err "nyi: bind lhs of adverbed expr (partial)"))
       (if (contains? x :rhs)
         (let [[e2 r] (kresolve tu e  (:rhs x))
               [e3 o] (kresolve tu e2 (:verb x))]
-          (invoke e3 (merge o {:f (m o) :pass-global-env true}) [r]))
+          (invoke e3 (make o) [r]))
         (let [[e2 o] (kresolve tu e (:verb x))]
-          [e2 (merge o {:f (m o) :pass-global-env true})])))))
+          [e2 (make o)])))))
 
 (defn resolve-assign [tu e x]
   "Resolve the assignment specified by x"
@@ -1924,7 +1942,9 @@
 ;; the formula changes.
 (defn make-monadic-stream [e f s]
   (let [g       (lambda-callable e f)
-        h       (if (snapshot-aware? f 1) g #(g (snapshot-value %)))
+        h       (if (snapshot-aware? f 1)
+                  g
+                  (fn [x] (null! (keys f)) (g (snapshot-value x))))
         obs     (atom nil)
         subs    (atom [])
         on-done (fn []
@@ -1934,6 +1954,7 @@
         on-next (fn [ssi] ;; snapshot in
                   (let [sso (derive-snapshot ssi (h ssi))]
                     (when-not (swallow? sso)
+                      (null! "sso" sso)
                       (doseq [s @subs] ((:on-next s) sso)))
                     (when (snapshot-final? sso)
                       (on-done))))
@@ -2132,7 +2153,17 @@
                   :unsub    #(swap! subs except %)}]
     (swap! test-streams conj r)
     (reset! stream r)))
+(defn push-all-test-streams []
+  ;; push events from all test streams randomly
+  (loop [s @test-streams]
+    (let [i (int (rand (count s)))]
+      (if ((:push (s i)))
+        (recur s)
+        (if (< 1 (count s))
+          (recur (removev s i)))))))
 (defn wait [x]
+  "Force all test streams (created via into-stream) to push all
+  their data and wait for all callbacks to complete."
   (if-not (stream? x)
     x
     (let [extract (atom false)
@@ -2143,7 +2174,7 @@
                      (swap! r conj v))
           obs     {:on-done on-done :on-next on-next}]
       ((:sub x) obs)
-      (doseq [s @test-streams] ((:push-all s))) ;; TODO randomize
+      (push-all-test-streams)
       (if @extract (first @r) @r))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
