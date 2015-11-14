@@ -10,9 +10,8 @@
       show`click ev dom`go;      / dom with sym => single element by ID
       dom[`result]text str every 2000;
       / dom with string => collection of elements via CSS selector
-      (dom".cx"){x text'$y*1+!x}`clientX of`mousemove ev dom`box;
-      / The following don't work yet...
-      / (dom`result)text str{x@&0=x mod 2}`clientX of`mousemove ev dom`box;
+      (dom".cx"){x text'$y*1+!x}/:{x@&0=x mod 2}`clientX of`mousemove ev dom`box;
+      / The following don't work yet... 
       / dom[`result],/:`click ev dom`go;
       / dom[`result],/:{x;"<p>foo</p>"}'`click ev dom`go;
     </script>
