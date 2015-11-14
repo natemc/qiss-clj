@@ -133,8 +133,14 @@
     (is (= [0 1 2 0 1] (keval "5#!3")))
     (is (= [1 2 0 1 2] (keval "-5#!3"))))
   (testing "m n#x (where m and n >= 0) is 2d reshape"
+    (is (= [] (keval "2 5#!0")))
     (is (= [[0 1 2 3 4] [5 6 7 8 9]] (keval "2 5#!10")))
-    (is (= [[0 1] [2 3] [4 5] [6 7] [8 9]] (keval "5 2#!10")))))
+    (is (= [[0 1] [2 3] [4 5] [6 7] [8 9]] (keval "5 2#!10"))))
+  (testing "m n#x (where m < 0) is reshape with fixed cols and flex rows"
+    (is (= [[0 1 2] [3 4 5] [6 7]] (keval "-1 3#!8")))
+    (is (= [[0 1 2]] (keval "-1 3#!3")))
+    (is (= [[0 1]] (keval "-1 3#!2")))
+    (is (= [] (keval "-1 3#!0")))))
 (deftest test-underscore
   (testing "n _ container => drop 1st n"
     (is (= [2 3 4] (keval "2_!5")))
@@ -165,6 +171,8 @@
     (is (= [[1 2 3] [2 4 6]] (keval "1 2 3*/:1 2"))))
   (testing "adverbed functions can be assigned"
     (is (= 12 (keval "{a:+/;a[0;3 4 5]}[]"))))
+  (testing "' can be each-both"
+    (is (= [2 4 6] (keval "1 2 3{x+y}'1 2 3"))))
   (testing "adverbs can be stacked"
     (is (= [1 2 3 4 5 6 7 8 9] (keval ",//(1 2 3;(4 5 6;7 8 9))")))
     (is (= [[[1 3] [1 4]] [[2 3] [2 4]]] (keval "1 2,/:\\:3 4")))
@@ -522,6 +530,9 @@
   (testing "overtake from a stream works"
     (is (= [0 1 2 0 1] (keval "<=5#>=!3")))
     (is (= [1 2 0 1 2] (keval "<=-5#>=!3"))))
+  (testing "taking a box (reshaping) from a stream works"
+    (is (= [[0 1 2] [3 4 5] [6 7 8]] (keval "<=3 3#>=!10")))
+    (is (= [[0 1 2] [3 4 5] [6 7 8] [9]] (keval "<=-1 3#>=!10"))))
   (testing "drop from a stream does"
     (is (= [1 2] (keval "<=1_>=!3")))
     (is (= [1 2] (keval "<={1_x}@>=!3")))

@@ -583,7 +583,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn take-from-stream [n x]
   (let [subs    (atom [])
-        w       (atom []) ; window
+        w       (atom []) ; window for overtaking
         on-done (fn []
                   (let [ww @w]
                     (doseq [j (range (count ww) n)]
@@ -658,7 +658,7 @@
                 (matrix-from-vector s u (vec (drop (* b t) v)))))))))
 (defn fixed-cols-flex-rows [n v]
   (if (<= (count v) n)
-    v
+    [v]
     (let [r (/ (count v) (float n))
           t (int (Math/ceil r))      ;; rows
           u (int (Math/floor r))]    ;; full rows
@@ -668,19 +668,51 @@
               (matrix-from-vector 1
                                   (- (count v) (* u n))
                                   (vec (drop (* u n) v))))))))
+(defn fixed-cols-from-stream [n x]
+  (let [subs    (atom [])
+        w       (atom []) ; window for collecting
+        on-done (fn []
+                  (let [ww @w]
+                    (when (< 0 (count ww))
+                      (doseq [s @subs] ((:on-next s)
+                                        (make-snapshot 0 ww))))
+                    (doseq [s @subs] ((:on-done s)))
+                    (reset! subs nil)))
+        on-next (fn [ss]
+                  (if (< 0 n)
+                    (let [ww (swap! w conj (snapshot-value ss))]
+                      (when (= (count ww) n)
+                        (doseq [s @subs] ((:on-next s)
+                                          (derive-snapshot ss ww)))
+                        (reset! w [])))))]
+    ((:sub x) {:on-done on-done :on-next on-next})
+    {:sources (:sources x)
+     :stream  true
+     :sub     #(if (= n 0)
+                 ((:on-done %))
+                 (swap! subs conj %))
+     :unsub   #(swap! subs except %)}))
+(defn reshape-from-stream [x y]
+  (let [[m n] x]
+    (cond (< m 0) (fixed-cols-from-stream n y)
+          (< n 0) (err "cannot take unbounded cols from a stream")
+          :else   (take-from-stream m (fixed-cols-from-stream n y)))))
+(defn reshape-from-vector [x y]
+  (if (= 0 (count y))
+    []
+    (let [[m n] x]
+      (cond (< m 0) (fixed-cols-flex-rows n y)
+            (< n 0) (fixed-rows-flex-cols m y)
+            :else   (matrix-from-vector m n y)))))
 (defn reshape [x y]
   (cond (= 1 (count x))
         (err "does reshape with length 1 vector on lhs make sense?")
-        (< 2 (count x))
-        (err "nyi: reshape with lhs longer than 2")
         (< 1 (apply + (map #(if (< % 0) 1 0) x)))
         (err "reshape can take at most one infinite dimension")
-        (vector? y)
-        (let [[m n] x]
-          (cond (< m 0) (fixed-cols-flex-rows n y)
-                (< n 0) (fixed-rows-flex-cols m y)
-                :else   (matrix-from-vector m n y)))
-        ;; (stream? y) ;; TODO
+        (< 2 (count x))
+        (err "nyi: reshape with lhs longer than 2")
+        (vector? y) (reshape-from-vector x y)
+        (stream? y) (reshape-from-stream x y)
         :else
         (err "nyi: reshape only supports vector on rhs")))
 (defn ktake [x y]
@@ -851,8 +883,13 @@
   the arity of f."
   (fn [e & x]
     (let [g (lambda-callable e f)]
-      (apply #(mapv (fn [& a] (apply g a)) %)
-             x))))
+      (if (some stream? x)
+        (if (not= 1 (count x))
+          (err "nyi: multi-arg ' with streams")
+          (make-stream e f x))
+        (if-not (apply = (mapv count x))
+          (err "length: collections of unequal length in '")
+          (apply (partial mapv (fn [& a] (apply g a))) x))))))
 (defn each-left [f]
   "Create a dyadic function from f (which must be dyadic) that loops
   over its lhs argument"
