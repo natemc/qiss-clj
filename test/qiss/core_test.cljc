@@ -131,7 +131,10 @@
     (is (= (keval "([]a:`c`d;b:3 4)") (keval "-2#([]a:`a`b`c`d;b:1 2 3 4)"))))
   (testing "n#x where n>#x => overtake"
     (is (= [0 1 2 0 1] (keval "5#!3")))
-    (is (= [1 2 0 1 2] (keval "-5#!3")))))
+    (is (= [1 2 0 1 2] (keval "-5#!3"))))
+  (testing "m n#x (where m and n >= 0) is 2d reshape"
+    (is (= [[0 1 2 3 4] [5 6 7 8 9]] (keval "2 5#!10")))
+    (is (= [[0 1] [2 3] [4 5] [6 7] [8 9]] (keval "5 2#!10")))))
 (deftest test-underscore
   (testing "n _ container => drop 1st n"
     (is (= [2 3 4] (keval "2_!5")))

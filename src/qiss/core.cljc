@@ -634,11 +634,60 @@
         (table? x)       (count (first (dict-val x)))
         (keyed-table? x) (count (first (dict-val (dict-key x))))
         :else            1))
+(defn matrix-from-vector [m n v] ;; rows cols vec
+  (mapv (fn [r]
+          (mapv (fn [c] (v (mod (+ (* r n) c) (count v))))
+                (range n)))
+        (range m)))
+(defn fixed-rows-flex-cols [m v]
+  ;; This is not exactly how k does it.
+  ;; k gives t cols until you don't have enough elements
+  ;; which sometimes yields fewer than m rows.
+  ;; This gives fewer than t cols earlier so you always
+  ;; get m rows (unless count[v]<m).
+  (if (<= (count v) m)
+    (mapv (fn [x] [x]) v)
+    (let [c (/ (count v) (float m))
+          t (int (Math/ceil c))             ;; cols in big rows
+          u (int (Math/floor c))]           ;; cols in small rows
+      (if (= t u)
+        (matrix-from-vector m t v)
+        (let [s (- (int (/ 1 (- c (int c)))) 1) ;; # of small rows
+              b (- m s)]                        ;; # of big rows
+          (catv (matrix-from-vector b t v)
+                (matrix-from-vector s u (vec (drop (* b t) v)))))))))
+(defn fixed-cols-flex-rows [n v]
+  (if (<= (count v) n)
+    v
+    (let [r (/ (count v) (float n))
+          t (int (Math/ceil r))      ;; rows
+          u (int (Math/floor r))]    ;; full rows
+      (if (= t u)
+        (matrix-from-vector t n v)
+        (catv (matrix-from-vector u n v)
+              (matrix-from-vector 1
+                                  (- (count v) (* u n))
+                                  (vec (drop (* u n) v))))))))
+(defn reshape [x y]
+  (cond (= 1 (count x))
+        (err "does reshape with length 1 vector on lhs make sense?")
+        (< 2 (count x))
+        (err "nyi: reshape with lhs longer than 2")
+        (< 1 (apply + (map #(if (< % 0) 1 0) x)))
+        (err "reshape can take at most one infinite dimension")
+        (vector? y)
+        (let [[m n] x]
+          (cond (< m 0) (fixed-cols-flex-rows n y)
+                (< n 0) (fixed-rows-flex-cols m y)
+                :else   (matrix-from-vector m n y)))
+        ;; (stream? y) ;; TODO
+        :else
+        (err "nyi: reshape only supports vector on rhs")))
 (defn ktake [x y]
   "x#y take from y the elements specified by x"
-  ;; TODO: support stream for x
-  (if (and (coll? x) (not (empty? x)) (number? (first x)))
-    (err "nyi: reshape") ;; TODO: take a box
+  ;; TODO: support stream for x?
+  (if (and (coll? x) (not (empty? x)) (every? number? x))
+    (reshape (mapv #(if (bool? %) (if % 1 0) %) x) y)
     (let [n (if (bool? x) (if x 1 0) x)]
       (cond (not (coll? y))  (vec (repeat n y))
             (vector? y)      (take-from-vec n y)
@@ -802,7 +851,8 @@
   the arity of f."
   (fn [e & x]
     (let [g (lambda-callable e f)]
-      (apply (partial mapv (fn [& a] (apply g a))) x))))
+      (apply #(mapv (fn [& a] (apply g a)) %)
+             x))))
 (defn each-left [f]
   "Create a dyadic function from f (which must be dyadic) that loops
   over its lhs argument"
@@ -1808,6 +1858,8 @@
   (cond (= 0 (count x))   "()"
         (char? (first x)) (str/join x)
         (= 1 (count x))   (str "," (stringify (first x)))
+        (coll? (first x)) (str/join "\n" (mapv stringify x))
+;;        (coll? (first x)) (str "(" (str/join ";" (mapv stringify x)) ")")
         :else             (str/join " " (mapv stringify x))))
 (defn stringify [x]
   (cond (vector? x)      (stringify-vector x)
