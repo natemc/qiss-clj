@@ -544,7 +544,20 @@
     (is (= [0 2] (keval "<={x@&0=x mod 2}@>=!3"))))
   (testing "multiple streams in the same computation works"
     (is (some #{(keval "<=(>=!3)*>=!3")}
-              [[0 2 4] [0 1 2 4] [0 0 2 4] [0 0 1 2 4] [0 0 0 2 4]]))))
+              [[0 2 4] [0 1 2 4] [0 0 2 4] [0 0 1 2 4] [0 0 0 2 4]])))
+  (testing "/: over a stream works"
+    (is (= [[0 0] [1 1]] (keval "<=2#/:>=!2"))))
+  (testing "\\: over a stream works"
+    (is (= [[] [3] [3 2] [3 2 1]] (keval "<=(>=!4)#\\:3 2 1"))))
+  (testing "/ over a stream works"
+    (is (= 6 (keval "<=+/>=!4")))
+    (is (= 9 (keval "<=3+/>=!4"))))
+  (testing "\\ over a stream works"
+    (is (= [0 1 3 6] (keval "<=+\\>=!4")))
+    (is (= [3 4 6 9] (keval "<=3+\\>=!4"))))
+  (testing "': over a stream works"
+    (is (= [3 7 4 6] (keval "<=-':>=3 10 14 20")))
+    (is (= [2 7 4 6] (keval "<=1-':>=3 10 14 20")))))
 ;; ;; gave up on this one: couldn't fix the <exprx> rule
 ;; ;; (testing "select"
 ;; ;;       (is (= 1 (count

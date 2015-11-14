@@ -795,78 +795,121 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; adverbs
 ;; TODO: How should adverbs work with streams?
-;;   Never?  Seems a bad idea
-;;   Always the same as if there were no adverb?
-;;   Require the use of adverbs with streams?  Seems a bad idea
-(defn install-multi-event-handler [f x]
-  #?(:cljs (dom/listen! (:element x) (:event x) f)))
-
+(declare make-stream)
 (defn each [f] ; TODO: atomize when f is dyadic? e.g., 3+'1 2 3
   "Create a function from f that loops over all arguments (like
   clojure's map).  The valence/arity of the created function matches
   the arity of f."
   (fn [e & x]
-    (let [p (lambda-callable e f)]
-;;      (if (and (= 1 (count x)) (stream? (first x)))
-;;        (install-multi-event-handler p (first x))
-      (apply (partial mapv (fn [& a] (apply p a))) x))))
+    (let [g (lambda-callable e f)]
+      (apply (partial mapv (fn [& a] (apply g a))) x))))
 (defn each-left [f]
   "Create a dyadic function from f (which must be dyadic) that loops
   over its lhs argument"
   (fn [e x y]
-    (let [p #((lambda-callable e f) % y)] 
-;;      (if (and (= 1 (count x)) (stream? (first x)))
-;;        (install-multi-event-handler p (first x))
-      (mapv p x))))
+    (let [g #((lambda-callable e f) % y)] 
+      (if (stream? x)
+        (make-stream e {:f g} [x])
+        (mapv g x)))))
+(defn stream-delta [f]
+  (fn [p q]
+    (if (nil? p)
+      q
+      (derive-snapshot q (apply f (map snapshot-value [q p]))))))
 (defn each-prior [f]
   "Create a dyadic function from f (which must be dyadic) that loops
   over a list passing each element and its prior, e.g., deltas is 0-':x"
   (fn [e & x]
-    (let [p (lambda-callable e f)]
+    (let [g (lambda-callable e f)]
       (if (= 1 (count x))
-        (let [q (first x)]
-          (vec (cons (first q) (map p (next q) (drop-last q)))))
-        (let [q (second x)]
-          (vec (map p q (cons (first x) (drop-last q)))))))))
+        (let [j (first x)]
+          (if-not (stream? j)
+            (vec (cons (first j) (map g (next j) (drop-last j))))
+            (let [p       (atom nil)
+                  subs    (atom [])
+                  on-next #(let [d ((stream-delta g) @p %)]
+                             (reset! p %)
+                             (doseq [s @subs] ((:on-next s) d)))]
+              ((:sub j) {:on-next on-next
+                         :on-done (fn [] (doseq [s @subs] ((:on-done s))))})
+              {:stream true :sub #(swap! subs conj %)})))
+        (let [[i j] x]
+          (if-not (stream? j)
+            (vec (map g j (cons i (drop-last j))))
+            (let [p    (atom (if (snapshot? i) i (make-snapshot 0 i)))
+                  subs (atom [])
+                  on-next #(let [d ((stream-delta g) @p %)]
+                             (reset! p %)
+                             (doseq [s @subs] ((:on-next s) d)))]
+              ((:sub j) {:on-next on-next
+                         :on-done (fn [] (doseq [s @subs] ((:on-done s))))})
+              {:stream true :sub #(swap! subs conj %)})))))))
 (defn each-right [f]
   "Create a dyadic function from f (which must be dyadic) that loops
   over its rhs argument"
   (fn [e x y]
-    (let [g (lambda-callable e f)
-          h (if (snapshot-aware? f 2)
-              g
-              (fn [x y]
-                (let [lhs (if (snapshot? x) (snapshot-value x) x)]
-                  (if (snapshot? y)
-                    (derive-snapshot y (g lhs (snapshot-value y)))
-                    (let [r (mapv (partial g lhs) y)]
-                      (if (snapshot? x)
-                        (derive-snapshot x r)
-                        r))))))]
-      (h x y))))
-;;           p (partial h x)]
-;;       (if (snapshot? y)
-;;         (derive-snapshot y)
-;; ;;      (if (and (= 1 (count y)) (stream? (first y)))
-;; ;;        (install-multi-event-handler p (first y))
-;;       (mapv p y))))
+    (let [g #((lambda-callable e f) x %)]
+      (if (stream? y)
+        (make-stream e {:f g} [y])
+        (mapv g y)))))
+(defn stream-push-last [subs x]
+  (doseq [s subs] ((:on-next s) x) ((:on-done s))))
+(defn stream-reducer [f]
+  (fn [p q]
+    (if (nil? p)
+      q
+      (derive-snapshot q (apply f (map snapshot-value [p q]))))))
 (defn over [f]
   "Create a dyadic function from f (which must be dyadic) that
   performs a reduce (aka fold left) over its rhs argument"
   (fn [e & x]
-    (let [p (lambda-callable e f)]
+    (let [g (lambda-callable e f)]
       (if (= 1 (count x))
-        (reduce p (first x))
-        (reduce p (first x) (second x))))))
+        (let [j (first x)]
+          (if-not (stream? j)
+            (reduce g j)
+            (let [a    (atom nil) ;; accumulator
+                  subs (atom [])
+                  push (fn [] (stream-push-last @subs
+                                                (assoc @a :extract true)))]
+              ((:sub j) {:on-next #(swap! a (stream-reducer g) %)
+                         :on-done push})
+              {:stream true :sub #(swap! subs conj %)})))
+        (let [[i j] x]
+          (if-not (stream? j)
+            (reduce g i j)
+            (let [a    (atom (if (snapshot? i) i (make-snapshot 0 i)))
+                  subs (atom [])
+                  push (fn [] (stream-push-last @subs
+                                                (assoc @a :extract true)))]
+              ((:sub j) {:on-next #(swap! a (stream-reducer g) %)
+                         :on-done push})
+              {:stream true :sub #(swap! subs conj %)})))))))
 (defn scan [f]
   "Create a dyadic function from f (which must be dyadic) that
   performs reductions (a fold left but returning all intermediate
   results) over its rhs argument"
   (fn [e & x]
-    (let [p (lambda-callable e f)]
-      (vec (drop 1 (if (= 1 (count x))
-                     (reductions f (first x))
-                     (reductions p (first x) (second x))))))))
+    (let [g (lambda-callable e f)]
+      (if (= 1 (count x))
+        (let [j (first x)]
+          (if-not (stream? j)
+            (vec (drop 1 (reductions g j)))
+            (let [a    (atom nil)
+                  subs (atom [])]
+              ((:sub j) {:on-next #(let [r (swap! a (stream-reducer g) %)]
+                                     (doseq [s @subs] ((:on-next s) r)))
+                         :on-done (fn [] (doseq [s @subs] ((:on-done s))))})
+              {:stream true :sub #(swap! subs conj %)})))
+        (let [[i j] x]
+          (if-not (stream? j)
+            (vec (drop 1 (reductions g i j)))
+            (let [a    (atom (if (snapshot? i) i (make-snapshot 0 i)))
+                  subs (atom [])]
+              ((:sub j) {:on-next #(let [r (swap! a (stream-reducer g) %)]
+                                     (doseq [s @subs] ((:on-next s) r)))
+                         :on-done (fn [] (doseq [s @subs] ((:on-done s))))})
+              {:stream true :sub #(swap! subs conj %)})))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; @ operator
 (declare invoke)
@@ -1089,7 +1132,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (def ops {
           (keyword "~") {:f tilde  :text "~" :rank [1 2]}
-          :! {:f bang :text "!" :rank [1 2]} ;; :snapshot-aware [1]}
+          :! {:f bang :text "!" :rank [1 2] :snapshot-aware [1]}
           :at {:f at :pass-global-env true :text "@" :rank [1 2 3 4]}
           :dot {:f dot :pass-global-env true :text "." :rank [1 2 3 4]
                 :snapshot-aware [2]}
@@ -1363,13 +1406,18 @@
   [x] (some #{2} (lambda-rank x)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; adverbs and streams, hmm
+;; first thought is that an adverb turns a stream it is iterating over
+;; into a series of values, but leaves others alone.  That may mean
+;; adverbs must all be stream aware.
 (defn resolve-adverbed [tu e x]
   "Find the value of x, and adverbed expr"
   (let [m    (adverbs (keyword (:adverb x)))
         make (fn [o]
                (merge o {:f (m o)
                          :pass-global-env true
-                         :snapshot-aware [2]
+                         :stream-aware [1 2]
+                         ;; :snapshot-aware [2] ;; inherit from o
                          :text (str (:text o) (:adverb x))}))]
     (if (contains? x :lhs) ; eval must be right to left!
       (if (contains? x :rhs)
