@@ -175,6 +175,7 @@
 (defn stream? [x] (:stream x))
 (defn stream-aware? [x r] ;; lambda, rank
   (and (:stream-aware x) (some #{r} (:stream-aware x))))
+(defn stream-sources [x] (:sources x))
 (defn table? [x] (and (map? x) (:k x) (:v x) (:t x)))
 (defn add-to-dict [d k v] (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
 (defn catv "concat x and y into a vector" [x y] (vec (concat x y)))
@@ -539,12 +540,49 @@
                                           (map vector (iterate inc 0) x))))
         (dict? x)   (index (dict-key x) (group (dict-val x)))
         :else       (err "can't group " x)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn make-stream
+   ;; a stream is an observeable and an observer
+  ([sources on-next]
+   (make-stream sources on-next (fn [subs] nil)))
+  ([sources on-next on-done]
+   (let [subs   (atom [])
+         ondone (fn []
+                  (let [s @subs]
+                    (on-done s)
+                    (doseq [x s] ((:on-done x)))
+                    (reset! subs nil)))
+         onnext (fn [ss]
+                 (let [r (on-next @subs ss)]
+;;                    (when-not (swallow? r)
+;;                      (doseq [s @subs] ((:on-next s) r)))
+                   (when (snapshot-final? r)
+                     (ondone))))]
+     {:on-done ondone
+      :on-next onnext
+      :sources sources
+      :stream  true
+      :sub     #(swap! subs conj %)
+      :unsub   #(swap! subs except %)})))
+(defn join-vec-to-stream [v s]
+  (let [started (atom 0) ;; 1 => first time we got an event from s
+        push-v  (fn [subs] (doseq [i v]
+                             (let [ss (make-snapshot (:source s) i)]
+                               (doseq [s subs] ((:on-next s) ss)))))
+        on-done (fn [subs]
+                  (when (= 1 (swap! started inc)) (push-v subs)))
+        on-next (fn [subs ssi]
+                  (when (= 1 (swap! started inc)) (push-v subs))
+                  (doseq [s subs] ((:on-next s) ssi)))
+        r       (make-stream (stream-sources s) on-next on-done)]
+    ((:sub s) r)
+    r))
 (defn join
   ",x (enlist) and x,y (join)"
   ([x] [x])
-  ([x y] (cond (vector? x)             (if (vector? y)
-                                         (vec (concat x y))
-                                         (conj x y))
+  ([x y] (cond (vector? x)             (cond (vector? y) (vec (concat x y))
+                                             (stream? y) (join-vec-to-stream x y)
+                                             :else       (conj x y))
                (vector? y)              (vec (cons x y))
                (dict? x)                (if (dict? y)
                                           ((atomize (fn [_ y] y)) x y)
@@ -582,51 +620,44 @@
     (take-from-table n (unkey-table x))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn take-from-stream [n x]
-  (let [subs    (atom [])
-        w       (atom []) ; window for overtaking
-        on-done (fn []
+  (let [w       (atom []) ; window for overtaking
+        obs     (atom nil)
+        on-done (fn [subs]
+                  ((:unsub x) @obs)
                   (let [ww @w]
                     (doseq [j (range (count ww) n)]
-                      (doseq [s @subs] ((:on-next s) (ww (mod j (count ww)))))))
-                  (doseq [s @subs] ((:on-done s)))
-                  (reset! subs nil))
-        on-next (fn [ss]
+                      (doseq [s subs]
+                        ((:on-next s) (ww (mod j (count ww))))))))
+        on-next (fn [subs ss]
                   (let [ww (swap! w (fn [oldw]
                                       (if (< (count oldw) n)
                                         (conj oldw ss)
                                         oldw)))]
-                    (doseq [s @subs] ((:on-next s) ss))
-                    (when (= (count ww) n) (on-done))))]
-    ((:sub x) {:on-done on-done :on-next on-next})
-    {:sources (:sources x)
-     :stream  true
-     :sub     #(if (= n 0)
-                 ((:on-done %))
-                 (swap! subs conj %))
-     :unsub   #(swap! subs except %)}))
+                    (doseq [s subs] ((:on-next s) ss))
+                    (when (= (count ww) n) (make-snapshot-final ss))))
+        s       (make-stream (:sources x) on-next on-done)
+        ;; override sub to call on-done immediately if 0#
+        os      (assoc s :sub #(if (= n 0) ((:on-done %)) ((:sub s) %)))]
+    ((:sub x) (reset! obs os))
+    os))
 (defn take-last-from-stream [n x]
-  (let [subs    (atom [])
-        w       (atom []) ; window
-        on-done (fn []
+  (let [w       (atom []) ; window
+        on-done (fn [subs]
                   (let [ww @w]
                     (doseq [i (reverse (range n))]
-                      (doseq [s @subs]
+                      (doseq [s subs]
                         ((:on-next s) (ww (- (count ww)
                                              1
-                                             (mod i (count ww))))))))
-                  (doseq [s @subs] ((:on-done s)))
-                  (reset! subs nil))
-        on-next (fn [ss]
+                                             (mod i (count ww)))))))))
+        on-next (fn [subs ss]
                   (swap! w (fn [ww]
                              (conj (if (< (count ww) n)
                                      ww
                                      (vec (drop 1 ww)))
-                                   ss))))]
-    ((:sub x) {:on-done on-done :on-next on-next})
-    {:sources (:sources x)
-     :stream  true
-     :sub     #(swap! subs conj %)
-     :unsub   #(swap! subs except %)}))
+                                   ss))))
+        s       (make-stream (:sources x) on-next on-done)]
+    ((:sub x) s)
+    s))
 (defn kcount [x]
   "#x (count)  returns 1 for atoms"
   (cond (vector? x)      (count x)
@@ -669,29 +700,24 @@
                                   (- (count v) (* u n))
                                   (vec (drop (* u n) v))))))))
 (defn fixed-cols-from-stream [n x]
-  (let [subs    (atom [])
-        w       (atom []) ; window for collecting
-        on-done (fn []
+  (let [w       (atom []) ; window for collecting snapshots
+        on-done (fn [subs]
                   (let [ww @w]
                     (when (< 0 (count ww))
-                      (doseq [s @subs] ((:on-next s)
-                                        (make-snapshot 0 ww))))
-                    (doseq [s @subs] ((:on-done s)))
-                    (reset! subs nil)))
-        on-next (fn [ss]
+                      (doseq [s subs] ((:on-next s)
+                                        (make-snapshot 0 ww))))))
+        on-next (fn [subs ss]
                   (if (< 0 n)
                     (let [ww (swap! w conj (snapshot-value ss))]
                       (when (= (count ww) n)
-                        (doseq [s @subs] ((:on-next s)
-                                          (derive-snapshot ss ww)))
-                        (reset! w [])))))]
-    ((:sub x) {:on-done on-done :on-next on-next})
-    {:sources (:sources x)
-     :stream  true
-     :sub     #(if (= n 0)
-                 ((:on-done %))
-                 (swap! subs conj %))
-     :unsub   #(swap! subs except %)}))
+                        (reset! w [])
+                        (doseq [s subs] ((:on-next s)
+                                         (derive-snapshot ss ww)))))))
+        s       (make-stream (:sources x) on-next on-done)
+        ;; override sub to call on-done immediately if 0#
+        os      (assoc s :sub #(if (= n 0) ((:on-done %)) ((:sub s) %)))]
+    ((:sub x) os)
+    os))
 (defn reshape-from-stream [x y]
   (let [[m n] x]
     (cond (< m 0) (fixed-cols-from-stream n y)
@@ -811,38 +837,26 @@
   (let [i (mapv range (next (deltas (conj x (kcount y)))))]
     (index y (mapv (fn [p q] (mapv #(+ p %) q)) x i))))
 (defn drop-from-stream [n x]
-  (let [subs    (atom [])
-        i       (atom 0)
-        on-done (fn []
-                  (doseq [s @subs] ((:on-done s)))
-                  (reset! subs nil))
-        on-next (fn [ss]
+  (let [i       (atom 0)
+        on-next (fn [subs ss]
                   (let [j (swap! i #(+ 1 (min n %)))]
                     (when (< n j)
-                      (doseq [s @subs] ((:on-next s) ss)))))]
-    ((:sub x) {:on-done on-done :on-next on-next})
-    {:sources (:sources x)
-     :stream  true
-     :sub     #(swap! subs conj %)
-     :unsub   #(swap! subs except %)}))
+                      (doseq [s subs] ((:on-next s) ss)))))
+        s       (make-stream (:sources x) on-next)]
+    ((:sub x) s)
+    s))
 (defn drop-last-from-stream [n x]
-  (let [subs    (atom [])
-        w       (atom []) ; window
-        on-done (fn []
-                  (doseq [s @subs] ((:on-done s)))
-                  (reset! subs nil))
-        on-next (fn [ss]
+  (let [w       (atom []) ; window
+        on-next (fn [subs ss]
                   (let [ww (swap! w (fn [oldw]
                                       (if (<= (count oldw) n)
                                         (conj oldw ss)
                                         (conj (vec (drop 1 oldw)) ss))))]
                     (when (< n (count ww))
-                      (doseq [s @subs] ((:on-next s) (first ww))))))]
-    ((:sub x) {:on-done on-done :on-next on-next})
-    {:sources (:sources x)
-     :stream  true
-     :sub     #(swap! subs conj %)
-     :unsub   #(swap! subs except %)}))
+                      (doseq [s subs] ((:on-next s) (first ww))))))
+        s       (make-stream (:sources x) on-next)]
+    ((:sub x) s)
+    s))
 (defn kdrop [x y]
   "Remove the first x elements from y (negative x => drop from the back)"
   (let [o (if (<= 0 x) (partial drop x) (partial drop-last (- x)))]
@@ -876,7 +890,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; adverbs
 ;; TODO: How should adverbs work with streams?
-(declare make-stream)
+(declare make-func-stream)
 (defn each [f] ; TODO: atomize when f is dyadic? e.g., 3+'1 2 3
   "Create a function from f that loops over all arguments (like
   clojure's map).  The valence/arity of the created function matches
@@ -886,7 +900,7 @@
       (if (some stream? x)
         (if (not= 1 (count x))
           (err "nyi: multi-arg ' with streams")
-          (make-stream e f x))
+          (make-func-stream e f x))
         (if-not (apply = (mapv count x))
           (err "length: collections of unequal length in '")
           (apply (partial mapv (fn [& a] (apply g a))) x))))))
@@ -896,7 +910,7 @@
   (fn [e x y]
     (let [g #((lambda-callable e f) % y)] 
       (if (stream? x)
-        (make-stream e {:f g} [x])
+        (make-func-stream e {:f g} [x])
         (mapv g x)))))
 (defn stream-delta [f]
   (fn [p q]
@@ -913,31 +927,31 @@
           (if-not (stream? j)
             (vec (cons (first j) (map g (next j) (drop-last j))))
             (let [p       (atom nil)
-                  subs    (atom [])
-                  on-next #(let [d ((stream-delta g) @p %)]
-                             (reset! p %)
-                             (doseq [s @subs] ((:on-next s) d)))]
-              ((:sub j) {:on-next on-next
-                         :on-done (fn [] (doseq [s @subs] ((:on-done s))))})
-              {:stream true :sub #(swap! subs conj %)})))
+                  on-next (fn [subs ss]
+                            (let [d ((stream-delta g) @p ss)]
+                             (reset! p ss)
+                             (doseq [s subs] ((:on-next s) d))))
+                  s       (make-stream (:sources j) on-next)]
+              ((:sub j) s)
+              s)))
         (let [[i j] x]
           (if-not (stream? j)
             (vec (map g j (cons i (drop-last j))))
-            (let [p    (atom (if (snapshot? i) i (make-snapshot 0 i)))
-                  subs (atom [])
-                  on-next #(let [d ((stream-delta g) @p %)]
-                             (reset! p %)
-                             (doseq [s @subs] ((:on-next s) d)))]
-              ((:sub j) {:on-next on-next
-                         :on-done (fn [] (doseq [s @subs] ((:on-done s))))})
-              {:stream true :sub #(swap! subs conj %)})))))))
+            (let [p       (atom (if (snapshot? i) i (make-snapshot 0 i)))
+                  on-next (fn [subs ss]
+                            (let [d ((stream-delta g) @p ss)]
+                              (reset! p ss)
+                              (doseq [s subs] ((:on-next s) d))))
+                  s       (make-stream (:sources j) on-next)]
+              ((:sub j) s)
+              s)))))))
 (defn each-right [f]
   "Create a dyadic function from f (which must be dyadic) that loops
   over its rhs argument"
   (fn [e x y]
     (let [g #((lambda-callable e f) x %)]
       (if (stream? y)
-        (make-stream e {:f g} [y])
+        (make-func-stream e {:f g} [y])
         (mapv g y)))))
 (defn stream-push-last [subs x]
   (doseq [s subs] ((:on-next s) x) ((:on-done s))))
@@ -955,23 +969,25 @@
         (let [j (first x)]
           (if-not (stream? j)
             (reduce g j)
-            (let [a    (atom nil) ;; accumulator
-                  subs (atom [])
-                  push (fn [] (stream-push-last @subs
-                                                (assoc @a :extract true)))]
-              ((:sub j) {:on-next #(swap! a (stream-reducer g) %)
-                         :on-done push})
-              {:stream true :sub #(swap! subs conj %)})))
+            (let [a       (atom nil) ;; accumulator
+                  on-done (fn [subs]
+                            (stream-push-last subs
+                                              (assoc @a :extract true)))
+                  on-next (fn [subs ss] (swap! a (stream-reducer g) ss))
+                  s       (make-stream (:sources j) on-next on-done)]
+              ((:sub j) s)
+              s)))
         (let [[i j] x]
           (if-not (stream? j)
             (reduce g i j)
-            (let [a    (atom (if (snapshot? i) i (make-snapshot 0 i)))
-                  subs (atom [])
-                  push (fn [] (stream-push-last @subs
-                                                (assoc @a :extract true)))]
-              ((:sub j) {:on-next #(swap! a (stream-reducer g) %)
-                         :on-done push})
-              {:stream true :sub #(swap! subs conj %)})))))))
+            (let [a       (atom (if (snapshot? i) i (make-snapshot 0 i)))
+                  on-done (fn [subs]
+                            (stream-push-last subs
+                                              (assoc @a :extract true)))
+                  on-next (fn [subs ss] (swap! a (stream-reducer g) ss))
+                  s       (make-stream (:sources j) on-next on-done)]
+              ((:sub j) s)
+              s)))))))
 (defn scan [f]
   "Create a dyadic function from f (which must be dyadic) that
   performs reductions (a fold left but returning all intermediate
@@ -982,21 +998,23 @@
         (let [j (first x)]
           (if-not (stream? j)
             (vec (drop 1 (reductions g j)))
-            (let [a    (atom nil)
-                  subs (atom [])]
-              ((:sub j) {:on-next #(let [r (swap! a (stream-reducer g) %)]
-                                     (doseq [s @subs] ((:on-next s) r)))
-                         :on-done (fn [] (doseq [s @subs] ((:on-done s))))})
-              {:stream true :sub #(swap! subs conj %)})))
+            (let [a       (atom nil)
+                  on-next (fn [subs ss]
+                            (let [r (swap! a (stream-reducer g) ss)]
+                              (doseq [s subs] ((:on-next s) r))))
+                  s       (make-stream (:sources j) on-next)]
+              ((:sub j) s)
+              s)))
         (let [[i j] x]
           (if-not (stream? j)
             (vec (drop 1 (reductions g i j)))
-            (let [a    (atom (if (snapshot? i) i (make-snapshot 0 i)))
-                  subs (atom [])]
-              ((:sub j) {:on-next #(let [r (swap! a (stream-reducer g) %)]
-                                     (doseq [s @subs] ((:on-next s) r)))
-                         :on-done (fn [] (doseq [s @subs] ((:on-done s))))})
-              {:stream true :sub #(swap! subs conj %)})))))))
+            (let [a       (atom (if (snapshot? i) i (make-snapshot 0 i)))
+                  on-next (fn [subs ss]
+                            (let [r (swap! a (stream-reducer g) ss)]
+                              (doseq [s subs] ((:on-next s) r))))
+                  s       (make-stream (:sources j) on-next)]
+              ((:sub j) s)
+              s)))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; @ operator
 (declare invoke)
@@ -1229,7 +1247,7 @@
           :% {:f fdiv :text "%" :rank [1 2]}
           :# {:f pound :text "#" :rank [1 2] :stream-aware [2]}
           :$ {:f dollar :text "$" :rank [1 2]}
-          (keyword ",") {:f join :text "," :rank [1 2]}
+          (keyword ",") {:f join :text "," :rank [1 2] :stream-aware [2]}
           :& {:f amp :text "&" :rank [1 2] :snapshot-aware [1]}
           :| {:f pipe :text "|" :rank [1 2]}
           :_ {:f under :text "_" :rank [1 2] :stream-aware [2]}
@@ -1439,16 +1457,17 @@
         [e2 g] (if (= (count a) (count s))
                  [e f]
                  (invoke-partial e f b))]
-    [e2 (make-stream e g s)]))
+    [e2 (make-func-stream e g s)]))
 (defn index-from-streams [e c i]
   "Turn indexing with streams to invoking . with streams"
   (invoke-with-streams e
                        (:dot ops)
                        [c (if-not (some stream? i)
                             i
-                            (make-stream e
-                                         {:f (fn [& x] x) :rank [(count i)]}
-                                         i))]))
+                            (make-func-stream e
+                                              {:f (fn [& x] x)
+                                               :rank [(count i)]}
+                                              i))]))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn invoke [e f a]
   "Apply f to a. If f is not a lambda, index f at depth using a"
@@ -1612,7 +1631,7 @@
                 (if (stream? (first i))
                   (recur (next i) (next j) (conj r (first j)))
                   (recur (next i) j (conj r (first i)))))))]
-    (make-stream e {:f f} (filterv stream? v))))
+    (make-func-stream e {:f f} (filterv stream? v))))
 (defn resolve-vec [tu e x]
   "Resolve the (...;...) expr specified by x"
   (let [[e2 r] (reduce (fn [[e r] i]
@@ -2094,24 +2113,16 @@
   (let [g       (lambda-callable e f)
         h       (if (snapshot-aware? f 1) g #(g (snapshot-value %)))
         obs     (atom nil)
-        subs    (atom [])
-        on-done (fn []
-                  (doseq [sub @subs] ((:on-done sub)))
-                  (reset! subs nil)
-                  ((:unsub s) @obs))
-        on-next (fn [ssi] ;; snapshot in
+        on-next (fn [subs ssi] ;; snapshot in
                   (let [sso (derive-snapshot ssi (h ssi))]
                     (when-not (swallow? sso)
-                      (doseq [s @subs] ((:on-next s) sso)))
-                    (when (snapshot-final? sso)
-                      (on-done))))
-        r       {:on-done on-done
-                 :on-next on-next
-                 :sources (:sources s)
-                 :stream  true
-                 :sub     #(swap! subs conj %)
-                 :unsub   #(when (= [] (swap! subs except %))
-                             ((:unsub s) @obs))}]
+                      (doseq [s subs] ((:on-next s) sso)))
+                    sso))
+        stream  (make-stream (:sources s) on-next)
+        r       (assoc stream
+                       :unsub
+                       #(when (= [] ((:unsub stream) %))
+                          ((:unsub s) @obs)))]
     ((:sub s) (reset! obs r))
     r))
 (defn make-monadic-stream-dup [e f s n]
@@ -2120,24 +2131,16 @@
                   (fn [x] (apply g (repeat n x)))
                   (fn [x] (apply g (repeat n (snapshot-value x)))))
         obs     (atom nil)
-        subs    (atom [])
-        on-done (fn []
-                  (doseq [sub @subs] ((:on-done sub)))
-                  (reset! subs nil)
-                  ((:unsub s) @obs))
-        on-next (fn [ssi] ;; snapshot in
+        on-next (fn [subs ssi] ;; snapshot in
                   (let [sso (derive-snapshot ssi (h ssi))]
                     (when-not (swallow? sso)
-                      (doseq [s @subs] ((:on-next s) sso)))
-                    (when (snapshot-final? sso)
-                      (on-done))))
-        r       {:on-done on-done
-                 :on-next on-next
-                 :sources (:sources s)
-                 :stream  true
-                 :sub     #(swap! subs conj %)
-                 :unsub   #(when (= [] (swap! subs except %))
-                             ((:unsub s) @obs))}]
+                      (doseq [s subs] ((:on-next s) sso)))
+                    sso))
+        stream  (make-stream (:sources s) on-next)
+        r       (assoc stream
+                       :unsub
+                       #(when (= [] ((:unsub stream) %))
+                          ((:unsub s) @obs)))]
     ((:sub s) (reset! obs r))
     r))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2178,9 +2181,9 @@
     r))
 ;; This is too complicated :-/
 ;; f is a function of (count s) arguments; s is a vec of streams.
-;; make-stream will create a stream that will call f every time
+;; make-func-stream will create a stream that will call f every time
 ;; any element of s changes and push the results of f.
-(defn make-stream [e f s] ;; env, function and stream args
+(defn make-func-stream [e f s] ;; env, function and stream args
   (if (= 1 (count s))
     (make-monadic-stream e f (first s))
     (let [g (group s)]
@@ -2281,14 +2284,19 @@
         i        (atom 0) ;; index of event in x to send next
         source   (swap! last-event-source-id inc)
         stream   (atom {})
-        on-done  (fn [] (swap! test-streams except @stream))
+        on-done  (fn []
+                   (swap! test-streams except @stream)
+                   (doseq [s @subs] ((:on-done s)))
+                   (reset! subs nil))
         push     (fn []
                    (let [j (swap! i (fn [k] (+ 1 (min (count x) k))))]
-                     (when (<= j (count x))
-                       (let [ss (make-snapshot source (x (dec j)))]
-                         (doseq [s @subs] ((:on-next s) ss)))
-                       (when (= j (count x))
-                         (doseq [s @subs] ((:on-done s)))
+                     (if (<= j (count x))
+                       (do
+                         (let [ss (make-snapshot source (x (dec j)))]
+                           (doseq [s @subs] ((:on-next s) ss)))
+                         (when (= j (count x))
+                           (on-done)))
+                       (when (= 0 (count x))
                          (on-done)))
                      (< j (count x)))) ;; more to send?
         push-all (fn [] (loop [] (if (push) (recur))))
