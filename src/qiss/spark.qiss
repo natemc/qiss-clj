@@ -1,0 +1,32 @@
+
+
+/ https://gorillalabs.github.io/sparkling/articles/getting_started.html
+
+c:sparkconf["local";"qiss-sparkling-example"]   / initialize and create a spark config
+
+sc:sparkcontext[c]
+
+data:sparkparallelize[sc; ("a"; "b"; "c"; "d"; "e")]    / parallized collection
+
+sparkfirst data       / take a peek at the first item in the rdd
+
+numdata:sparkparallelize[sc; (1; 2; 3; 4; 5)]
+
+sparkcollect sparkmap[numdata; {x * x}]   / melt down
+
+data:sparkparallelizepairs[sc; (("a";1) ;("b";2); ("c";3); ("d";4); ("e";5))]
+
+sparkfirst data       / the same
+
+
+rddtext:sparktextfile[sc;"poi_names.txt"]
+
+rddtext2:sparkmap[rddtext;{#x}]  / serialization of this count function causes a spark meltdown
+
+/ be patient as spark will eventually return
+
+/ isn't rddtext'#
+/ rddtext speach # better?
+/ maybe qiss should auto-magically spark-erize RDD transformations and actions?
+
+sparkreduce[rddtext2;+]

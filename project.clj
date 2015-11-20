@@ -9,6 +9,7 @@
                  [instaparse "1.4.1"]
                  [midje "1.6.3"]
                  [rhizome "0.2.5"]
+                 [gorillalabs/sparkling "1.2.1" ]
                  ;; clojurescript from here down
                  [com.lucasbradstreet/instaparse-cljs "1.4.1.0"]
                  [im.chit/purnam "0.5.2"]
@@ -16,8 +17,7 @@
                  [prismatic/dommy "1.1.0"]
                  [testdouble/clojurescript.csv "0.2.0"]]
   :plugins [[lein-cljsbuild "1.1.0"]
-            [lein-figwheel "0.4.0"]
-            [lein-npm "0.4.0"]]
+            [lein-figwheel "0.4.0"]]
   :source-paths ["src"]
   :clean-targets ^{:protect false} ["resources/public/js/compiled" "target"]
   :cljsbuild {
@@ -84,4 +84,6 @@
              }
   :main ^:skip-aot qiss.core
   :target-path "target/%s"
-  :profiles {:uberjar {:aot :all}})
+  :aot [#".*" clojure.tools.logging.impl sparkling.serialization sparkling.destructuring]
+  :profiles {:uberjar {:aot :all}
+             :provided {:dependencies [[org.apache.spark/spark-core_2.10 "1.3.1"]]}})

@@ -17,7 +17,9 @@
                       [clojure.stacktrace :as st] ;; handy from the repl
                       [clojure.string :as str]
                       [instaparse.core :as insta]
-                      [instaparse.viz :as instav])
+                      [instaparse.viz :as instav]
+                      [sparkling.conf :as conf]
+                      [sparkling.core :as spark])
             (:gen-class)]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2333,6 +2335,67 @@
       (if @extract (first @r) @r))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Spark
+(defn spark-conf [master app-name]
+  "Create new Spark Configuration by setting Master and AppName.
+  Provides Spark the basic info necessary to access a cluster."
+  (-> (conf/spark-conf)
+      (conf/master (string master))
+      (conf/app-name (string app-name))))
+
+(defn spark-context [conf]
+  "Main entry point for Spark.
+  establish connection to a Spark cluster defined
+  in passed in argument configuration"
+  (spark/spark-context conf))
+
+(defn spark-collect [rdd]
+  (->> rdd
+      spark/collect)
+  )
+
+(defn spark-filter [rdd pred]
+  (->> rdd
+       (spark-filter pred))
+  )
+
+(defn spark-first [data]
+  "RDD version of first"
+  (spark/first data)
+  )
+
+(defn spark-parallelize [sc data]
+  "instantiate a Spark parallelizable version of passed in native data"
+  (spark/parallelize sc data)
+  )
+
+(defn spark-parallelize-pairs [sc data]
+  "instantiate a Spark parallelizable version of passed in native data pairs"
+  (spark/parallelize sc data)
+  )
+
+(defn spark-text-file [sc uri]
+  "create a RDD from URI of a text file.
+  URI can be hdfs://... or s3n:// or a local fs path"
+  (spark/text-file sc (string uri)))
+
+(defn spark-map [rdd function]
+  (->> rdd
+      (spark/map function))
+  )
+
+(defn spark-reduce [rdd function]
+  (->> rdd
+      (spark/reduce function))
+  )
+
+(defn spark-tuple [x y]
+  (spark/tuple x y))
+
+(defn spark-take [n rdd]
+       (spark/take n rdd))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (declare genv)
 (defn set-genv [e] (reset! genv e))
 (defn keval
@@ -2353,6 +2416,18 @@
                      :lj       {:f lj :rank [2]}
                      :mod      {:f kmod :rank [2]}
                      :show     {:f show :rank [1] :snapshot-aware [1]}
+                     :sparkcollect {:f spark-collect :rank [1]}
+                     :sparkconf {:f spark-conf :rank [2]}
+                     :sparkcontext {:f spark-context :rank [1]}
+                     :sparkfilter {:f spark-filter :rank [2]}
+                     :sparkfirst {:f spark-first :rank [1]}
+                     :sparkmap {:f spark-map :rank [2]}
+                     :sparkreduce {:f spark-reduce :rank [2]}
+                     :sparkparallelize {:f spark-parallelize :rank [2]}
+                     :sparkparallelizepairs {:f spark-parallelize-pairs :rank [2]}
+                     :sparktake {:f spark-take :rank [2]}
+                     :sparktextfile {:f spark-text-file :rank [2]}
+                     :sparktuple {:f spark-tuple :rank [2]}
                      :stop     {:f stop :rank [1] :stream-aware [1]}
                      :sv       {:f sv :rank [2]}
                      :throttle {:f throttle :rank [2] :stream-aware [2]}
