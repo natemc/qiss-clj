@@ -2350,50 +2350,58 @@
   (spark/spark-context conf))
 
 (defn spark-collect [rdd]
-  (->> rdd
-      spark/collect)
+  "RDD version of collect"
+  (spark/collect rdd))
+
+(defn spark-count [rdd]
+  "RDD version of count"
+  (spark/count rdd)
   )
 
-(defn spark-filter [rdd pred]
-  (->> rdd
-       (spark-filter pred))
-  )
+(defn spark-filter-old [e rdd pred]
+  (spark/filter (lambda-callable e pred) rdd))
 
-(defn spark-first [data]
+(defn spark-filter [e rdd pred]
+  (spark/filter #(= 0 (mod % 2)) rdd))
+
+(defn spark-first [rdd]
   "RDD version of first"
-  (spark/first data)
-  )
+  (spark/first rdd))
 
 (defn spark-parallelize [sc data]
   "instantiate a Spark parallelizable version of passed in native data"
-  (spark/parallelize sc data)
-  )
+  (spark/parallelize sc data))
 
 (defn spark-parallelize-pairs [sc data]
   "instantiate a Spark parallelizable version of passed in native data pairs"
-  (spark/parallelize sc data)
-  )
+  (spark/parallelize sc data))
 
 (defn spark-text-file [sc uri]
   "create a RDD from URI of a text file.
   URI can be hdfs://... or s3n:// or a local fs path"
   (spark/text-file sc (string uri)))
 
-(defn spark-map [rdd function]
-  (->> rdd
-      (spark/map function))
-  )
+(defn spark-map [f rdd]
+   (spark/map f rdd))
 
 (defn spark-reduce [rdd function]
-  (->> rdd
-      (spark/reduce function))
-  )
+  (spark/reduce function rdd))
+
+(defn spark-sample [])
 
 (defn spark-tuple [x y]
   (spark/tuple x y))
 
 (defn spark-take [n rdd]
-       (spark/take n rdd))
+  (spark/take n rdd))
+
+(defn spark-union
+  "union operation on two or more RDDs"
+  ([rdd1 rdd2]
+   (spark/union rdd1 rdd2))
+  ([rdd1 rdd2 & rdds]
+    (spark-union rdd1 (spark-union rdd2 (spark-union (first rdds) (rest rdds))))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (declare genv)
@@ -2419,8 +2427,11 @@
                      :sparkcollect {:f spark-collect :rank [1]}
                      :sparkconf {:f spark-conf :rank [2]}
                      :sparkcontext {:f spark-context :rank [1]}
-                     :sparkfilter {:f spark-filter :rank [2]}
+                     :sparkcount {:f spark-count :rank [1]}
+                     :sparkfilter {:f spark-filter :pass-global-env true :rank [2]}
                      :sparkfirst {:f spark-first :rank [1]}
+                     ;   :sparkflatmap {:f spark-flatmap :rank [1]}
+                     ;   :sparkgroupbykey {:f spark-groupbykey :rank [2]}
                      :sparkmap {:f spark-map :rank [2]}
                      :sparkreduce {:f spark-reduce :rank [2]}
                      :sparkparallelize {:f spark-parallelize :rank [2]}
@@ -2428,6 +2439,8 @@
                      :sparktake {:f spark-take :rank [2]}
                      :sparktextfile {:f spark-text-file :rank [2]}
                      :sparktuple {:f spark-tuple :rank [2]}
+                     :sparksample {:f spark-sample :rank [2]}
+                     :sparkunion {:f spark-union :rank [2]}
                      :stop     {:f stop :rank [1] :stream-aware [1]}
                      :sv       {:f sv :rank [2]}
                      :throttle {:f throttle :rank [2] :stream-aware [2]}

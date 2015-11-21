@@ -2,15 +2,22 @@
 
 / https://gorillalabs.github.io/sparkling/articles/getting_started.html
 
-c:sparkconf["local";"qiss-sparkling-example"]   / initialize and create a spark config
+/ c:sparkconf["local";"qiss-sparkling-example"]   / initialize and create a spark config
 
-sc:sparkcontext[c]
+sc:sparkcontext[c:sparkconf["local";"qiss-sparkling-example"]]
+numdata:sparkparallelize[sc; (1; 2; 3; 4; 5)]
+filteredrdd:sparkfilter[numdata;{0=x mod 2}]
+sparkcollect filteredrdd
+
+
+
+ilsfile:sparktextfile[sc;"iowa-liquor.csv"]  / http://mishadoff.com/blog/spark-in-clojure/
+sparkfirst ilsfile
 
 data:sparkparallelize[sc; ("a"; "b"; "c"; "d"; "e")]    / parallized collection
 
 sparkfirst data       / take a peek at the first item in the rdd
 
-numdata:sparkparallelize[sc; (1; 2; 3; 4; 5)]
 
 sparkcollect sparkmap[numdata; {x * x}]   / melt down
 
