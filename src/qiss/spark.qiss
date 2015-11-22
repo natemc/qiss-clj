@@ -4,10 +4,29 @@
 
 / c:sparkconf["local";"qiss-sparkling-example"]   / initialize and create a spark config
 
-sc:sparkcontext[c:sparkconf["local";"qiss-sparkling-example"]]
-numdata:sparkparallelize[sc; (1; 2; 3; 4; 5)]
+/ spark cluster can run distributed or locally.  argument below 'local[4]' kicks off a local cluster with 4 threads
+/ local[*] --> Run Spark locally with as many worker threads as logical cores on your machine.
+sc:sparkcontext[c:sparkconf["local[*]";"qiss-sparkling-example"]]
+rdd1:sparkparallelize[sc; (1; 2; 3; 4; 5)]
+rdd2:sparkparallelize[sc; (2; 2; 2; 222; 22)]
+sparkcollect rdd1 sparkintersection rdd2
+sparkcollect sparkparallelize[sc; !10] sparksubtract sparkparallelize[sc; !5]
+sparkcollect sparksample[ rdd:sparkparallelize[sc; !10] ;0b;0.7;1]
+
+/ TODO: fix below
+sparkrddname rdd:sparkparallelize[sc; !10]
+/ #<JavaRDD: qiss.core/spark-parallelize, core.cljc, L.2381>
+sparkrddname[rdd;"heythisismyrddname"]
+/ No matching method found: setName for class java.lang.String
+
+sparkcollect sparkdistinct rdd:sparkparallelize[sc; (1; 1; 2; 3; 4; 5)]
+
+sparkcollect rdd sparkcartesian rdd
+
 filteredrdd:sparkfilter[numdata;{0=x mod 2}]
 sparkcollect filteredrdd
+
+sparkstop[sc]
 
 
 

@@ -9,7 +9,7 @@
                  [instaparse "1.4.1"]
                  [midje "1.6.3"]
                  [rhizome "0.2.5"]
-                 [gorillalabs/sparkling "1.2.1" ]
+                 [gorillalabs/sparkling "1.2.4-SNAPSHOT"]
                  ;; clojurescript from here down
                  [com.lucasbradstreet/instaparse-cljs "1.4.1.0"]
                  [im.chit/purnam "0.5.2"]

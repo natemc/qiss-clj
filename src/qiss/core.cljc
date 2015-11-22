@@ -18,7 +18,7 @@
                       [clojure.string :as str]
                       [instaparse.core :as insta]
                       [instaparse.viz :as instav]
-                      [sparkling.conf :as conf]
+                      [sparkling.conf :as sparkconf]
                       [sparkling.core :as spark])
             (:gen-class)]))
 
@@ -2336,12 +2336,16 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Spark
+
+(def spark-STORAGE-LEVELS
+   spark/STORAGE-LEVELS)
+
 (defn spark-conf [master app-name]
   "Create new Spark Configuration by setting Master and AppName.
   Provides Spark the basic info necessary to access a cluster."
-  (-> (conf/spark-conf)
-      (conf/master (string master))
-      (conf/app-name (string app-name))))
+  (-> (sparkconf/spark-conf)
+      (sparkconf/master (string master))
+      (sparkconf/app-name (string app-name))))
 
 (defn spark-context [conf]
   "Main entry point for Spark.
@@ -2353,15 +2357,35 @@
   "RDD version of collect"
   (spark/collect rdd))
 
-(defn spark-count [rdd]
+(def spark-count
   "RDD version of count"
-  (spark/count rdd)
-  )
+  spark/count)
 
-(defn spark-filter-old [e rdd pred]
-  (spark/filter (lambda-callable e pred) rdd))
+(def spark-glom
+  spark/glom)
+
+(def spark-cache
+  spark/cache)
+
+(def spark-lookup
+  spark/lookup)
+
+(def spark-collect-map
+  spark/collect-map)
+
+
+(defn spark-distinct
+  "RDD version of distinct"
+  ([rdd]
+   (spark/distinct rdd))
+  ([rdd n]
+   (spark/distinct rdd n)))
+
 
 (defn spark-filter [e rdd pred]
+  (spark/filter (lambda-callable e pred) rdd))
+
+(defn spark-filter-hack [e rdd pred]
   (spark/filter #(= 0 (mod % 2)) rdd))
 
 (defn spark-first [rdd]
@@ -2376,6 +2400,19 @@
   "instantiate a Spark parallelizable version of passed in native data pairs"
   (spark/parallelize sc data))
 
+(defn spark-partitions
+  "Returns a vector of paritions for a given RDD"
+  [rdd]
+  (spark/partitions rdd))
+
+(defn spark-sample
+  "Returns a vector of paritions for a given RDD"
+  [rdd with-replacement? fraction seed]
+  (spark/sample with-replacement? fraction seed rdd))
+
+(def spark-count-partitions
+  spark/count-partitions)
+
 (defn spark-text-file [sc uri]
   "create a RDD from URI of a text file.
   URI can be hdfs://... or s3n:// or a local fs path"
@@ -2387,7 +2424,9 @@
 (defn spark-reduce [rdd function]
   (spark/reduce function rdd))
 
-(defn spark-sample [])
+(defn spark-stop [sc]
+  "shutdown SparkContext"
+  (spark/stop sc))
 
 (defn spark-tuple [x y]
   (spark/tuple x y))
@@ -2397,11 +2436,39 @@
 
 (defn spark-union
   "union operation on two or more RDDs"
-  ([rdd1 rdd2]
-   (spark/union rdd1 rdd2))
-  ([rdd1 rdd2 & rdds]
-    (spark-union rdd1 (spark-union rdd2 (spark-union (first rdds) (rest rdds))))))
+  ([& rdds]
+   (apply spark/union rdds)))
 
+(defn spark-intersection
+  "intersection operation on two or more RDDs"
+  ([rdd1 rdd2]
+   (spark/intersection rdd1 rdd2)))
+
+(defn spark-subtract
+  "rdd1 except rdd2"
+  ([rdd1 rdd2]
+   (spark/subtract rdd1 rdd2)))
+
+(def spark-values
+  spark/values)
+
+(def spark-keys
+  spark/keys)
+
+(def spark-cogroup
+  spark/cogroup)
+
+(def spark-checkpoint
+  spark/checkpoint)
+
+(def spark-cartesian
+  spark/cartesian)
+
+(defn spark-rdd-name
+  ([rdd name]
+   (spark/rdd-name rdd (string name)))
+  ([rdd]
+   (spark/rdd-name rdd)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (declare genv)
@@ -2424,23 +2491,36 @@
                      :lj       {:f lj :rank [2]}
                      :mod      {:f kmod :rank [2]}
                      :show     {:f show :rank [1] :snapshot-aware [1]}
+                     :sparkcartesian {:f spark-cartesian :rank [2]}
+                     :sparkcheckpoint {:f spark-checkpoint :rank [0]}
+                     :sparkcogroup {:f spark-cogroup :rank [1 2]}
                      :sparkcollect {:f spark-collect :rank [1]}
                      :sparkconf {:f spark-conf :rank [2]}
                      :sparkcontext {:f spark-context :rank [1]}
                      :sparkcount {:f spark-count :rank [1]}
+                     :sparkcountpartitions {:f spark-count-partitions :rank [1]}
+                     :sparkdistinct {:f spark-distinct :rank [1 2]}
                      :sparkfilter {:f spark-filter :pass-global-env true :rank [2]}
                      :sparkfirst {:f spark-first :rank [1]}
                      ;   :sparkflatmap {:f spark-flatmap :rank [1]}
+                     :sparkintersection {:f spark-intersection :rank [2]}
                      ;   :sparkgroupbykey {:f spark-groupbykey :rank [2]}
+                     :sparkkeys {:f spark-keys :rank [2]}
                      :sparkmap {:f spark-map :rank [2]}
                      :sparkreduce {:f spark-reduce :rank [2]}
                      :sparkparallelize {:f spark-parallelize :rank [2]}
                      :sparkparallelizepairs {:f spark-parallelize-pairs :rank [2]}
+                     :sparkpartitions {:f spark-partitions :rank [1]}
+                     :sparkrddname {:f spark-rdd-name :rank [1 2]}
                      :sparktake {:f spark-take :rank [2]}
                      :sparktextfile {:f spark-text-file :rank [2]}
                      :sparktuple {:f spark-tuple :rank [2]}
-                     :sparksample {:f spark-sample :rank [2]}
-                     :sparkunion {:f spark-union :rank [2]}
+                     :sparksample {:f spark-sample :rank [4]}
+                     :sparkstop {:f spark-stop :rank [1]}
+                     :sparksubtract {:f spark-subtract :rank [2]}
+                     :sparkSTORAGE_LEVELS {:f spark-STORAGE-LEVELS :rank [0]}
+                     :sparkunion {:f spark-union :rank [2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20]}
+                     :sparkvalues {:f spark-values :rank [2]}
                      :stop     {:f stop :rank [1] :stream-aware [1]}
                      :sv       {:f sv :rank [2]}
                      :throttle {:f throttle :rank [2] :stream-aware [2]}
