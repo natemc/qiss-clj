@@ -26,6 +26,13 @@ sparkcollect sparkdistinct rdd:sparkparallelize[sc; (1; 1; 2; 3; 4; 5)]
 sparkcollect rdd:sparkparallelizepairs[sc;10#sparktuple[1;2]]
 sparkcollect sc sparkparallelizepairs 10#1 sparktuple 2
 
+/ qiss operators with rdd as first-class-type
+*rdd             / sparkfirst
+rdd,rdd          / sparkjoin
+3#rdd            / sparktake
+show rdd         / sparkcollect(?)
+?rdd             / sparkdistinct
+#(?rdd,rdd)      / sparkcount
 
 sparkcollect rdd sparkcartesian rdd
 

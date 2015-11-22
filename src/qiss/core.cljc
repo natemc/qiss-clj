@@ -142,7 +142,10 @@
         :else       x))
 ;;    (if (lambda? x) (dissoc x :env) x)))
 (defn rdd?old [x] (:rdd x))
-(defn rdd? [x] (= org.apache.spark.api.java.JavaRDD (class x)) )
+(defn rdd? [x]
+  #?(:clj (instance? org.apache.spark.api.java.JavaRDD x)
+     :cljs false))
+
 (defn snapshot? [x] (:snapshot x))
 (defn snapshot-aware? [x r] ;; lambda, rank
   (and (:snapshot-aware x) (some #{r} (:snapshot-aware x))))
@@ -583,12 +586,15 @@
         r       (make-stream (stream-sources s) on-next on-done)]
     ((:sub s) r)
     r))
+(declare rdd?)
+(declare spark-union)
 (defn join
   ",x (enlist) and x,y (join)"
   ([x] [x])
-  ([x y] (cond (vector? x)             (cond (vector? y) (vec (concat x y))
-                                             (stream? y) (join-vec-to-stream x y)
-                                             :else       (conj x y))
+  ([x y] (cond (and (rdd? x) (rdd? y))  (spark-union x y)
+               (vector? x)              (cond (vector? y) (vec (concat x y))
+                                              (stream? y) (join-vec-to-stream x y)
+                                              :else       (conj x y))
                (vector? y)              (vec (cons x y))
                (dict? x)                (if (dict? y)
                                           ((atomize (fn [_ y] y)) x y)
@@ -664,9 +670,11 @@
         s       (make-stream (:sources x) on-next on-done)]
     ((:sub x) s)
     s))
+(def spark-count)
 (defn kcount [x]
   "#x (count)  returns 1 for atoms"
-  (cond (vector? x)      (count x)
+  (cond (rdd? x) (spark-count x)
+        (vector? x)      (count x)
         (dict? x)        (count (dict-val x))
         (table? x)       (count (first (dict-val x)))
         (keyed-table? x) (count (first (dict-val (dict-key x))))
@@ -747,13 +755,15 @@
         (stream? y) (reshape-from-stream x y)
         :else
         (err "nyi: reshape only supports vector on rhs")))
+(declare spark-take)
 (defn ktake [x y]
   "x#y take from y the elements specified by x"
   ;; TODO: support stream for x?
   (if (and (coll? x) (not (empty? x)) (every? number? x))
     (reshape (mapv #(if (bool? %) (if % 1 0) %) x) y)
     (let [n (if (bool? x) (if x 1 0) x)]
-      (cond (not (coll? y))  (vec (repeat n y))
+      (cond (rdd? y)         (spark-take n y)   ; this condition must test first - talk w/nate
+            (not (coll? y))  (vec (repeat n y))
             (vector? y)      (take-from-vec n y)
             (dict? y)        (take-from-dict n y)
             (table? y)       (take-from-table n y)
@@ -823,9 +833,11 @@
     (vec (if (float? y)
            (repeatedly x #(rand y))
            (repeatedly x #(rand-int y))))))
+(def spark-distinct)
 (defn ques
   "?x (distinct) and x?y (find or rand depending on the arguments)"
-  ([x] (vec (distinct x)))
+  ([x] (cond (rdd? x) (spark-distinct x)
+             :else (vec (distinct x))))
   ([x y] (cond (vector? x)      (findv x y)
                (dict? x)        (index (dict-key x) (ques (dict-val x) y))
                (table? x)       (find-table x y)
@@ -1963,8 +1975,10 @@
               "[]"))]
     (println (s x))))
 
+(def spark-collect)
 (defn show [x]
-  (cond (vector? x)      (println (stringify-vector x))
+  (cond (rdd? x)         (spark-collect x)
+        (vector? x)      (println (stringify-vector x))
         (dict? x)        (show-dict x)
         (table? x)       (show-table x)
         (keyed-table? x) (show-keyed-table x)
@@ -2382,7 +2396,7 @@
   "RDD version of distinct"
   ([rdd]
    (spark/distinct rdd))
-  ([rdd n]
+  ([rdd n]                                                  ; n is the num of partitions?
    (spark/distinct rdd n)))
 
 
@@ -2430,6 +2444,14 @@
 
 (defn spark-map [f rdd]
    (spark/map f rdd))
+
+; note the ordering - func goes first!
+(defn spark-map-hack [f rdd]
+  (spark/map (fn [x] (* 2 x)) rdd))
+
+; this is not necessary
+(defn spark-map-hack2 [f rdd]
+  (spark/map #(fn [x] (* 2 x)) rdd))
 
 (defn spark-reduce [rdd function]
   (spark/reduce function rdd))
@@ -2511,12 +2533,15 @@
                      :sparkcountpartitions {:f spark-count-partitions :rank [1]}
                      :sparkdistinct {:f spark-distinct :rank [1 2]}
                      :sparkfilter {:f spark-filter :pass-global-env true :rank [2]}
+                     :sparkfilterhack {:f spark-filter-hack :pass-global-env true :rank [2]}
                      :sparkfirst {:f spark-first :rank [1]}
                      ;   :sparkflatmap {:f spark-flatmap :rank [1]}
                      :sparkintersection {:f spark-intersection :rank [2]}
                      ;   :sparkgroupbykey {:f spark-groupbykey :rank [2]}
                      :sparkkeys {:f spark-keys :rank [2]}
                      :sparkmap {:f spark-map :rank [2]}
+                     :sparkmaphack {:f spark-map-hack :rank [2]}
+                     :sparkmaphack2 {:f spark-map-hack2 :rank [2]}
                      :sparkreduce {:f spark-reduce :rank [2]}
                      :sparkparallelize {:f spark-parallelize :rank [2 3] :rdd true}
                      :sparkparallelizepairs {:f spark-parallelize-pairs :rank [2 3]}
