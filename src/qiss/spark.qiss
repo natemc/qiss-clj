@@ -21,6 +21,12 @@ sparkrddname[rdd;"heythisismyrddname"]
 
 sparkcollect sparkdistinct rdd:sparkparallelize[sc; (1; 1; 2; 3; 4; 5)]
 
+
+// the following two lines are equivalent
+sparkcollect rdd:sparkparallelizepairs[sc;10#sparktuple[1;2]]
+sparkcollect sc sparkparallelizepairs 10#1 sparktuple 2
+
+
 sparkcollect rdd sparkcartesian rdd
 
 filteredrdd:sparkfilter[numdata;{0=x mod 2}]

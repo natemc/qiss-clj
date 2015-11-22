@@ -2392,13 +2392,19 @@
   "RDD version of first"
   (spark/first rdd))
 
-(defn spark-parallelize [sc data]
+(defn spark-parallelize
   "instantiate a Spark parallelizable version of passed in native data"
-  (spark/parallelize sc data))
+  ([sc data]
+   (spark/parallelize sc data))
+  ([sc data num-slices]
+   (spark/parallelize sc data num-slices)))
 
-(defn spark-parallelize-pairs [sc data]
+(defn spark-parallelize-pairs
   "instantiate a Spark parallelizable version of passed in native data pairs"
-  (spark/parallelize sc data))
+  ([sc data]
+    (spark/parallelize-pairs sc data))
+  ([sc data num-slices]
+    (spark/parallelize-pairs sc data num-slices)))
 
 (defn spark-partitions
   "Returns a vector of paritions for a given RDD"
@@ -2508,8 +2514,8 @@
                      :sparkkeys {:f spark-keys :rank [2]}
                      :sparkmap {:f spark-map :rank [2]}
                      :sparkreduce {:f spark-reduce :rank [2]}
-                     :sparkparallelize {:f spark-parallelize :rank [2]}
-                     :sparkparallelizepairs {:f spark-parallelize-pairs :rank [2]}
+                     :sparkparallelize {:f spark-parallelize :rank [2 3]}
+                     :sparkparallelizepairs {:f spark-parallelize-pairs :rank [2 3]}
                      :sparkpartitions {:f spark-partitions :rank [1]}
                      :sparkrddname {:f spark-rdd-name :rank [1 2]}
                      :sparktake {:f spark-take :rank [2]}
