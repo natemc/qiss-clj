@@ -2449,7 +2449,8 @@
               (let [e2 (try
                          (let [x (second (parse line))
                                [ne r] (resolve-full-expr line e x)]
-                           (if (not= :assign (first x))
+                           (if (and (not= :assign (first x))
+                                    (not (nil? r)))
                              (show r))
                            ne)
                          (catch Exception ex
@@ -2464,7 +2465,7 @@
 (defn -main
   "qiss repl"
   [& args]
-  (println *command-line-args*) ;; TODO process command line args
+  ;; (println *command-line-args*) ;; TODO process command line args
   ;; TODO support stdin and stdout in the usual way
   #?(:clj (repl))
   0)
