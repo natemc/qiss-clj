@@ -566,8 +566,37 @@
       :stream  true
       :sub     #(swap! subs conj %)
       :unsub   #(swap! subs except %)})))
+(defn join-stream-to-stream [s t]
+  (let [obs-s     (atom nil)
+        obs-t     (atom nil)
+        subs      (atom [])
+        on-next   #(doseq [x @subs] ((:on-next x) %))
+        on-done-t (fn []
+                    (reset! obs-t nil)
+                    (doseq [x @subs] ((:on-done x)))
+                    (reset! subs nil))
+        on-done-s (fn []
+                    (reset! obs-s nil)
+                    ((:sub t) (reset! obs-t
+                                      {:on-done on-done-t :on-next on-next}))
+                    nil)
+        ;; we have a potential problem: sources needs to change through time.
+        r         {:sources (vec (distinct (mapcat :sources [s t])))
+                   :stream  true
+                   :sub     #(swap! subs conj %)
+                   :unsub   #(when (= [] (swap! subs except %))
+                               ((:unsub s) @obs-s)
+                               ((:unsub t) @obs-t))}]
+    ((:sub s) (reset! obs-s {:on-done on-done-s :on-next on-next}))
+    r))
+(defn join-stream-to-vec [s v]
+  (let [on-done (fn [] (mapv #(make-snapshot 0 %) v))
+        on-next identity
+        r       (make-stream (stream-sources s) on-next on-done)]
+    ((:sub s) r)
+    r))
 (defn join-vec-to-stream [v s]
-  (let [items   (mapv #(make-snapshot (:source s) %) v)
+  (let [items   (mapv #(make-snapshot 0 %) v)
         started (atom 0) ;; 1 => first time we got an event from s
         on-done (fn [] (when (= 1 (swap! started inc)) items))
         on-next #(if (not= 1 (swap! started inc)) % (conj items %))
@@ -577,13 +606,17 @@
 (defn join
   ",x (enlist) and x,y (join)"
   ([x] [x])
-  ([x y] (cond (vector? x)             (cond (vector? y) (vec (concat x y))
-                                             (stream? y) (join-vec-to-stream x y)
-                                             :else       (conj x y))
-               (vector? y)              (vec (cons x y))
+  ([x y] (cond (vector? x)              (cond (vector? y) (vec (concat x y))
+                                              (stream? y) (join-vec-to-stream x y)
+                                              :else       (conj x y))
+               (stream? x)              (cond (stream? y)
+                                              (join-stream-to-stream x y)
+                                              (vector? y) (join-stream-to-vec x y)
+                                              :else       (err "nyi: join" x y))
                (dict? x)                (if (dict? y)
                                           ((atomize (fn [_ y] y)) x y)
                                           (err "can't join" x y))
+               (vector? y)              (vec (cons x y))
                (or (coll? x) (coll? y)) (err "can't join" x y)
                :else       [x y])))
 
@@ -2139,7 +2172,8 @@
                :stream  true
                :sub     #(swap! subs conj %)
                :unsub   #(when (= [] (swap! subs except %))
-                           ((:unsub s) @obs))}]
+                           (doseq [x (mapv :unsub s)] (x @obs))
+                           (reset! obs nil))}]
     (let [oo (mapv (fn [i] {:on-done (on-done i) :on-next (on-next i)})
                    (til-count s))]
       (doseq [[o in] (map vector oo s)] ((:sub in) o))
@@ -2255,23 +2289,27 @@
                    (doseq [s @subs] ((:on-done s)))
                    (reset! subs nil))
         push     (fn []
-                   (let [j (swap! i (fn [k] (+ 1 (min (count x) k))))]
-                     (if (<= j (count x))
-                       (do
-                         (let [ss (make-snapshot source (x (dec j)))]
-                           (doseq [s @subs] ((:on-next s) ss)))
-                         (when (= j (count x))
-                           (on-done)))
-                       (when (= 0 (count x))
-                         (on-done)))
+                   (let [curr-subs @subs
+                         j         (if (= 0 (count curr-subs))
+                                     @i
+                                     (swap! i #(+ 1 (min (count x) %))))]
+                     (when (< 0 (count curr-subs))
+                       (if (<= j (count x))
+                         (do
+                           (let [ss (make-snapshot source (x (dec j)))]
+                             (doseq [s curr-subs] ((:on-next s) ss)))
+                           (when (= j (count x))
+                             (on-done)))
+                         (when (= 0 (count x))
+                           (on-done))))
                      (< j (count x)))) ;; more to send?
-        push-all (fn [] (loop [] (if (push) (recur))))
         r        {:push     push
-                  :push-all push-all
                   :sources  [source]
                   :stream   true
+                  :subs     subs ;; for debugging
                   :sub      #(swap! subs conj %)
-                  :unsub    #(swap! subs except %)}]
+                  :unsub    #(when (= [] (swap! subs except %))
+                               (reset! i (count x)))}]
     (swap! test-streams conj r)
     (reset! stream r)))
 (defn push-all-test-streams []
