@@ -141,6 +141,8 @@
         (and (map? x) (< 5 (count x))) (map-snippet 2 x)
         :else       x))
 ;;    (if (lambda? x) (dissoc x :env) x)))
+(defn rdd?old [x] (:rdd x))
+(defn rdd? [x] (= org.apache.spark.api.java.JavaRDD (class x)) )
 (defn snapshot? [x] (:snapshot x))
 (defn snapshot-aware? [x r] ;; lambda, rank
   (and (:snapshot-aware x) (some #{r} (:snapshot-aware x))))
@@ -491,9 +493,11 @@
 (defn first-from-snapshot [x]
   ;; :extract true is a hack to work with wait
   (assoc (make-snapshot-final x) :extract true))
+(declare spark-first)
 (defn times
   "*x (first) and x*y (atomic multiplication)"
   ([x] (cond (snapshot? x) (first-from-snapshot x)
+             (rdd? x) (spark-first x)
              :else         (first x)))
   ([x y] ((atomize *) x y)))
 (defn vs [x y]
@@ -1245,7 +1249,7 @@
                 :snapshot-aware [2]}
           :+ {:f plus :text "+" :rank [1 2]}
           :- {:f minus :text "-" :rank [1 2]}
-          :* {:f times :text "*" :rank [1 2] :snapshot-aware [1]}
+          :* {:f times :text "*" :rank [1 2] :snapshot-aware [1] :rdd true}
           :% {:f fdiv :text "%" :rank [1 2]}
           :# {:f pound :text "#" :rank [1 2] :stream-aware [2]}
           :$ {:f dollar :text "$" :rank [1 2]}
@@ -2514,7 +2518,7 @@
                      :sparkkeys {:f spark-keys :rank [2]}
                      :sparkmap {:f spark-map :rank [2]}
                      :sparkreduce {:f spark-reduce :rank [2]}
-                     :sparkparallelize {:f spark-parallelize :rank [2 3]}
+                     :sparkparallelize {:f spark-parallelize :rank [2 3] :rdd true}
                      :sparkparallelizepairs {:f spark-parallelize-pairs :rank [2 3]}
                      :sparkpartitions {:f spark-partitions :rank [1]}
                      :sparkrddname {:f spark-rdd-name :rank [1 2]}
