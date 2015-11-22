@@ -1474,7 +1474,7 @@
                                                :rank [(count i)]}
                                               i))]))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn invoke [e f a]
+(defn invoke-helper [e f a]
   "Apply f to a. If f is not a lambda, index f at depth using a"
   (if (not (lambda? f))
     (cond (and (vector? f) (some #{:hole} f)) ;; (;4)3 => (3;4)
@@ -1499,13 +1499,11 @@
               ;;                            a)))])
           [e (apply (lambda-callable e f) a)]))
       (invoke-partial e f a))))
-;; (defn invoke [e f a]
-;;   (null! "invoke"
-;;          (if (:text f) (:text f) (lambda-callable e f))
-;;          a)
-;;   (let [[e r] (invoke-inner e f a)]
-;;     (null! "->" r)
-;;     [e r]))
+(defn invoke [e f a]
+  (let [[e r] (invoke-helper e f a)]
+    (if (and (map? r) (:new-env r))
+      [(:new-env r) nil]
+      [e r])))
 (defn is-callable "Can x be invoked" [x] (instance? clojure.lang.IFn x))
 (defn can-only-be-monadic
   "Can x be invoked with 1 argument and no other number of arguments?"
@@ -2338,12 +2336,16 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (declare genv)
-(defn set-genv [e] (reset! genv e))
+(defn set-genv [e] (reset! genv e) nil)
 (defn keval
   ([x] (let [[e r] (resolve-full-expr x @genv (second (parse x)))]
          (set-genv e)
          (lose-env r)))
   ([e x] (lose-env (last (resolve-full-expr x e (second (parse x)))))))
+
+(declare load-code)
+#?(:clj (defn load-qiss-file [e f]
+          {:new-env (load-code e (slurp (apply str f)))}))
 
 (def builtin-common {:cols     {:f cols :rank [1]}
                      :comp     {:f compose :rank [2]}
@@ -2365,6 +2367,9 @@
                      :xdesc    {:f xdesc :rank [2]}})
 (def builtin (merge builtin-common
                     #?(:clj  {:exit   {:f exit :rank [0 1]}
+                              :load   {:f load-qiss-file
+                                       :pass-global-env true
+                                       :rank [1]}
                               :new    {:f k-new :rank [1 2]}
                               :rcsv   {:f rcsv :rank [2]}
                               :rcsvh  {:f rcsvh :rank [2]}
@@ -2392,8 +2397,8 @@
                    (eseq (dom/sel "script")))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn load-code
-  ([]
-   #?(:clj  (load-code (slurp "src/qiss/qiss.qiss"))
+  ([env]
+   #?(:clj  (load-code env (slurp "src/qiss/qiss.qiss"))
       :cljs (let [q (qiss-elements)
                   r (make-array (count q))]
               (null! "found" (count q) "qisses to load...")
@@ -2403,56 +2408,63 @@
                     (aset r i (.-text e))
                     (xhr/send s (fn [v] (aset r i (response-text v))
                                   (when (every? some? r)
-                                    (doseq [c r] (load-code c))
+                                    (doseq [c r] (load-code env c))
                                     (null! "qisses loaded"))))))))))
-  ([x]
-   (set-genv (reduce #(let [[ne r] (resolve-full-expr x %1 %2)] ne)
-                     @genv
-                     (rest (second (parse x :start :file)))))))
+  ([env x]
+   (reduce #(let [[ne r]
+                  (resolve-full-expr x %1 %2)]
+              ne)
+           env
+           (rest (second (parse x :start :file))))))
 
 (declare grammar)
 (declare parser)
 (declare parses)
 #?(:clj (declare vis))
-(load-grammar "qiss/grammar"
-              (fn [g]
-                (null! "loaded grammar OK")
-                (def grammar g)
-                (def parser  (insta/parser grammar))
-                (def parse   (comp (partial insta/transform xform) parser))
-                (def parses  #(mapv (partial insta/transform xform)
-                                    (insta/parses parser %)))
-                #?(:clj (def vis (comp insta/visualize parse)))
-                (load-code)))
+(defn initialize-qiss [e]
+  (load-grammar "qiss/grammar"
+                (fn [g]
+                  (null! "loaded grammar OK")
+                  (def grammar g)
+                  (def parser  (insta/parser grammar))
+                  (def parse   (comp (partial insta/transform xform) parser))
+                  (def parses  #(mapv (partial insta/transform xform)
+                                      (insta/parses parser %)))
+                  #?(:clj (def vis (comp insta/visualize parse)))
+                  (load-code e))))
 
-(defn repl
-  ([] (repl builtin))
-  #?(:clj ([e] ;; env
-           (println "Welcome to qiss.  qiss is short and simple.")
-           (loop [e e]
-             (do ;; (print "e ") (println e)
-               (print "qiss)") (flush))
-;;               (print "\u00a7)") (flush))
-             (if-let [line (read-line)]
-               (if (or (empty? line) (= \/ (first line))) ; skip comments
-                 (recur e)
-                 (if (and (not= "\\\\" line) (not= "exit" line))
-                   (let [e2 (try
-                              (let [x (second (parse line))
-                                    [ne r] (resolve-full-expr line e x)]
-                                (if (not= :assign (first x))
-                                  (show r))
-                                ne)
-                              (catch Exception ex
-                                (println (.getMessage ex))
-                                e))]
-                     (recur e2)))))))))
+#?(:clj
+   (defn repl
+     ([] (repl @genv))
+     ([e] ;; env cmdline
+      (println "Welcome to qiss.  qiss is short and simple.")
+      (loop [e e]
+        (do ;; (print "e ") (println e)
+          (print "qiss)") (flush))
+        ;;               (print "\u00a7)") (flush))
+        (if-let [line (read-line)]
+          (if (or (empty? line) (= \/ (first line))) ; skip comments
+            (recur e)
+            (if (and (not= "\\\\" line) (not= "exit" line))
+              (let [e2 (try
+                         (let [x (second (parse line))
+                               [ne r] (resolve-full-expr line e x)]
+                           (if (not= :assign (first x))
+                             (show r))
+                           ne)
+                         (catch Exception ex
+                           (println (.getMessage ex))
+                           e))]
+                (recur e2)))))))))
 
-(defonce conn
-         #?(:cljs (brepl/connect "http://localhost:9000/repl")
-            :clj ()))
+#?(:cljs (defonce conn (brepl/connect "http://localhost:9000/repl")))
+
+(set-genv (initialize-qiss @genv))
 
 (defn -main
-          "qiss repl"
-          [& args]
-          #?(:clj (repl @genv)))
+  "qiss repl"
+  [& args]
+  (println *command-line-args*) ;; TODO process command line args
+  ;; TODO support stdin and stdout in the usual way
+  #?(:clj (repl))
+  0)

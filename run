@@ -1,1 +1,1 @@
-exec rlwrap lein run
+exec rlwrap lein run "$@"
