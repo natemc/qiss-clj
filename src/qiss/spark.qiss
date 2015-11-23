@@ -27,18 +27,25 @@ sparkcollect rdd:sparkparallelizepairs[sc;10#sparktuple[1;2]]
 sparkcollect sc sparkparallelizepairs 10#1 sparktuple 2
 
 / qiss operators with rdd (and PairRDD) as first-class-type
-*rdd             / sparkfirst
-rdd,rdd          / sparkjoin
-3#rdd            / sparktake
-show rdd         / sparkcollect
-?rdd             / sparkdistinct
-#(?rdd,rdd)      / sparkcount
+*rdd1             / sparkfirst
+rdd1,rdd2         / sparkjoin
+3#rdd1            / sparktake
+show rdd1         / sparkcollect
+?rdd1             / sparkdistinct
+#(?rdd1,rdd2)     / sparkcount
+rdd1-rdd2         / sparksubtract
 
-/ create 2.6 million paird
-prdd: sc sparkparallelizepairs ({(x sparktuple 1 ? 10)}'10000#alpha)
-show (=prdd)     / sparkgroupbykeys
-show (!prdd)     / sparkkeys
-show (.prdd)     / sparkvalues
+/ create 26 element pairrrd, 10 element pairrrd
+prdd1: sc sparkparallelizepairs ({(x sparktuple 1 ? 10)}'alpha)
+prdd2: sc sparkparallelizepairs ({(x sparktuple 1 ? 10)}'10#alpha)
+show (=prdd1)     / sparkgroupbykeys
+show (!prdd1)     / sparkkeys
+show (.prdd1)     / sparkvalues
+show (5=prdd1)    / sparkgroupbykeys across 5 splits
+show prdd1-prdd2  / sparksubtractbykey
+
+show group prdd
+show 5 group prdd
 
 sparkcollect rdd sparkcartesian rdd
 
@@ -48,7 +55,6 @@ sparkcollect filteredrdd
 sparkstop[sc]
 
 
-
 ilsfile:sparktextfile[sc;"iowa-liquor.csv"]  / http://mishadoff.com/blog/spark-in-clojure/
 sparkfirst ilsfile
 
@@ -56,22 +62,12 @@ data:sparkparallelize[sc; ("a"; "b"; "c"; "d"; "e")]    / parallized collection
 
 sparkfirst data       / take a peek at the first item in the rdd
 
-
 sparkcollect sparkmap[numdata; {x * x}]   / melt down
 
 data:sparkparallelizepairs[sc; (("a";1) ;("b";2); ("c";3); ("d";4); ("e";5))]
 
 sparkfirst data       / the same
 
-
 rddtext:sparktextfile[sc;"poi_names.txt"]
-
-rddtext2:sparkmap[rddtext;{#x}]  / serialization of this count function causes a spark meltdown
-
-/ be patient as spark will eventually return
-
-/ isn't rddtext'#
-/ rddtext speach # better?
-/ maybe qiss should auto-magically spark-erize RDD transformations and actions?
 
 sparkreduce[rddtext2;+]

@@ -1,10 +1,12 @@
 (ns qiss.core-test
-  #?(:clj  (:require [clojure.test :refer :all]
-                     [qiss.core :refer :all]
-                     [sparkling.api :as spark]
-                     [sparkling.conf :as sparkconf]))
-  #?(:cljs (:require [cljs.test :refer-macros [deftest is run-tests testing]]
-                     [qiss.core :refer :all])))
+  #?(:clj
+     (:require [clojure.test :refer :all]
+               [qiss.core :refer :all]
+               [sparkling.api :as spark]
+               [sparkling.conf :as sparkconf]))
+  #?(:cljs
+     (:require [cljs.test :refer-macros [deftest is run-tests testing]]
+               [qiss.core :refer :all])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -601,16 +603,16 @@
 
 
 ;; spark tests
-(deftest spark-configuration-and-context
-  (testing
-    "Spark configuration object instantiation"
-    (is (= org.apache.spark.SparkConf
-           (class (keval "sparkconf[\"local[*]\";\"qiss-spark-test-2\"]")))))
-  (testing
-    "Spark context start, stop"
-    (is (= nil
-           (keval "sparkstop sparkcontext sparkconf[\"local[*]\";\"qiss-spark-test-start-stop\"]")))))
-
+;(deftest spark-configuration-and-context
+;  (testing
+;    "Spark configuration object instantiation"
+;    (is (= org.apache.spark.SparkConf
+;           (class (keval "sparkconf[\"local[*]\";\"qiss-spark-test-2\"]"))))))
+;(testing
+;  "Spark context start, stop"
+;  (is (= nil
+;         (keval "sparkstop sparkcontext sparkconf[\"local[*]\";\"qiss-spark-test-start-stop\"]")))) )
+;
 
 
 

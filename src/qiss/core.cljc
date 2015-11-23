@@ -435,7 +435,8 @@
   "=x (group)      and    x=y (atomic equals)"
   ([x] (cond (pairrdd? x) (spark-group-by-key x)
              :else (group x)))
-  ([x y] ((atomize =) x y))) ;; TODO: promote long => double, fuzzy doubles
+  ([x y] (cond (and (number? x) (pairrdd? y)) (spark-group-by-key x y)
+           :else ((atomize =) x y)))) ;; TODO: promote long => double, fuzzy doubles
 (defn fdiv
   "%x (reciprocal) and x%y (atomic floating-point division)"
   ([x] (if (coll? x) (mapv #(double (/ %)) x)
@@ -470,10 +471,15 @@
          (keyed-table? x) (index (dict-key x) (less (dict-val x)))
          :else            (err "can't <" x)))
   ([x y] ((atomize <) x y)))
+(def spark-subtract)
+(def spark-subtract-by-key)
 (defn minus
   "-x (unary negation) and x-y (atomic minus)"
   ([x] (- x))
-  ([x y] ((atomize -) x y)))
+  ([x y]
+   (cond (rdd? x)     (spark-subtract x y)
+         (pairrdd? x) (spark-subtract-by-key x y)
+         :else ((atomize -) x y))))
 (defn neq
   "x<>y (atomic not-equals)"
   ([x y] ((atomize not=) x y))) ;; TODO: promote long => double, fuzzy doubles
@@ -2372,6 +2378,8 @@
   "Create new Spark Configuration by setting Master and AppName.
   Provides Spark the basic info necessary to access a cluster."
   (-> (sparkconf/spark-conf)
+      ;      (sparkconf/set (string key) (string val))
+      (sparkconf/set "spark.driver.allowMultipleContexts" "true")
       (sparkconf/master (string master))
       (sparkconf/app-name (string app-name))))
 
@@ -2455,11 +2463,22 @@
 (defn spark-map [f rdd]
    (spark/map f rdd))
 
+; (clojure.pprint/pprint
+;   (macroexpand '(sparkling.function/gen-function Function function)))
+(def function
+  (clojure.core/fn
+    ([f__7087__auto__]
+     (new sparkling.function.Function f__7087__auto__))))
+
 ; note the ordering - func goes first!
 (defn spark-map-hack [f rdd]
-  (spark/map (fn [x] (* 2 x)) rdd))
+  (let [wrappedf (function (fn [x] (* 2 x)))]
+    (.map rdd wrappedf)))
+
 
 ; this is not necessary
+; (and shortcut form for fn #() cannot be used
+; for maps
 (defn spark-map-hack2 [f rdd]
   (spark/map #(fn [x] (* 2 x)) rdd))
 
@@ -2490,6 +2509,11 @@
   "rdd1 except rdd2"
   ([rdd1 rdd2]
    (spark/subtract rdd1 rdd2)))
+
+(defn spark-subtract-by-key
+  "Return each (key, value) pair in rdd1 that has no pair with matching key in rdd2."
+  ([rdd1 rdd2]
+   (spark/subtract-by-key rdd1 rdd2)))
 
 (def spark-values
   spark/values)
@@ -2581,7 +2605,7 @@
                      :sparkfirst {:f spark-first :rank [1]}
                      ;   :sparkflatmap {:f spark-flatmap :rank [1]}
                      :sparkintersection {:f spark-intersection :rank [2]}
-                     :sparkgroupbykey {:f spark-group-by-key :rank [1]}
+                     :sparkgroupbykey {:f spark-group-by-key :rank [1 2]}
                      :sparkkeys {:f spark-keys :rank [1]}
                      :sparkmap {:f spark-map :rank [2]}
                      :sparkmaphack {:f spark-map-hack :rank [2]}
@@ -2599,6 +2623,7 @@
                      :sparkstop {:f spark-stop :rank [1]}
                      :sparksortbykey {:f spark-sort-by-key :rank [1]}
                      :sparksubtract {:f spark-subtract :rank [2]}
+                     :sparksubtractbykey {:f spark-subtract-by-key :rank [2]}
                      :sparkSTORAGE_LEVELS {:f spark-STORAGE-LEVELS :rank [0]}
                      :sparkunion {:f spark-union :rank [2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20]}
                      :sparkvalues {:f spark-values :rank [1]}

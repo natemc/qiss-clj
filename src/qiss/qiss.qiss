@@ -9,6 +9,7 @@ except:{x@&~x in y};
 
 / testing 1 2 3
 fby:{[f v;h]@[(#h)#v;g;{y};f'v g:.=h]};
+/ group:{=x}
 in:{(#y)>((),y)?x};
 inter:{x@&x in y};
 lower:{@[x;i;{y};alpha p i:&26>p:ALPHA?x]};
