@@ -19,5 +19,9 @@ union:{?x,y};
 upper:{@[x;i;{y};ALPHA p i:&26>p:alpha?x]};
 xcol:{+(x,(#x)_cols y)!.+y};
 xcols:{(x,cols[y]except x)#y}; / testing comments
+/ spark init
+/   key -> !
+/   value -> .
+sc:sparkcontext "local[*]" sparkconf  "qiss-default-cluster"
+/ .z.exit:{sparkstop sc}
 / Don't put a newline at EOF: the grammar needs work
-

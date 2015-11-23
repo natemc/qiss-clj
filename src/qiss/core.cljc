@@ -145,6 +145,9 @@
 (defn rdd? [x]
   #?(:clj (instance? org.apache.spark.api.java.JavaRDD x)
      :cljs false))
+(defn pairrdd? [x]
+  #?(:clj (instance? org.apache.spark.api.java.JavaPairRDD x)
+     :cljs false))
 
 (defn snapshot? [x] (:snapshot x))
 (defn snapshot-aware? [x r] ;; lambda, rank
@@ -203,10 +206,11 @@
   (cond (table? x)       (dict-key x)
         (keyed-table? x) (catv (cols (dict-key x)) (cols (dict-val x)))
         :else            (err "cols cannot be applied to" x)))
+(def spark-keys)
 (defn keycols "the names of the columns of keyed table x" [x]
-  (if (keyed-table? x)
-    (cols (dict-key x))
-    (err "keycols cannot be applied to " x)))
+  (cond (pairrdd? x)     (spark-keys x)
+        (keyed-table? x) (cols (dict-key x))
+    :else (err "keycols cannot be applied to " x)))
 (defn d-from-t "dict from table" [x] (dissoc x :t))
 (defn t-from-d "table from dict" [x] (assoc x :t true))
 
@@ -426,9 +430,11 @@
   ([x y] (promote-bools (fn [& b] (and b)) min x y)))
 (defn div "atomic integer division" [x y] ((atomize quot) x y))
 (declare group)
+(declare spark-group-by-key)
 (defn eq
   "=x (group)      and    x=y (atomic equals)"
-  ([x] (group x))
+  ([x] (cond (pairrdd? x) (spark-group-by-key x)
+             :else (group x)))
   ([x y] ((atomize =) x y))) ;; TODO: promote long => double, fuzzy doubles
 (defn fdiv
   "%x (reciprocal) and x%y (atomic floating-point division)"
@@ -500,7 +506,7 @@
 (defn times
   "*x (first) and x*y (atomic multiplication)"
   ([x] (cond (snapshot? x) (first-from-snapshot x)
-             (rdd? x) (spark-first x)
+             (or (rdd? x) (pairrdd? x)) (spark-first x)
              :else         (first x)))
   ([x y] ((atomize *) x y)))
 (defn vs [x y]
@@ -512,7 +518,8 @@
 ;; non-atomic operators
 (defn bang
   "!x (the key of x) and x!y (key y using x)"
-  ([x] (cond (number? x)      (vec (range x))
+  ([x] (cond (pairrdd? x)     (spark-keys x)
+             (number? x)      (vec (range x))
              (vector? x)      (til-count x)
              (dict? x)        (dict-key x)
              (keyed-table? x) (dict-key x)
@@ -592,6 +599,7 @@
   ",x (enlist) and x,y (join)"
   ([x] [x])
   ([x y] (cond (and (rdd? x) (rdd? y))  (spark-union x y)
+               (and (pairrdd? x) (pairrdd? y))  (spark-union x y)
                (vector? x)              (cond (vector? y) (vec (concat x y))
                                               (stream? y) (join-vec-to-stream x y)
                                               :else       (conj x y))
@@ -673,7 +681,7 @@
 (def spark-count)
 (defn kcount [x]
   "#x (count)  returns 1 for atoms"
-  (cond (rdd? x) (spark-count x)
+  (cond (or (rdd? x) (pairrdd? x))  (spark-count x)
         (vector? x)      (count x)
         (dict? x)        (count (dict-val x))
         (table? x)       (count (first (dict-val x)))
@@ -762,7 +770,7 @@
   (if (and (coll? x) (not (empty? x)) (every? number? x))
     (reshape (mapv #(if (bool? %) (if % 1 0) %) x) y)
     (let [n (if (bool? x) (if x 1 0) x)]
-      (cond (rdd? y)         (spark-take n y)   ; this condition must test first - talk w/nate
+      (cond (or (rdd? y) (pairrdd? y)) (spark-take n y)   ; this condition must test first - talk w/nate
             (not (coll? y))  (vec (repeat n y))
             (vector? y)      (take-from-vec n y)
             (dict? y)        (take-from-dict n y)
@@ -836,9 +844,10 @@
 (def spark-distinct)
 (defn ques
   "?x (distinct) and x?y (find or rand depending on the arguments)"
-  ([x] (cond (rdd? x) (spark-distinct x)
+  ([x] (cond (or (rdd? x) (pairrdd? x))  (spark-distinct x)
              :else (vec (distinct x))))
-  ([x y] (cond (vector? x)      (findv x y)
+  ([x y] (cond (or (rdd? y) (pairrdd? y))          (err "nyi: " x y)
+               (vector? x)      (findv x y)
                (dict? x)        (index (dict-key x) (ques (dict-val x) y))
                (table? x)       (find-table x y)
                (keyed-table? x) (index (dict-key x) (ques (dict-val x) y))
@@ -1205,7 +1214,8 @@
    x . i      (index at depth)
    .[x;i;f]   (selective transformation)
    .[x;i;f;y] (selective transformation w/rhs)"
-  ([e x] (cond (vector? x)      x
+  ([e x] (cond (pairrdd? x)      (spark-keys x)
+               (vector? x)      x
                (dict? x)        (dict-val x)
                (keyed-table? x) (dict-val x)
                (keyword? x)     (if-let [u (e x)] u (err x "not found"))
@@ -1977,7 +1987,7 @@
 
 (def spark-collect)
 (defn show [x]
-  (cond (rdd? x)         (spark-collect x)
+  (cond (or (rdd? x) (pairrdd? x))          (spark-collect x)
         (vector? x)      (println (stringify-vector x))
         (dict? x)        (show-dict x)
         (table? x)       (show-table x)
@@ -2487,6 +2497,29 @@
 (def spark-keys
   spark/keys)
 
+(def spark-group-by-key
+  spark/group-by-key)
+
+(def spark-sort-by-key
+  spark/sort-by-key)
+
+(def spark-count-by-key
+  "Only available on RDDs of type (K, V).
+  Returns a map of (K, Int) pairs with the count of each key."
+  spark/count-by-key)
+
+(def spark-count-by-value
+  "Return the count of each unique value in `rdd` as a map of (value, count)
+  pairs."
+  spark/count-by-value)
+
+(def spark-collect-as-map
+  "Returns all elements of `pair-rdd` as a map at the driver process.
+  Attention: The resulting map will only have one entry per key.
+             Thus, if you have multiple tuples with the same key in the pair-rdd, the collection returned will not contain all elements!
+             The function itself will *not* issue a warning of any kind!"
+  spark/collect-map)
+
 (def spark-cogroup
   spark/cogroup)
 
@@ -2501,6 +2534,14 @@
    (spark/rdd-name rdd (string name)))
   ([rdd]
    (spark/rdd-name rdd)))
+
+(defn spark-save-as-text-file
+  "Writes the elements of `rdd` as a text file (or set of text files)
+  in a given directory `path` in the local filesystem, HDFS or any other Hadoop-supported
+  file system. Spark will call toString on each element to convert it to a line of
+  text in the file."
+  [path rdd]
+  (spark/save-as-text-file path rdd))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (declare genv)
@@ -2527,9 +2568,12 @@
                      :sparkcheckpoint {:f spark-checkpoint :rank [0]}
                      :sparkcogroup {:f spark-cogroup :rank [1 2]}
                      :sparkcollect {:f spark-collect :rank [1]}
+                     :sparkcollectasmap {:f spark-collect-as-map :rank [1]}
                      :sparkconf {:f spark-conf :rank [2]}
                      :sparkcontext {:f spark-context :rank [1]}
                      :sparkcount {:f spark-count :rank [1]}
+                     :sparkcountbykey {:f spark-count-by-key :rank [1]}
+                     :sparkcountbyvalue {:f spark-count-by-value :rank [1]}
                      :sparkcountpartitions {:f spark-count-partitions :rank [1]}
                      :sparkdistinct {:f spark-distinct :rank [1 2]}
                      :sparkfilter {:f spark-filter :pass-global-env true :rank [2]}
@@ -2537,8 +2581,8 @@
                      :sparkfirst {:f spark-first :rank [1]}
                      ;   :sparkflatmap {:f spark-flatmap :rank [1]}
                      :sparkintersection {:f spark-intersection :rank [2]}
-                     ;   :sparkgroupbykey {:f spark-groupbykey :rank [2]}
-                     :sparkkeys {:f spark-keys :rank [2]}
+                     :sparkgroupbykey {:f spark-group-by-key :rank [1]}
+                     :sparkkeys {:f spark-keys :rank [1]}
                      :sparkmap {:f spark-map :rank [2]}
                      :sparkmaphack {:f spark-map-hack :rank [2]}
                      :sparkmaphack2 {:f spark-map-hack2 :rank [2]}
@@ -2551,11 +2595,14 @@
                      :sparktextfile {:f spark-text-file :rank [2]}
                      :sparktuple {:f spark-tuple :rank [2]}
                      :sparksample {:f spark-sample :rank [4]}
+                     :sparksaveastextfile {:f spark-save-as-text-file :rank [2]}
                      :sparkstop {:f spark-stop :rank [1]}
+                     :sparksortbykey {:f spark-sort-by-key :rank [1]}
                      :sparksubtract {:f spark-subtract :rank [2]}
                      :sparkSTORAGE_LEVELS {:f spark-STORAGE-LEVELS :rank [0]}
                      :sparkunion {:f spark-union :rank [2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20]}
-                     :sparkvalues {:f spark-values :rank [2]}
+                     :sparkvalues {:f spark-values :rank [1]}
+                     ; :values {:f values :rank [1]}
                      :stop     {:f stop :rank [1] :stream-aware [1]}
                      :sv       {:f sv :rank [2]}
                      :throttle {:f throttle :rank [2] :stream-aware [2]}
