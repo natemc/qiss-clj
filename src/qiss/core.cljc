@@ -141,7 +141,6 @@
         (and (map? x) (< 5 (count x))) (map-snippet 2 x)
         :else       x))
 ;;    (if (lambda? x) (dissoc x :env) x)))
-(defn rdd?old [x] (:rdd x))
 (defn rdd? [x]
   #?(:clj (instance? org.apache.spark.api.java.JavaRDD x)
      :cljs false))
@@ -206,7 +205,7 @@
   (cond (table? x)       (dict-key x)
         (keyed-table? x) (catv (cols (dict-key x)) (cols (dict-val x)))
         :else            (err "cols cannot be applied to" x)))
-(def spark-keys)
+(declare spark-keys)
 (defn keycols "the names of the columns of keyed table x" [x]
   (cond (pairrdd? x)     (spark-keys x)
         (keyed-table? x) (cols (dict-key x))
@@ -299,9 +298,13 @@
   (if (vector? x)
     (mapv #(in % y) x)
     (if (some #{x} y) true false)))
+(declare spark-intersection)
 (defn inter
   "Intersection of 2 vectors.  Preserves the order per x"
-  [x y] (vec (filter #(some #{%} y) x)))
+  [x y]
+  (cond (and (rdd? x) (rdd? y))         (spark-intersection x y)
+        (and (pairrdd? x) (pairrdd? y)) (spark-intersection x y)
+        :else (vec (filter #(some #{%} y) x))))
 (declare index)
 (defn klast "the last element of x" [x]
   (cond (vector? x) (last x)
@@ -327,10 +330,14 @@
 (declare kcount)
 (defn til [x] (vec (range x)))
 (defn til-count "0..count[x]-1" [x] (vec (range (kcount x))))
+(declare spark-union)
 (defn union
   "Union of 2 vectors.  Preserves the order of x and the items added
   from y retain their relative order as well"
-  [x y] (vec (distinct (concat x y))))
+  [x y]
+  (cond (and (rdd? x) (rdd? y))         (spark-union x y)
+        (and (pairrdd? x) (pairrdd? y)) (spark-union x y)
+        :else (vec (distinct (concat x y)))))
 (defn where
   "All elements of x must be integers.  For each element of x (vector
   or dict), concat that many copies of that element's index"
@@ -471,8 +478,8 @@
          (keyed-table? x) (index (dict-key x) (less (dict-val x)))
          :else            (err "can't <" x)))
   ([x y] ((atomize <) x y)))
-(def spark-subtract)
-(def spark-subtract-by-key)
+(declare spark-subtract)
+(declare spark-subtract-by-key)
 (defn minus
   "-x (unary negation) and x-y (atomic minus)"
   ([x] (- x))
@@ -509,12 +516,17 @@
   ;; :extract true is a hack to work with wait
   (assoc (make-snapshot-final x) :extract true))
 (declare spark-first)
+(declare spark-cartesian)
 (defn times
   "*x (first) and x*y (atomic multiplication)"
-  ([x] (cond (snapshot? x) (first-from-snapshot x)
-             (or (rdd? x) (pairrdd? x)) (spark-first x)
-             :else         (first x)))
-  ([x y] ((atomize *) x y)))
+  ([x]
+   (cond (snapshot? x)                     (first-from-snapshot x)
+         (or (rdd? x) (pairrdd? x))        (spark-first x)
+         :else                             (first x)))
+  ([x y]
+   (cond (and (rdd? x) (rdd? y))           (spark-cartesian x y)
+         (and (pairrdd? x) (pairrdd? y))   (spark-cartesian x y)
+         :else                             ((atomize *) x y))))
 (defn vs [x y]
   "vector from string"
   (mapv vec (str/split (str/join y)
@@ -626,12 +638,11 @@
     ((:sub s) r)
     r))
 (declare rdd?)
-(declare spark-union)
+(declare spark-join)
 (defn join
   ",x (enlist) and x,y (join)"
   ([x] [x])
-  ([x y] (cond (and (rdd? x) (rdd? y))  (spark-union x y)
-               (and (pairrdd? x) (pairrdd? y))  (spark-union x y)
+  ([x y] (cond (and (pairrdd? x) (pairrdd? y))  (spark-join x y)
                (vector? x)              (cond (vector? y) (vec (concat x y))
                                               (stream? y) (join-vec-to-stream x y)
                                               :else       (conj x y))
@@ -702,7 +713,7 @@
         s       (make-stream (:sources x) on-next on-done)]
     ((:sub x) s)
     s))
-(def spark-count)
+(declare spark-count)
 (defn kcount [x]
   "#x (count)  returns 1 for atoms"
   (cond (or (rdd? x) (pairrdd? x))  (spark-count x)
@@ -863,7 +874,7 @@
     (vec (if (float? y)
            (repeatedly x #(rand y))
            (repeatedly x #(rand-int y))))))
-(def spark-distinct)
+(declare spark-distinct)
 (defn ques
   "?x (distinct) and x?y (find or rand depending on the arguments)"
   ([x] (cond (or (rdd? x) (pairrdd? x))  (spark-distinct x)
@@ -1282,7 +1293,7 @@
                 :snapshot-aware [2]}
           :+ {:f plus :text "+" :rank [1 2]}
           :- {:f minus :text "-" :rank [1 2]}
-          :* {:f times :text "*" :rank [1 2] :snapshot-aware [1] :rdd true}
+          :* {:f times :text "*" :rank [1 2] :snapshot-aware [1]}
           :% {:f fdiv :text "%" :rank [1 2]}
           :# {:f pound :text "#" :rank [1 2] :stream-aware [2]}
           :$ {:f dollar :text "$" :rank [1 2]}
@@ -1827,8 +1838,10 @@
           [e5 (make-table (dict-key r) v)])
         [e3 t]))))
 
+(declare spark-left-outer-join)
 (defn lj [x y]
-  (cond (not (keyed-table? y)) (err "rhs of lj must be a keyed table")
+  (cond (and (pairrdd? x) (pairrdd? y)) (spark-left-outer-join x y)
+        (not (keyed-table? y)) (err "rhs of lj must be a keyed table")
         (not (every? #(some #{%} (cols x)) (keycols y))) (err "mismatch: lj" x y)
         ;; for every row in x, find the index of the first matching row in y
         :else
@@ -1994,7 +2007,7 @@
               "[]"))]
     (println (s x))))
 
-(def spark-collect)
+(declare spark-collect)
 (defn show [x]
   (cond (or (rdd? x) (pairrdd? x))          (spark-collect x)
         (vector? x)      (println (stringify-vector x))
@@ -2465,6 +2478,9 @@
 (defn spark-map [f rdd]
    (spark/map f rdd))
 
+(defn spark-flat-map [f rdd]
+  (spark/flat-map f rdd))
+
 ; (clojure.pprint/pprint
 ;   (macroexpand '(sparkling.function/gen-function Function function)))
 (def function
@@ -2473,10 +2489,15 @@
      (new sparkling.function.Function f__7087__auto__))))
 
 ; note the ordering - func goes first!
-(defn spark-map-hack [f rdd]
+(defn spark-map-hack0 [f rdd]
   (let [wrappedf (function (fn [x] (* 2 x)))]
     (.map rdd wrappedf)))
 
+(def keval)
+(defn spark-map-hack [f rdd]
+  (let [myf ((keval "{x * 2}") :formals)
+        wrappedf (function myf)]
+    (.map rdd wrappedf)))
 
 ; this is not necessary
 ; (and shortcut form for fn #() cannot be used
@@ -2501,6 +2522,20 @@
   "union operation on two or more RDDs"
   ([& rdds]
    (apply spark/union rdds)))
+
+(defn spark-join
+  "When called on `rdd` of type (K, V) and (K, W), returns a dataset of
+   (K, (V, W)) pairs with all pairs of elements for each key."
+  ([rdd other]
+   (spark/join rdd other)))
+
+(defn spark-left-outer-join
+  "Performs a left outer join of `rdd` and `other`. For each element (K, V)
+   in the RDD, the resulting RDD will either contain all pairs (K, (V, W)) for W in other,
+   or the pair (K, (V, nil)) if no elements in other have key K."
+  ([rdd other]
+   (spark/join rdd other)))
+
 
 (defn spark-intersection
   "intersection operation on two or more RDDs"
@@ -2589,6 +2624,7 @@
                                 :stream-aware[2]}
                      :eval     {:f #(keval (apply str %)) :rank [1]}
                      :every    {:f every :rank [1]}
+                     :inter    {:f inter :rank [2]}
                      :keys     {:f keycols :rank [1]}
                      :last     {:f klast :rank [1]}
                      :lj       {:f lj :rank [2]}
@@ -2609,15 +2645,17 @@
                      :sparkfilter {:f spark-filter :pass-global-env true :rank [2]}
                      :sparkfilterhack {:f spark-filter-hack :pass-global-env true :rank [2]}
                      :sparkfirst {:f spark-first :rank [1]}
-                     ;   :sparkflatmap {:f spark-flatmap :rank [1]}
+                     :sparkflatmap {:f spark-flat-map :rank [2]}
                      :sparkintersection {:f spark-intersection :rank [2]}
+                     :sparkjoin {:f spark-join :rank [2]}
                      :sparkgroupbykey {:f spark-group-by-key :rank [1 2]}
                      :sparkkeys {:f spark-keys :rank [1]}
-                     :sparkmap {:f spark-map :rank [2]}
+                     :sparkleftouterjoin {:f spark-left-outer-join :rank [2]}
+                     :sparkmap {:f spark-map :pass-global-env true :rank [2]}
                      :sparkmaphack {:f spark-map-hack :rank [2]}
                      :sparkmaphack2 {:f spark-map-hack2 :rank [2]}
                      :sparkreduce {:f spark-reduce :rank [2]}
-                     :sparkparallelize {:f spark-parallelize :rank [2 3] :rdd true}
+                     :sparkparallelize {:f spark-parallelize :rank [2 3] }
                      :sparkparallelizepairs {:f spark-parallelize-pairs :rank [2 3]}
                      :sparkpartitions {:f spark-partitions :rank [1]}
                      :sparkrddname {:f spark-rdd-name :rank [1 2]}
@@ -2637,6 +2675,7 @@
                      :stop     {:f stop :rank [1] :stream-aware [1]}
                      :sv       {:f sv :rank [2]}
                      :throttle {:f throttle :rank [2] :stream-aware [2]}
+                     :union    {:f union :rank [2]} ; TODO: accept arb number of args like sparkunion
                      :vs       {:f vs :rank [2]}
                      :xasc     {:f xasc :rank [2]}
                      :xdesc    {:f xdesc :rank [2]}})

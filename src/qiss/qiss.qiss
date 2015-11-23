@@ -11,12 +11,12 @@ except:{x@&~x in y};
 fby:{[f v;h]@[(#h)#v;g;{y};f'v g:.=h]};
 / group:{=x}
 in:{(#y)>((),y)?x};
-inter:{x@&x in y};
+/ inter:{x@&x in y};
 lower:{@[x;i;{y};alpha p i:&26>p:ALPHA?x]};
 of:{y x};
 rotate:{y(x+!#y)mod(#y)};
 str:{$x};
-union:{?x,y};
+/ union:{?x,y};
 upper:{@[x;i;{y};ALPHA p i:&26>p:alpha?x]};
 xcol:{+(x,(#x)_cols y)!.+y};
 xcols:{(x,cols[y]except x)#y}; / testing comments

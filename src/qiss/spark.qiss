@@ -28,21 +28,33 @@ sparkcollect sc sparkparallelizepairs 10#1 sparktuple 2
 
 / qiss operators with rdd (and PairRDD) as first-class-type
 *rdd1             / sparkfirst
-rdd1,rdd2         / sparkjoin
+rdd1 union rdd2   / sparkunion  (not a set union)
+?rdd1             / sparkdistinct
+?rdd1 union rdd2  / sparkunion + distinct (set union)
+rdd1 inter rdd2   / sparkintersection
 3#rdd1            / sparktake
 show rdd1         / sparkcollect
-?rdd1             / sparkdistinct
 #(?rdd1,rdd2)     / sparkcount
 rdd1-rdd2         / sparksubtract
+rdd1 * rdd2       / sparkcartesian
 
 / create 26 element pairrrd, 10 element pairrrd
 prdd1: sc sparkparallelizepairs ({(x sparktuple 1 ? 10)}'alpha)
 prdd2: sc sparkparallelizepairs ({(x sparktuple 1 ? 10)}'10#alpha)
-show (=prdd1)     / sparkgroupbykeys
-show (!prdd1)     / sparkkeys
-show (.prdd1)     / sparkvalues
-show (5=prdd1)    / sparkgroupbykeys across 5 splits
-show prdd1-prdd2  / sparksubtractbykey
+show (= prdd1)          / sparkgroupbykeys
+show (! prdd1)          / sparkkeys
+show (. prdd1)          / sparkvalues
+show (5 = prdd1)        / sparkgroupbykeys across 5 splits
+show prdd1 - prdd2      / sparksubtractbykey
+show prdd1 , prdd2      / sparkjoin
+show prdd1 * prdd2      / sparkcartesian
+show prdd1 lj prdd2     / sparkleftouterjoin
+show prdd1 union prdd2  / sparkunion
+show prdd1 inter prdd2  / sparkintersection
+
+#!prdd1                 / sparkcountbyvalue   TODO: this needs grammar support?
+#.prdd1                 / sparkcountbykey
+
 
 show group prdd
 show 5 group prdd
