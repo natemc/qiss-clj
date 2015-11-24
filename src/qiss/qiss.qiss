@@ -20,9 +20,6 @@ str:{$x};
 upper:{@[x;i;{y};ALPHA p i:&26>p:alpha?x]};
 xcol:{+(x,(#x)_cols y)!.+y};
 xcols:{(x,cols[y]except x)#y}; / testing comments
-/ spark init
-/   key -> !
-/   value -> .
-sc:sparkcontext "local[*]" sparkconf  "qiss-default-cluster"
-/ .z.exit:{sparkstop sc}
+/ remove the next line when command line file loading via argument is implemented
+load "src/qiss/sparkinit.qiss"
 / Don't put a newline at EOF: the grammar needs work

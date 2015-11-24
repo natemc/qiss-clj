@@ -1,0 +1,4 @@
+/ spark init
+sc:sparkcontext "local[*]" sparkconf  "qiss-default-cluster"
+/ .z.exit:{sparkstop sc}
+/ Don't put a newline at EOF: the grammar needs work
