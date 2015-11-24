@@ -142,6 +142,10 @@
     (is (= [[0 1]] (keval "-1 3#!2")))
     (is (= [] (keval "-1 3#!0")))))
 (deftest test-underscore
+  (testing "_n is floor"
+    (is (= 3 (keval "_3.14")))
+    (is (= 3 (keval "_3.99")))
+    (is (= -4 (keval "_-3.14"))))
   (testing "n _ container => drop 1st n"
     (is (= [2 3 4] (keval "2_!5")))
     (is (= (keval "`c`d!3 4") (keval "2_`a`b`c`d!1 2 3 4")))
