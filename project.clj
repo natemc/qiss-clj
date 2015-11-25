@@ -9,7 +9,9 @@
                  [instaparse "1.4.1"]
                  [midje "1.6.3"]
                  [rhizome "0.2.5"]
-                 [gorillalabs/sparkling "1.2.4-SNAPSHOT"]
+                 ; [gorillalabs/sparkling "1.2.4-SNAPSHOT"]
+                  [yieldbot/flambo "0.7.1"]
+
                  ;; clojurescript from here down
                  [com.lucasbradstreet/instaparse-cljs "1.4.1.0"]
                  [im.chit/purnam "0.5.2"]
@@ -82,8 +84,13 @@
              ;; to configure a different figwheel logfile path
              ;; :server-logfile "tmp/logs/figwheel-logfile.log"
              }
-  :main ^:skip-aot qiss.core
+  :main qiss.core
   :target-path "target/%s"
-  :aot [#".*" clojure.tools.logging.impl sparkling.serialization sparkling.destructuring]
-  :profiles {:uberjar {:aot :all}
-             :provided {:dependencies [[org.apache.spark/spark-core_2.10 "1.3.1"]]}})
+  :aot [#".*" flambo.function qiss.core clojure.tools.logging.impl sparkling.serialization sparkling.destructuring]
+  :profiles {:dev {:aot [#".*" qiss.core clojure.tools.logging.impl sparkling.serialization sparkling.destructuring]}
+             :uberjar {:aot :all}
+             :provided {:dependencies [[org.apache.spark/spark-core_2.10 "1.5.0"]
+                                       [org.apache.spark/spark-streaming_2.10 "1.5.0"]
+                                       [org.apache.spark/spark-streaming-kafka_2.10 "1.5.0"]
+                                       [org.apache.spark/spark-streaming-flume_2.10 "1.5.0"]
+                                       [org.apache.spark/spark-sql_2.10 "1.5.0"]]}})

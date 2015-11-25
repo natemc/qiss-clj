@@ -18,9 +18,15 @@
                       [clojure.string :as str]
                       [instaparse.core :as insta]
                       [instaparse.viz :as instav]
-                      [sparkling.conf :as sparkconf]
-                      [sparkling.core :as spark])
+                     ; [sparkling.conf :as sparkconf]
+                     ; [sparkling.core :as spark]
+                      [flambo.conf :as sparkconf]
+                      [flambo.api :as spark]
+                      [flambo.tuple :as ft]
+                      )
             (:gen-class)]))
+
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Transducers
@@ -2419,10 +2425,12 @@
   spark/cache)
 
 (def spark-lookup
-  spark/lookup)
+  ; spark/lookup
+  )
 
 (def spark-collect-map
-  spark/collect-map)
+  ; spark/collect-map
+  )
 
 
 (defn spark-distinct
@@ -2468,36 +2476,54 @@
   (spark/sample with-replacement? fraction seed rdd))
 
 (def spark-count-partitions
-  spark/count-partitions)
+  ; spark/count-partitions
+  )
 
 (defn spark-text-file [sc uri]
   "create a RDD from URI of a text file.
   URI can be hdfs://... or s3n:// or a local fs path"
   (spark/text-file sc (string uri)))
 
+(declare keval)
+(defn spark-map-old [f rdd]
+   (spark/map (partial (lambda-code (keval "{x * 2}"))) rdd))
+
+; (spark-collect (let [rdd (keval "sc sparkparallelize (1;2;3;4;5)") ]
+;                 (spark/map rdd (spark/fn [x] ((partial ((keval "{x * 2}") :f)) {} x)))))
+
+
+(defn spark-map-old [f rdd]
+;  (spark/map rdd (spark/fn [x] (* 2 x)))) ; order is flipped in flambo
+  (spark/map rdd (spark/fn [x] ((partial ((keval "{x * 2}") :f)) {} x))))
+
+; #(keval (apply str %))
 (defn spark-map [f rdd]
-   (spark/map f rdd))
+  ;  (spark/map rdd (spark/fn [x] (* 2 x)))) ; order is flipped in flambo
+  (let [ff #(keval (apply str %))]
+    (spark/map rdd (spark/fn [x] ((partial ((keval "{x * 2}") :f)) {} x)))))
 
 (defn spark-flat-map [f rdd]
   (spark/flat-map f rdd))
 
 ; (clojure.pprint/pprint
 ;   (macroexpand '(sparkling.function/gen-function Function function)))
-(def function
-  (clojure.core/fn
-    ([f__7087__auto__]
-     (new sparkling.function.Function f__7087__auto__))))
+;(def function
+;  (clojure.core/fn
+;    ([f__7087__auto__]
+;     (new sparkling.function.Function f__7087__auto__))))
 
 ; note the ordering - func goes first!
 (defn spark-map-hack0 [f rdd]
-  (let [wrappedf (function (fn [x] (* 2 x)))]
-    (.map rdd wrappedf)))
+;  (let [wrappedf (function (fn [x] (* 2 x)))]
+;    (.map rdd wrappedf)
+  )
 
-(def keval)
+
 (defn spark-map-hack [f rdd]
-  (let [myf ((keval "{x * 2}") :formals)
-        wrappedf (function myf)]
-    (.map rdd wrappedf)))
+;  (let [myf #(keval "{x * 2}")
+;        wrappedf (function myf)]
+;    (.map rdd wrappedf)
+  )
 
 ; this is not necessary
 ; (and shortcut form for fn #() cannot be used
@@ -2510,10 +2536,12 @@
 
 (defn spark-stop [sc]
   "shutdown SparkContext"
-  (spark/stop sc))
+  ; (spark/stop sc)
+  )
 
 (defn spark-tuple [x y]
-  (spark/tuple x y))
+  ; (spark/tuple x y)
+  )
 
 (defn spark-take [n rdd]
   (spark/take n rdd))
@@ -2540,7 +2568,8 @@
 (defn spark-intersection
   "intersection operation on two or more RDDs"
   ([rdd1 rdd2]
-   (spark/intersection rdd1 rdd2)))
+  ; (spark/intersection rdd1 rdd2)
+  ))
 
 (defn spark-subtract
   "rdd1 except rdd2"
@@ -2550,13 +2579,15 @@
 (defn spark-subtract-by-key
   "Return each (key, value) pair in rdd1 that has no pair with matching key in rdd2."
   ([rdd1 rdd2]
-   (spark/subtract-by-key rdd1 rdd2)))
+   ; (spark/subtract-by-key rdd1 rdd2)
+    ))
 
 (def spark-values
   spark/values)
 
 (def spark-keys
-  spark/keys)
+  ; spark/keys
+  )
 
 (def spark-group-by-key
   spark/group-by-key)
@@ -2579,13 +2610,16 @@
   Attention: The resulting map will only have one entry per key.
              Thus, if you have multiple tuples with the same key in the pair-rdd, the collection returned will not contain all elements!
              The function itself will *not* issue a warning of any kind!"
-  spark/collect-map)
+  ; spark/collect-map
+  )
 
 (def spark-cogroup
-  spark/cogroup)
+  ; spark/cogroup
+  )
 
 (def spark-checkpoint
-  spark/checkpoint)
+  ; spark/checkpoint
+  )
 
 (def spark-cartesian
   spark/cartesian)
@@ -2651,7 +2685,7 @@
                      :sparkgroupbykey {:f spark-group-by-key :rank [1 2]}
                      :sparkkeys {:f spark-keys :rank [1]}
                      :sparkleftouterjoin {:f spark-left-outer-join :rank [2]}
-                     :sparkmap {:f spark-map :pass-global-env true :rank [2]}
+                     :sparkmap {:f spark-map  :rank [2]}
                      :sparkmaphack {:f spark-map-hack :rank [2]}
                      :sparkmaphack2 {:f spark-map-hack2 :rank [2]}
                      :sparkreduce {:f spark-reduce :rank [2]}
