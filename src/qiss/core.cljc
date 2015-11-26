@@ -2412,22 +2412,19 @@
                    (eseq (dom/sel "script")))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn load-code
-  ([env]
-   #?(:clj  (load-code env (slurp "src/qiss/qiss.qiss"))
-      :cljs (let [q (qiss-elements)
-                  r (make-array (count q))]
-              (null! "found" (count q) "qisses to load...")
-              (doseq [[i e] (map list (range (count q)) q)]
-                (let [s (.-src e)]
-                  (if (= "" s) ;; no src attr => code is in tag's text
-                    (aset r i (.-text e))
-                    (xhr/send s (fn [v] (aset r i (response-text v))
-                                  (when (every? some? r)
-                                    (doseq [c r] (load-code env c))
-                                    (null! "qisses loaded"))))))))))
+  #?(:cljs ([] (let [q (qiss-elements)
+                     r (make-array (count q))]
+                 (null! "found" (count q) "qisses to load...")
+                 (doseq [[i e] (map list (range (count q)) q)]
+                   (let [s (.-src e)]
+                     (if (= "" s) ;; no src attr => code is in tag's text
+                       (aset r i (.-text e))
+                       (xhr/send s (fn [v] (aset r i (response-text v))
+                                     (when (every? some? r)
+                                       (set-genv (reduce load-code @genv r))
+                                       (null! "qisses loaded"))))))))))
   ([env x]
-   (reduce #(let [[ne r]
-                  (resolve-full-expr x %1 %2)]
+   (reduce #(let [[ne r] (resolve-full-expr x %1 %2)]
               ne)
            env
            (rest (second (parse x :start :file))))))
@@ -2436,7 +2433,7 @@
 (declare parser)
 (declare parses)
 #?(:clj (declare vis))
-(defn initialize-qiss [e]
+(defn initialize-qiss-common [after]
   (load-grammar "qiss/grammar"
                 (fn [g]
                   (null! "loaded grammar OK")
@@ -2446,8 +2443,12 @@
                   (def parses  #(mapv (partial insta/transform xform)
                                       (insta/parses parser %)))
                   #?(:clj (def vis (comp insta/visualize parse)))
-                  (load-code e))))
-
+                  (after))))
+(defn initialize-qiss
+  #?(:cljs ([] (initialize-qiss-common load-code)))
+  #?(:clj  ([e] (initialize-qiss-common
+                 (fn [] (load-code e (slurp "src/qiss/qiss.qiss")))))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 #?(:clj
    (defn repl
      ([] (repl @genv))
@@ -2474,16 +2475,19 @@
                 (recur e2)))))))))
 
 #?(:cljs (defonce conn (brepl/connect "http://localhost:9000/repl")))
-
-(set-genv (initialize-qiss @genv))
-
+#?(:clj  (when-not *command-line-args* ;; i.e., we're in a clojure repl
+           (set-genv (initialize-qiss builtin)))
+   :cljs (initialize-qiss)) ;; DO NOT set-genv here; it's async
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn -main
   "qiss repl"
   [& args]
-  (let [a (vec args)
-        f (index a (where (like a ".*\\.qiss")))]
-    (if-not (empty? f)
-      (set-genv (load-qiss-file @genv (first f)))))
   ;; TODO support stdin and stdout in the usual way
-  #?(:clj (repl))
+  #?(:clj (let [a (vec args)
+                i (where (like a ".*\\.qiss"))
+                f (index a i)
+                e (initialize-qiss builtin)]
+            (repl (if (empty? f)
+                    builtin
+                    (load-qiss-file e (first f))))))
   0)
