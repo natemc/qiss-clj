@@ -18,3 +18,5 @@ pom.xml.asc
 *.class
 *.log
 *.swp
+
+*.csv#

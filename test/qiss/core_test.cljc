@@ -2,8 +2,12 @@
   #?(:clj
      (:require [clojure.test :refer :all]
                [qiss.core :refer :all]
-               [sparkling.api :as spark]
-               [sparkling.conf :as sparkconf]))
+;               [sparkling.api :as spark]
+;               [sparkling.conf :as sparkconf]
+               [flambo.conf :as sparkconf]
+               [flambo.api :as spark]
+               [flambo.tuple :as ft]
+               [flambo.sql :as sparksql]))
   #?(:cljs
      (:require [cljs.test :refer-macros [deftest is run-tests testing]]
                [qiss.core :refer :all])))
@@ -616,3 +620,8 @@
 
 
 
+;(deftest spark-test
+;  (testing
+;    ""
+;    (is (= 3
+;     (keval "sparkcount sparkcollect sparkfilter[  sc sparkparallelize (0;1;2;3;4;5) ; {0=x mod 2} ]\n")))))
