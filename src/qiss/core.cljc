@@ -1,25 +1,18 @@
 (ns qiss.core
-  #?(:cljs (:require-macros [cljs.core.async.macros :refer [go go-loop]]))
-  #?(:cljs (:require [cljs.core.async :as async :refer [chan put! <! >!]]
-                     [clojure.browser.repl :as brepl]
-                     [clojure.string :as str]
-                     [dommy.core :as dom :refer-macros [sel sel1]]
-                     [goog.net.XhrIo :as xhr]
-                     [goog.string :as gstring :refer [format]]
-                     [instaparse.core :as insta]
-                     [instaparse.viz :as instav]
-                     [testdouble.cljs.csv :as csv]))
-
   #?@(:clj [(:require [clojure-csv.core :as csv]
-                      [clojure.core.async :as async
-                         :refer [chan go go-loop put! <! >! <!!]]
                       [clojure.java.io :as io]
                       [clojure.stacktrace :as st] ;; handy from the repl
                       [clojure.string :as str]
                       [instaparse.core :as insta]
                       [instaparse.viz :as instav])
-            (:gen-class)]))
-
+            (:gen-class)])
+  #?(:cljs (:require [clojure.string :as str]
+                     [dommy.core :as dom :refer-macros [sel sel1]]
+                     [goog.net.XhrIo :as xhr]
+                     [goog.string :as gstring :refer [format]]
+                     [instaparse.core :as insta]
+                     [instaparse.viz :as instav]
+                     [testdouble.cljs.csv :as csv])))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Transducers
 ;; NOT USED.  These are just here to think about.
@@ -2474,7 +2467,6 @@
                            e))]
                 (recur e2)))))))))
 
-#?(:cljs (defonce conn (brepl/connect "http://localhost:9000/repl")))
 #?(:clj  (when-not *command-line-args* ;; i.e., we're in a clojure repl
            (set-genv (initialize-qiss builtin)))
    :cljs (initialize-qiss)) ;; DO NOT set-genv here; it's async
