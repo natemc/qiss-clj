@@ -3,11 +3,26 @@
 /
 / df:sparksqlload[ c;"iowa-liquor.csv";"com.databricks.spark.csv"]
 /
-df:c sparksqlreadcsv "iowa_liquor_sales_fixed_with_header5.csv"
-sparksqlregisterdataframeastable[c;df;"myfirsttable"]   / give it a name
-sparkcount c sparksql "SELECT * FROM myfirsttable"
-                                                     / this provides a table name
-                                                     / for the SQL query call below
-sparksqltablenames c                                 / is it really there? ---> (myfirsttable)
-sparksqlcolumns df                                   / equiv to cols
+/ $ wc iowa_liquor_sales_fixed_with_header5.csv
+       10     224    2621 iowa_liquor_sales_fixed_with_header5.csv
+/ $
+/    # nine row baby table for testing
+/
+df:c sparksqlreadcsv "iowa_liquor_sales_fixed_with_header5.csv"   / csv -> df
+sparksqlregisterdataframeastable[c;df;"myfirsttable"]       / df -> table
+c sparksql "SELECT NAME, DATE, ZIPCODE from myfirsttable"   / we can apply a SQL query func
+                                                            / to tables
+/ now go back the other way..
+/ myfirstable -> df
+df:sparksqltable[c; "myfirsttable"]       / table -> df
+
+/ basic qiss-esque dataframe operations
+show df                       / sparksqlshow
+#df                           / sparksqlcount
+*df                           / sparksqlfirst df
+rows:3#df                     / sparksqltake 3
+sparksqlrowtovec'rows         / each of the three rows to vec
+sparksqltablenames c          / is it really there? ---> (myfirsttable)
+sparksqlcolumns df            / equiv to cols
+sparksqlprintschema df        / meta
 / Don't put a newline at EOF: the grammar needs work

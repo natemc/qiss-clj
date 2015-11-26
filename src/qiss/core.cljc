@@ -156,7 +156,12 @@
 (defn pairrdd? [x]
   #?(:clj (instance? org.apache.spark.api.java.JavaPairRDD x)
      :cljs false))
-
+(defn dframe? [x]
+  #?(:clj (instance? org.apache.spark.sql.DataFrame x)
+     :cljs false))
+(defn row? [x]
+  #?(:clj (instance? org.apache.spark.sql.Row x)
+     :cljs false))
 (defn snapshot? [x] (:snapshot x))
 (defn snapshot-aware? [x r] ;; lambda, rank
   (and (:snapshot-aware x) (some #{r} (:snapshot-aware x))))
@@ -531,6 +536,7 @@
   ([x]
    (cond (snapshot? x)                     (first-from-snapshot x)
          (or (rdd? x) (pairrdd? x))        (spark-first x)
+         (or (dframe? x))                  (spark-first x)
          :else                             (first x)))
   ([x y]
    (cond (and (rdd? x) (rdd? y))           (spark-cartesian x y)
@@ -723,14 +729,17 @@
     ((:sub x) s)
     s))
 (declare spark-count)
+(declare spark-sql-count)
 (defn kcount [x]
   "#x (count)  returns 1 for atoms"
-  (cond (or (rdd? x) (pairrdd? x))  (spark-count x)
-        (vector? x)      (count x)
-        (dict? x)        (count (dict-val x))
-        (table? x)       (count (first (dict-val x)))
-        (keyed-table? x) (count (first (dict-val (dict-key x))))
-        :else            1))
+  (cond (or (rdd? x)
+            (pairrdd? x)) (spark-count x)
+        (dframe? x)       (spark-sql-count x)
+        (vector? x)       (count x)
+        (dict? x)         (count (dict-val x))
+        (table? x)        (count (first (dict-val x)))
+        (keyed-table? x)  (count (first (dict-val (dict-key x))))
+        :else             1))
 (defn matrix-from-vector [m n v] ;; rows cols vec
   (mapv (fn [r]
           (mapv (fn [c] (v (mod (+ (* r n) c) (count v))))
@@ -806,22 +815,25 @@
         :else
         (err "nyi: reshape only supports vector on rhs")))
 (declare spark-take)
+(declare spark-sql-take)
 (defn ktake [x y]
   "x#y take from y the elements specified by x"
   ;; TODO: support stream for x?
   (if (and (coll? x) (not (empty? x)) (every? number? x))
     (reshape (mapv #(if (bool? %) (if % 1 0) %) x) y)
     (let [n (if (bool? x) (if x 1 0) x)]
-      (cond (or (rdd? y) (pairrdd? y)) (spark-take n y)   ; this condition must test first - talk w/nate
-            (not (coll? y))  (vec (repeat n y))
-            (vector? y)      (take-from-vec n y)
-            (dict? y)        (take-from-dict n y)
-            (table? y)       (take-from-table n y)
-            (keyed-table? y) (take-from-keyed-table n y)
-            (stream? y)      (if (< n 0)
-                               (take-last-from-stream (- n) y)
-                               (take-from-stream n y))
-            :else            (err "nyi: # on " y)))))
+      (cond (or (rdd? y)
+                (pairrdd? y)) (spark-take n y)
+            (dframe? y)       (spark-sql-take y n)
+            (not (coll? y))   (vec (repeat n y))
+            (vector? y)       (take-from-vec n y)
+            (dict? y)         (take-from-dict n y)
+            (table? y)        (take-from-table n y)
+            (keyed-table? y)  (take-from-keyed-table n y)
+            (stream? y)       (if (< n 0)
+                                (take-last-from-stream (- n) y)
+                                (take-from-stream n y))
+            :else             (err "nyi: # on " y)))))
 (defn pound
   "#x (count) and x#y (take)"
   ([x] (kcount x))
@@ -2017,8 +2029,10 @@
     (println (s x))))
 
 (declare spark-collect)
+(declare spark-sql-show)
 (defn show [x]
   (cond (or (rdd? x) (pairrdd? x))          (spark-collect x)
+        (dframe? x)      (spark-sql-show x)
         (vector? x)      (println (stringify-vector x))
         (dict? x)        (show-dict x)
         (table? x)       (show-table x)
@@ -2645,6 +2659,28 @@
 ;  spark sql  -- all function names start with "spark-sql-"
 ;                except for spark-context-from-sql-text to avoid confusion.
 
+(defn spark-sql-show
+  "show"
+  [^DataFrame dataframe]
+  (.show dataframe))
+
+(defn spark-sql-take
+  "take"
+  [^DataFrame dataframe n]
+  (.take dataframe n))
+
+(defn spark-sql-count
+  "count"
+;  [^DataFrame dataframe]
+  [dataframe]
+  (.count dataframe))
+
+
+(defn spark-sql-group-by
+  ""
+  [^DataFrame dataframe colname]
+  (.groupBy dataframe (string colname)))
+
 (defn ^SQLContext spark-sql-context
   "Build a SQLContext from a JavaSparkContext"
   [^JavaSparkContext spark-context]
@@ -2700,9 +2736,10 @@
   "Is the given table cached"
   sparksql/is-cached?)
 
-(def spark-sql-table
+(defn ^DataFrame spark-sql-table
   "Return a table as a DataFrame"
-  sparksql/table)
+  [sql-context table-name]
+  (sparksql/table sql-context (string table-name)))
 
 (def spark-sql-table-names
   "Return a seq of strings of table names, optionally within a specific database"
@@ -2798,15 +2835,17 @@
                      :sparksqlcolumns {:f spark-sql-columns :rank [1]}
                      :sparksqlclearcache {:f spark-sql-clear-cache :rank [1]}
                      :sparksqlcontext {:f spark-sql-context :rank [1]}
+                     :sparksqlcount {:f spark-sql-count :rank [1]}
+                     :sparksqlgroupby {:f spark-sql-group-by :rank [2]}
                      :sparksqljsonrdd {:f spark-sql-json-rdd :rank [2]}
                      :sparksqliscached? {:f spark-sql-is-cached? :rank [2]}
                      :sparksqlload {:f spark-sql-load :rank [2 3]}
                      :sparksqlparquetfile {:f spark-sql-parquet-file :rank [2]}
-                     :sparksqlprintschema {:f spark-sql-print-schema :rank [2]}
+                     :sparksqlprintschema {:f spark-sql-print-schema :rank [1]}
                      :sparksqlreadcsv {:f spark-sql-read-csv :rank [2 3]}
                      :sparksqlregistertemptable {:f spark-sql-register-temp-table :rank [2]}
                      :sparksqlregisterdataframeastable {:f spark-sql-register-data-frame-as-table :rank [3]}
-                     :sparksqlrowtovec {:f spark-sql-row->vec :rank [2]}
+                     :sparksqlrowtovec {:f spark-sql-row->vec :rank [1]}
                      :sparksqltable {:f spark-sql-table :rank [2]}
                      :sparksqltablenames {:f spark-sql-table-names :rank [1]}
                      :sparksqluncachetable {:f spark-sql-uncache-table :rank [2]}
