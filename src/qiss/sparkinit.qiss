@@ -1,4 +1,8 @@
 / spark init
-sc:sparkcontext "local[*]" sparkconf  "qiss-default-cluster"
-/ .z.exit:{sparkstop sc}
+c:sparksqlcontext sc:sparkcontext "local[*]" sparkconf  "qiss-default-cluster"
+/                  sc --> spark context handle
+/                   c --> spark sql context handle
+/ spark-sql init
+/ ssc:sparksqlcontext sc  TODO: sc is not available for when this line executes during start-up
+/ .z.exit:{sparkstop sc}  /  as of spark 1.5, the spark shutdown is triggered automatically
 / Don't put a newline at EOF: the grammar needs work

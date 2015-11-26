@@ -83,3 +83,5 @@ sparkfirst data       / the same
 rddtext:sparktextfile[sc;"poi_names.txt"]
 
 sparkreduce[rddtext2;+]
+
+/ Don't put a newline at EOF: the grammar needs work

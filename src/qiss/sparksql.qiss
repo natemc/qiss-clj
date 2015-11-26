@@ -1,0 +1,13 @@
+/ ~800MB file
+/ http://mishadoff.com/blog/spark-in-clojure/
+/
+/ df:sparksqlload[ c;"iowa-liquor.csv";"com.databricks.spark.csv"]
+/
+df:c sparksqlreadcsv "iowa_liquor_sales_fixed_with_header5.csv"
+sparksqlregisterdataframeastable[c;df;"myfirsttable"]   / give it a name
+sparkcount c sparksql "SELECT * FROM myfirsttable"
+                                                     / this provides a table name
+                                                     / for the SQL query call below
+sparksqltablenames c                                 / is it really there? ---> (myfirsttable)
+sparksqlcolumns df                                   / equiv to cols
+/ Don't put a newline at EOF: the grammar needs work

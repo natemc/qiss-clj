@@ -23,7 +23,10 @@
                       [flambo.conf :as sparkconf]
                       [flambo.api :as spark]
                       [flambo.tuple :as ft]
+                      [flambo.sql :as sparksql]
                       )
+            (:import [org.apache.spark.api.java JavaSparkContext]
+                     [org.apache.spark.sql SQLContext Row DataFrame])
             (:gen-class)]))
 
 
@@ -2638,6 +2641,95 @@
   [path rdd]
   (spark/save-as-text-file path rdd))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;  spark sql  -- all function names start with "spark-sql-"
+;                except for spark-context-from-sql-text to avoid confusion.
+
+(defn ^SQLContext spark-sql-context
+  "Build a SQLContext from a JavaSparkContext"
+  [^JavaSparkContext spark-context]
+  (sparksql/sql-context spark-context))
+
+(defn ^JavaSparkContext spark-context-from-sql-context
+  "Get reference to the SparkContext out of a SQLContext"
+  [^SQLContext sql-context]
+  (sparksql/spark-context sql-context))
+
+(defn spark-sql
+  "Execute a query. The dialect that is used for SQL parsing can be configured with 'spark.sql.dialect'."
+  [sql-context query]
+  (sparksql/sql sql-context (string query)))
+
+(def spark-sql-parquet-file
+  "Loads a Parquet file, returning the result as a DataFrame."
+  sparksql/parquet-file)
+
+(defn spark-sql-load
+  "Returns the dataset stored at path as a DataFrame."
+  ([sql-context path]                   ; data source type configured by spark.sql.sources.default
+   (sparksql/load sql-context (string path)))
+  ([sql-context path source-type]       ; specify data source type
+   (sparksql/load sql-context (string path) (string source-type))))
+
+(defn spark-sql-read-csv
+  "Reads a file in table format and creates a data frame from it, with cases corresponding to
+  lines and variables to fields in the file. A clone of R's read.csv."
+  [sql-context path &{:keys [header separator quote]
+                      :or   {header false separator "," quote "'"}}]
+  (sparksql/read-csv sql-context (string path) :header true :quote "\""))
+; TODO: discuss 'enriched arguments in qiss w/nate'
+; (sql/read-csv c "test/resources/cars.csv" :header true)
+
+(def spark-sql-cache-table
+  "Caches the specified table in memory."
+  sparksql/cache-table)
+
+(def spark-sql-json-rdd
+  "Load an RDD of JSON strings (one object per line), inferring the schema, and returning a DataFrame"
+  sparksql/json-rdd)
+
+(def spark-sql-uncache-table
+  "Removes the specified table from the in-memory cache."
+  sparksql/uncache-table)
+
+(def spark-sql-clear-cache
+  "Remove all tables from cache"
+  sparksql/clear-cache)
+
+(def spark-sql-is-cached?
+  "Is the given table cached"
+  sparksql/is-cached?)
+
+(def spark-sql-table
+  "Return a table as a DataFrame"
+  sparksql/table)
+
+(def spark-sql-table-names
+  "Return a seq of strings of table names, optionally within a specific database"
+  sparksql/table-names)
+
+(def spark-sql-register-temp-table
+  "Registers this dataframe as a temporary table using the given name."
+  sparksql/register-temp-table)
+
+(defn spark-sql-register-data-frame-as-table
+  "Registers the given DataFrame as a temporary table in the
+  catalog. Temporary tables exist only during the lifetime of this
+  instance of SQLContex."
+  [sql-context df table-name]
+  (sparksql/register-data-frame-as-table sql-context df (string table-name)))
+
+(def spark-sql-columns
+  "Returns all column names as a sequence."
+  sparksql/columns)
+
+(def spark-sql-print-schema
+  sparksql/print-schema)
+
+(def spark-sql-row->vec
+  sparksql/row->vec)
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (declare genv)
 (defn set-genv [e] (reset! genv e) nil)
@@ -2671,6 +2763,7 @@
                      :sparkcollectasmap {:f spark-collect-as-map :rank [1]}
                      :sparkconf {:f spark-conf :rank [2]}
                      :sparkcontext {:f spark-context :rank [1]}
+                     :sparkcontextfromsqlcontext {:f spark-context-from-sql-context :rank [1]}
                      :sparkcount {:f spark-count :rank [1]}
                      :sparkcountbykey {:f spark-count-by-key :rank [1]}
                      :sparkcountbyvalue {:f spark-count-by-value :rank [1]}
@@ -2700,6 +2793,23 @@
                      :sparksaveastextfile {:f spark-save-as-text-file :rank [2]}
                      :sparkstop {:f spark-stop :rank [1]}
                      :sparksortbykey {:f spark-sort-by-key :rank [1]}
+                     :sparksql {:f spark-sql :rank [2]}
+                     :sparksqlcachetable {:f spark-sql-cache-table :rank [2]}
+                     :sparksqlcolumns {:f spark-sql-columns :rank [1]}
+                     :sparksqlclearcache {:f spark-sql-clear-cache :rank [1]}
+                     :sparksqlcontext {:f spark-sql-context :rank [1]}
+                     :sparksqljsonrdd {:f spark-sql-json-rdd :rank [2]}
+                     :sparksqliscached? {:f spark-sql-is-cached? :rank [2]}
+                     :sparksqlload {:f spark-sql-load :rank [2 3]}
+                     :sparksqlparquetfile {:f spark-sql-parquet-file :rank [2]}
+                     :sparksqlprintschema {:f spark-sql-print-schema :rank [2]}
+                     :sparksqlreadcsv {:f spark-sql-read-csv :rank [2 3]}
+                     :sparksqlregistertemptable {:f spark-sql-register-temp-table :rank [2]}
+                     :sparksqlregisterdataframeastable {:f spark-sql-register-data-frame-as-table :rank [3]}
+                     :sparksqlrowtovec {:f spark-sql-row->vec :rank [2]}
+                     :sparksqltable {:f spark-sql-table :rank [2]}
+                     :sparksqltablenames {:f spark-sql-table-names :rank [1]}
+                     :sparksqluncachetable {:f spark-sql-uncache-table :rank [2]}
                      :sparksubtract {:f spark-subtract :rank [2]}
                      :sparksubtractbykey {:f spark-subtract-by-key :rank [2]}
                      :sparkSTORAGE_LEVELS {:f spark-STORAGE-LEVELS :rank [0]}
