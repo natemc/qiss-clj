@@ -1,11 +1,26 @@
 / spark init
-/ c:sparksqlcontext sc:sparkcontext "local[*]" sparkconf  "qiss-default-cluster"
-/ MASTER:"spark://ec2-54-164-229-10.compute-1.amazonaws.com:7077"
+/   spark stand-alone cluster setup:
+/     1. git clone https://github.com/apache/spark.git
+/        cd spark; git checkout branch-1.5; build/mvn -DskipTests clean package
+/     2. export SPARK_HOME=`pwd`   # above git directory as SPARK_HOME
+/        edit $SPARK_HOME/conf/sprk-env.sh to include the following:
+/          export SPARK_WORKER_MEMORY=1g
+/          export SPARK_EXECUTOR_MEMORY=512m
+/          export SPARK_EXECUTOR_INSTANCES=4
+/          export SPARK_WORKER_CORES=2
+/          export SPARK_WORKER_DIR=/Users/ahnj/dev/qiss/workerdir
+/     3. cp $SPARK_HOME/conf/slaves.template $SPARK_HOME/conf/slaves   # slave hostname goes here (localhost is default)
+/     4. $SPARK_HOME/sbin/start-all.sh   # be sure you have ssh enabled (http://bluishcoder.co.nz/articles/mac-ssh.html)
+/     5. tail -f $SPARK_HOME/logs/*      # to observe master/slave log output
+/
 / MASTER:"local[*]"
-/ c:sparksqlcontext sc:sparkcontext "spark://macbookpro15.local:7077" sparkconf "qiss-default-cluster"
+/ c:sparksqlcontext sc:sparkcontext "local[*]" sparkconf  "qiss-local-cluster"
+/
+/ MASTER:"spark://macbookpro15.local:7077"
+c:sparksqlcontext sc:sparkcontext "spark://macbookpro15.local:7077" sparkconf "qiss-stand-alone-cluster"
 /                  sc --> spark context handle
 /                   c --> spark sql context handle
 / spark-sql init
-/ ssc:sparksqlcontext sc  TODO: sc is not available for when this line executes during start-up
+/ c:sparksqlcontext sc  TODO: sc is not available for when this line executes during start-up
 / .z.exit:{sparkstop sc}  /  as of spark 1.5, the spark shutdown is triggered automatically
 / Don't put a newline at EOF: the grammar needs work
