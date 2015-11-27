@@ -1,18 +1,5 @@
 (ns qiss.core
-  #?(:cljs (:require-macros [cljs.core.async.macros :refer [go go-loop]]))
-  #?(:cljs (:require [cljs.core.async :as async :refer [chan put! <! >!]]
-                     [clojure.browser.repl :as brepl]
-                     [clojure.string :as str]
-                     [dommy.core :as dom :refer-macros [sel sel1]]
-                     [goog.net.XhrIo :as xhr]
-                     [goog.string :as gstring :refer [format]]
-                     [instaparse.core :as insta]
-                     [instaparse.viz :as instav]
-                     [testdouble.cljs.csv :as csv]))
-
   #?@(:clj [(:require [clojure-csv.core :as csv]
-                      [clojure.core.async :as async
-                         :refer [chan go go-loop put! <! >! <!!]]
                       [clojure.java.io :as io]
                       [clojure.stacktrace :as st] ;; handy from the repl
                       [clojure.string :as str]
@@ -23,14 +10,17 @@
                       [flambo.conf :as sparkconf]
                       [flambo.api :as spark]
                       [flambo.tuple :as ft]
-                      [flambo.sql :as sparksql]
-                      )
+                      [flambo.sql :as sparksql])
             (:import [org.apache.spark.api.java JavaSparkContext]
                      [org.apache.spark.sql SQLContext Row DataFrame])
-            (:gen-class)]))
-
-
-
+            (:gen-class)])
+  #?(:cljs (:require [clojure.string :as str]
+                     [dommy.core :as dom :refer-macros [sel sel1]]
+                     [goog.net.XhrIo :as xhr]
+                     [goog.string :as gstring :refer [format]]
+                     [instaparse.core :as insta]
+                     [instaparse.viz :as instav]
+                     [testdouble.cljs.csv :as csv])))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Transducers
 ;; NOT USED.  These are just here to think about.
@@ -111,6 +101,9 @@
                                          " "
                                          (str/join " " y)
                                          ")"))))))
+(defn kstring? [s]
+  #?(:clj   (every? char? s)
+      :cljs (every? #(and (string? %) (= 1 (count %))) s)))
 #?(:cljs (defn log [x] (.log js/console x)))
 (defn now []
   #?(:clj  (.getTime (java.util.Date.))
@@ -332,6 +325,13 @@
           (if (= (count x) i)
             i
             (- (count x) (+ 1 i)))))
+(defn like [x pattern]
+  (let [p (re-pattern (string pattern))
+        h (fn h [i]
+            (cond (keyword? i) (not (nil? (re-find p (name i))))
+                  (kstring? i) (not (nil? (re-find p (str/join i))))
+                  :else        (mapv h i)))]
+    (h x)))
 (defn push [x v]
   "Prepend x to v"
   (vec (cons x (map identity v))))
@@ -960,7 +960,7 @@
         :else (err "nyi: _ (remove) for" x y)))
 (defn under
   "_x (floor) and x _y (drop or remove depending on the arguments)"
-  ([x] (long x)) ;; floor
+  ([x] (long (Math/floor x))) ;; floor
   ([x y] (if (coll? y)
            (if (vector? x) (cut x y) (kdrop x y))
            (kremove x y))))
@@ -1954,6 +1954,8 @@
 (defn substr "string begin end" [s b e] (subs s b (min e (count s))))
 
 (declare stringify)
+(defn stringify-boolean [x]
+  (if x "1b" "0b"))
 (defn stringify-dict [x]
   (let [ks (mapv stringify (dict-key x))
         kw (apply max (map count ks))
@@ -1983,11 +1985,12 @@
   (str/join "\n" (table-as-strings x)))
 (defn stringify-vector [x]
   (cond (= 0 (count x))   "()"
-        (char? (first x)) (str/join x)
+        (every? bool? x)  (str (str/join (mapv #(if % \1 \0) x)) \b)
+        (kstring? x)      (str/join x)
         (= 1 (count x))   (str "," (stringify (first x)))
         (coll? (first x)) (str/join "\n" (mapv stringify x))
 ;;        (coll? (first x)) (str "(" (str/join ";" (mapv stringify x)) ")")
-        :else             (str/join " " (mapv stringify x))))
+        :else               (str/join " " (mapv stringify x))))
 (defn stringify [x]
   (cond (vector? x)      (stringify-vector x)
         (dict? x)        (stringify-dict x)
@@ -1995,6 +1998,7 @@
         (keyed-table? x) (stringify-keyed-table x)
         (lambda? x)      (stringify-lambda x)
         (snapshot? x)    (stringify (snapshot-value x))
+        (bool? x)        (stringify-boolean x)
         :else            (str x)))
   
 (defn show-dict [x]
@@ -2039,6 +2043,7 @@
         (keyed-table? x) (show-keyed-table x)
         (lambda? x)      (show-lambda x)
         (snapshot? x)    (show (snapshot-value x))
+        (bool? x)        (println (stringify-boolean x))
         :else            (println x)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; parser initialization
@@ -2293,7 +2298,6 @@
                          :sub     #(swap! subs conj %)
                          :unsub   #(when (= [] (swap! subs except %))
                                      (dom/unlisten! (:element ele) event cb))}))))
-#?(:cljs (defn kstring? [s] (every? #(and (string? %) (= 1 (count %))) s)))
 #?(:cljs (defn kdom [s]
            (cond (and (coll? s) (not (kstring? s))) (mapv kdom s)
                  (keyword? s) {:element (dom/sel1 (str "#" (name s)))}
@@ -2779,8 +2783,8 @@
   ([e x] (lose-env (last (resolve-full-expr x e (second (parse x)))))))
 
 (declare load-code)
-#?(:clj (defn load-qiss-file [e f]
-          {:new-env (load-code e (slurp (apply str f)))}))
+#?(:clj (defn load-qiss-file [e f] (load-code e (slurp (string f)))))
+#?(:clj (defn load-qiss-file-from-qiss [e f] {:new-env (load-qiss-file e f)}))
 
 (def builtin-common {:cols     {:f cols :rank [1]}
                      :comp     {:f compose :rank [2]}
@@ -2792,6 +2796,7 @@
                      :inter    {:f inter :rank [2]}
                      :keys     {:f keycols :rank [1]}
                      :last     {:f klast :rank [1]}
+                     :like     {:f like :rank [2]}
                      :lj       {:f lj :rank [2]}
                      :mod      {:f kmod :rank [2]}
                      :show     {:f show :rank [1] :snapshot-aware [1]}
@@ -2866,7 +2871,7 @@
                      :xdesc    {:f xdesc :rank [2]}})
 (def builtin (merge builtin-common
                     #?(:clj  {:exit   {:f exit :rank [0 1]}
-                              :load   {:f load-qiss-file
+                              :load   {:f load-qiss-file-from-qiss
                                        :pass-global-env true
                                        :rank [1]}
                               :new    {:f k-new :rank [1 2]}
@@ -2896,22 +2901,19 @@
                    (eseq (dom/sel "script")))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn load-code
-  ([env]
-   #?(:clj  (load-code env (slurp "src/qiss/qiss.qiss"))
-      :cljs (let [q (qiss-elements)
-                  r (make-array (count q))]
-              (null! "found" (count q) "qisses to load...")
-              (doseq [[i e] (map list (range (count q)) q)]
-                (let [s (.-src e)]
-                  (if (= "" s) ;; no src attr => code is in tag's text
-                    (aset r i (.-text e))
-                    (xhr/send s (fn [v] (aset r i (response-text v))
-                                  (when (every? some? r)
-                                    (doseq [c r] (load-code env c))
-                                    (null! "qisses loaded"))))))))))
+  #?(:cljs ([] (let [q (qiss-elements)
+                     r (make-array (count q))]
+                 (null! "found" (count q) "qisses to load...")
+                 (doseq [[i e] (map list (range (count q)) q)]
+                   (let [s (.-src e)]
+                     (if (= "" s) ;; no src attr => code is in tag's text
+                       (aset r i (.-text e))
+                       (xhr/send s (fn [v] (aset r i (response-text v))
+                                     (when (every? some? r)
+                                       (set-genv (reduce load-code @genv r))
+                                       (null! "qisses loaded"))))))))))
   ([env x]
-   (reduce #(let [[ne r]
-                  (resolve-full-expr x %1 %2)]
+   (reduce #(let [[ne r] (resolve-full-expr x %1 %2)]
               ne)
            env
            (rest (second (parse x :start :file))))))
@@ -2920,7 +2922,7 @@
 (declare parser)
 (declare parses)
 #?(:clj (declare vis))
-(defn initialize-qiss [e]
+(defn initialize-qiss-common [after]
   (load-grammar "qiss/grammar"
                 (fn [g]
                   (null! "loaded grammar OK")
@@ -2930,8 +2932,12 @@
                   (def parses  #(mapv (partial insta/transform xform)
                                       (insta/parses parser %)))
                   #?(:clj (def vis (comp insta/visualize parse)))
-                  (load-code e))))
-
+                  (after))))
+(defn initialize-qiss
+  #?(:cljs ([] (initialize-qiss-common load-code)))
+  #?(:clj  ([e] (initialize-qiss-common
+                 (fn [] (load-code e (slurp "src/qiss/qiss.qiss")))))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 #?(:clj
    (defn repl
      ([] (repl @genv))
@@ -2957,14 +2963,19 @@
                            e))]
                 (recur e2)))))))))
 
-#?(:cljs (defonce conn (brepl/connect "http://localhost:9000/repl")))
-
-(set-genv (initialize-qiss @genv))
-
+#?(:clj  (when-not *command-line-args* ;; i.e., we're in a clojure repl
+           (set-genv (initialize-qiss builtin)))
+   :cljs (initialize-qiss)) ;; DO NOT set-genv here; it's async
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn -main
   "qiss repl"
   [& args]
-  ;; (println *command-line-args*) ;; TODO process command line args
   ;; TODO support stdin and stdout in the usual way
-  #?(:clj (repl))
+  #?(:clj (let [a (vec args)
+                i (where (like a ".*\\.qiss"))
+                f (index a i)
+                e (initialize-qiss builtin)]
+            (repl (if (empty? f)
+                    builtin
+                    (load-qiss-file e (first f))))))
   0)

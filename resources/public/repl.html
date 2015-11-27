@@ -108,21 +108,28 @@
      <textarea id="textedit"></textarea>
  </div>
 
- <script src='qiss/qiss.qiss' type='text/qiss'></script>
- <!-- We must load qiss.js at the bottom so that all the qiss
-        elements exist when we startup the interpreter -->
- <script src="js/compiled/qiss.js" type="text/javascript"></script>
  <!-- Embedding qiss code directly in an HTML file   dom[`prompt]text str every 2000; -->
  <script type='text/qiss'>
       show`click ev dom`go;            / dom with sym => single element by ID
       / show {str dom`prompt}`keydown ev dom`prompt;
-      // 0. trap all keydown events
-      show 13=`which of`keydown ev dom`prompt;  / event ev element --> NOT `ONkeydown!!
+      /  0. trap all keydown events -- (dom`prompt)`value x@&1
+
+      / dom[`result]text str every 2000;
+
+      / dom[`scroll] text str every 2000;  / [`innerHTML]:"heeeeeellllo"; / ,:"hello this is a test";
+
+      / (dom`scroll)[`innerHTML],:
+      {show `which of x} `keydown ev dom`prompt;  / event ev element --> NOT `ONkeydown!!
+      / show (dom`scroll)[`innerHTML],:(dom`prompt)`value
       /  1. when the above function returns true (user has pressed the <ENTER> key) do:
       /     (dom`scroll)[`innerHTML],:(dom`prompt)`value;  / shove the entry into the upper line
       /  2. send the contents for execution - via eval(?) see line 2066 of qiss.core
       /  3. (dom`prompt)[`value]:""    / clear the prompt
  </script>
+ <script src='qiss/qiss.qiss' type='text/qiss'></script>
+ <!-- We must load qiss.js at the bottom so that all the qiss
+        elements exist when we startup the interpreter -->
+ <script src="js/compiled/qiss.js" type="text/javascript"></script>
  <script>
 
 

@@ -1,5 +1,8 @@
 / spark init
-c:sparksqlcontext sc:sparkcontext "local[*]" sparkconf  "qiss-default-cluster"
+/ c:sparksqlcontext sc:sparkcontext "local[*]" sparkconf  "qiss-default-cluster"
+/ MASTER:"spark://ec2-54-164-229-10.compute-1.amazonaws.com:7077"
+/ MASTER:"local[*]"
+/ c:sparksqlcontext sc:sparkcontext "spark://macbookpro15.local:7077" sparkconf "qiss-default-cluster"
 /                  sc --> spark context handle
 /                   c --> spark sql context handle
 / spark-sql init
