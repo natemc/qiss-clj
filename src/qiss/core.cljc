@@ -2417,7 +2417,9 @@
   Provides Spark the basic info necessary to access a cluster."
   (-> (sparkconf/spark-conf)
       ;      (sparkconf/set (string key) (string val))
-      (sparkconf/set "spark.driver.allowMultipleContexts" "true")
+    ;  (sparkconf/set "spark.driver.allowMultipleContexts" "true")
+    ;  (sparkconf/set "spark.executor.memory" "6g")
+    ;  (sparkconf/set "spark.eventLog.enabled" "true")
       (sparkconf/master (string master))
       (sparkconf/app-name (string app-name))))
 
