@@ -171,7 +171,10 @@
 (defn stream? [x] (:stream x))
 (defn stream-aware? [x r] ;; lambda, rank
   (and (:stream-aware x) (some #{r} (:stream-aware x))))
-(defn stream-sources [x] (:sources x))
+(defn stream-sources [x]
+  (if (vector? x)
+    (vec (distinct (mapcat :sources x)))
+    (:sources x)))
 (defn table? [x] (and (map? x) (:k x) (:v x) (:t x)))
 (defn add-to-dict [d k v] (assoc d :k (conj (:k d) k) :v (conj (:v d) v)))
 (defn catv "concat x and y into a vector" [x y] (vec (concat x y)))
@@ -419,7 +422,7 @@
             (derive-snapshot x true)
             (swallow x))
           (where x)))
-  ([x y] (promote-bools (fn [& b] (and b)) min x y)))
+  ([x y] (promote-bools (fn [a b] (and a b)) min x y)))
 (defn div "atomic integer division" [x y] ((atomize quot) x y))
 (declare group)
 (defn eq
@@ -470,7 +473,7 @@
 (defn pipe
   "|x (reverse) and x|y (atomic max)"
   ([x] (vec (reverse x)))
-  ([x y] (promote-bools (fn [& b] (or b)) max x y)))
+  ([x y] (promote-bools (fn [a b] (or a b)) max x y)))
 (declare flip)
 (defn plus
   "+x (flip) and x+y (atomic addition)"
@@ -589,7 +592,7 @@
                     (doseq [i @it x @subs] ((:on-next x) i))
                     (when (nil? @obs-t) (on-done)))
         ;; we have a potential problem: sources needs to change through time.
-        r         {:sources (vec (distinct (mapcat :sources [s t])))
+        r         {:sources (stream-sources [s t])
                    :stream  true
                    :sub     #(swap! subs conj %)
                    :unsub   #(when (= [] (swap! subs except %))
@@ -668,11 +671,13 @@
         on-done (fn []
                   ((:unsub x) @obs)
                   (let [ww @w]
-                    (mapv #(ww (mod % (count ww))) (range (count ww) n))))
+                    (if (empty? ww)
+                      (vec (repeat n []))
+                      (mapv #(ww (mod % (count ww))) (range (count ww) n)))))
         on-next (fn [ss]
                   (let [ww (swap! w #(if (<= n (count %)) % (conj % ss)))]
                     (if (not= (count ww) n) ss (make-snapshot-final ss))))
-        s       (make-stream (:sources x) on-next on-done)
+        s       (make-stream (stream-sources x) on-next on-done)
         ;; override sub to call on-done immediately if 0#
         os      (assoc s :sub #(if (= n 0) ((:on-done %)) ((:sub s) %)))]
     ((:sub x) (reset! obs os))
@@ -681,12 +686,14 @@
   (let [w       (atom []) ; window
         on-done (fn []
                   (let [ww @w]
-                    (mapv #(ww (- (count ww) 1 (mod % (count ww))))
-                          (reverse (range n)))))
+                    (if (empty? ww)
+                      (vec (repeat n []))
+                      (mapv #(ww (- (count ww) 1 (mod % (count ww))))
+                            (reverse (range n))))))
         on-next (fn [ss]
                   (swap! w #(conj (if (< (count %) n) % (vec (drop 1 %))) ss))
                   nil)
-        s       (make-stream (:sources x) on-next on-done)]
+        s       (make-stream (stream-sources x) on-next on-done)]
     ((:sub x) s)
     s))
 (defn kcount [x]
@@ -742,7 +749,7 @@
                       (when (= (count ww) n)
                         (reset! w [])
                         (derive-snapshot ss ww)))))
-        s       (make-stream (:sources x) on-next on-done)
+        s       (make-stream (stream-sources x) on-next on-done)
         ;; override sub to call on-done immediately if 0#
         os      (assoc s :sub #(if (= n 0) ((:on-done %)) ((:sub s) %)))]
     ((:sub x) os)
@@ -770,21 +777,39 @@
         (stream? y) (reshape-from-stream x y)
         :else
         (err "nyi: reshape only supports vector on rhs")))
+(defn take-until [x y]
+  (let [on-next identity
+        r       (make-stream (stream-sources [x y]) on-next)
+        obs     (atom nil)
+        done    (fn []
+                  ((:unsub y) r)
+                  ((:unsub x) @obs)
+                  (reset! obs nil)
+                  ((:on-done r)))]
+    ((:sub y) r)
+    ((:sub x) (reset! obs {:on-done done
+                           :on-next (fn [ss] (done))}))
+    r))
 (defn ktake [x y]
   "x#y take from y the elements specified by x"
   ;; TODO: support stream for x?
-  (if (and (coll? x) (not (empty? x)) (every? number? x))
-    (reshape (mapv #(if (bool? %) (if % 1 0) %) x) y)
-    (let [n (if (bool? x) (if x 1 0) x)]
-      (cond (not (coll? y))  (vec (repeat n y))
-            (vector? y)      (take-from-vec n y)
-            (dict? y)        (take-from-dict n y)
-            (table? y)       (take-from-table n y)
-            (keyed-table? y) (take-from-keyed-table n y)
-            (stream? y)      (if (< n 0)
-                               (take-last-from-stream (- n) y)
-                               (take-from-stream n y))
-            :else            (err "nyi: # on " y)))))
+  (cond (stream? x) (if (stream? y)
+                      (take-until x y)
+                      (err "# (take-until) requires both sides to be streams"
+                           x y))
+        (and (coll? x) (not (empty? x)) (every? number? x))
+        (reshape (mapv #(if (bool? %) (if % 1 0) %) x) y)
+        :else
+        (let [n (if (bool? x) (if x 1 0) x)]
+          (cond (not (coll? y))  (vec (repeat n y))
+                (vector? y)      (take-from-vec n y)
+                (dict? y)        (take-from-dict n y)
+                (table? y)       (take-from-table n y)
+                (keyed-table? y) (take-from-keyed-table n y)
+                (stream? y)      (if (< n 0)
+                                   (take-last-from-stream (- n) y)
+                                   (take-from-stream n y))
+                :else            (err "nyi: # on " y)))))
 (defn pound
   "#x (count) and x#y (take)"
   ([x] (kcount x))
@@ -870,7 +895,7 @@
         on-next (fn [ss]
                   (let [j (swap! i #(+ 1 (min n %)))]
                     (when (< n j) ss)))
-        s       (make-stream (:sources x) on-next)]
+        s       (make-stream (stream-sources x) on-next)]
     ((:sub x) s)
     s))
 (defn drop-last-from-stream [n x]
@@ -880,7 +905,7 @@
                                        (conj % ss)
                                        (conj (vec (drop 1 %)) ss)))]
                     (when (< n (count ww)) (first ww))))
-        s       (make-stream (:sources x) on-next)]
+        s       (make-stream (stream-sources x) on-next)]
     ((:sub x) s)
     s))
 (defn kdrop [x y]
@@ -961,7 +986,7 @@
                             (let [d ((stream-delta g) @p ss)]
                               (reset! p ss)
                               d))
-                  s       (make-stream (:sources j) on-next)]
+                  s       (make-stream (stream-sources j) on-next)]
               ((:sub j) s)
               s)))
         (let [[i j] x]
@@ -972,7 +997,7 @@
                             (let [d ((stream-delta g) @p ss)]
                               (reset! p ss)
                               d))
-                  s       (make-stream (:sources j) on-next)]
+                  s       (make-stream (stream-sources j) on-next)]
               ((:sub j) s)
               s)))))))
 (defn each-right [f]
@@ -1007,7 +1032,7 @@
                   on-done (fn []
                             (assoc (make-snapshot-final @a) :extract true))
                   on-next (fn [ss] (swap! a (stream-reducer g) ss) nil)
-                  s       (make-stream (:sources j) on-next on-done)]
+                  s       (make-stream (stream-sources j) on-next on-done)]
               ((:sub j) s)
               s)))
         (let [[i j] x]
@@ -1017,7 +1042,7 @@
                   on-done (fn []
                             (assoc (make-snapshot-final @a) :extract true))
                   on-next (fn [ss] (swap! a (stream-reducer g) ss) nil)
-                  s       (make-stream (:sources j) on-next on-done)]
+                  s       (make-stream (stream-sources j) on-next on-done)]
               ((:sub j) s)
               s)))))))
 (defn scan [f]
@@ -1036,7 +1061,7 @@
               (vec (reductions g j)))
             (let [a       (atom (:identity f))
                   on-next #(swap! a (stream-reducer g) %)
-                  s       (make-stream (:sources j) on-next)]
+                  s       (make-stream (stream-sources j) on-next)]
               ((:sub j) s)
               s)))
         (let [[i j] x]
@@ -1044,7 +1069,7 @@
             (vec (drop 1 (reductions g i j)))
             (let [a       (atom (if (snapshot? i) i (make-snapshot 0 i)))
                   on-next #(swap! a (stream-reducer g) %)
-                  s       (make-stream (:sources j) on-next)]
+                  s       (make-stream (stream-sources j) on-next)]
               ((:sub j) s)
               s)))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2152,7 +2177,7 @@
         obs     (atom nil)
         on-next #(let [ss (derive-snapshot % (h %))]
                    (when-not (swallow? ss) ss))
-        stream  (make-stream (:sources s) on-next)
+        stream  (make-stream (stream-sources s) on-next)
         r       (assoc stream
                        :unsub
                        #(when (= [] ((:unsub stream) %))
@@ -2167,7 +2192,7 @@
         obs     (atom nil)
         on-next #(let [ss (derive-snapshot % (h %))]
                    (when-not (swallow? ss) ss))
-        stream  (make-stream (:sources s) on-next)
+        stream  (make-stream (stream-sources s) on-next)
         r       (assoc stream
                        :unsub
                        #(when (= [] ((:unsub stream) %))
@@ -2182,7 +2207,7 @@
         subs    (atom [])
         srcmap  (apply merge-with
                        into
-                       (mapv #(let [t (:sources (s %))]
+                       (mapv #(let [t (stream-sources (s %))]
                                 (zipmap t (repeat (count t) [%])))
                              (til-count s)))
         on-done (fn [i]
@@ -2200,7 +2225,7 @@
                             (let [sso (derive-snapshot ssi (f p))]
                               (when-not (swallow? sso)
                                 (doseq [s @subs] ((:on-next s) sso))))))))))
-        r     {:sources (vec (distinct (mapcat :sources s)))
+        r     {:sources (stream-sources s)
                :stream  true
                :sub     #(swap! subs conj %)
                :unsub   #(when (= [] (swap! subs except %))
@@ -2275,8 +2300,8 @@
   (let [source  (swap! last-event-source-id inc)
         subs    (atom [])
         on-done (fn [] (doseq [s @subs] ((:on-done s))))
-        on-next (fn [e] (let [ss (make-snapshot source e)]
-                          (doseq [s @subs] ((:on-next s) ss))))
+        on-next #(let [ss (make-snapshot source %)]
+                   (doseq [s @subs] ((:on-next s) ss)))
         id      (set-timer (fn [] (on-next (now))) t)]
     {:on-done (fn [] (stop-timer id) (on-done))
      :sources [source]
@@ -2302,7 +2327,7 @@
         on-next  (fn [ss] (reset! latest ss))
         obs      {:on-done on-done :on-next on-next}]
     ((:sub s) obs)
-    {:sources  (:sources s)
+    {:sources  (stream-sources s)
      :stream   true
      :sub      #(swap! subs conj %)
      :unsub    #(swap! subs except %)
@@ -2348,19 +2373,21 @@
   ;; push events from streams randomly
   ;; each stream must be pushable, which so far means only
   ;; streams created via into-stream
-  (loop [s streams]
-    (let [i (int (rand (count s)))]
-      (if ((:push (s i)))
-        (recur s)
-        (if (< 1 (count s))
-          (recur (removev s i)))))))
+  (when-not (empty? streams)
+    (loop [s streams]
+      (let [i (int (rand (count s)))]
+        (if ((:push (s i)))
+          (recur s)
+          (if (< 1 (count s))
+            (recur (removev s i))))))))
 (defn push-test-sources [sources]
   ;; push events from the test streams identified by sources
   ;; remove those streams from the global atom test-streams
   (let [streams (atom [])]
     (swap! test-streams
            #(let [in-sources (mapv (fn [x]
-                                     (if (some (set (:sources x)) sources)
+                                     (if (some (set (stream-sources x))
+                                               sources)
                                        true
                                        false))
                                    %)]
@@ -2378,13 +2405,16 @@
     x
     (let [extract (atom false)
           r       (atom [])
-          on-done (fn [] nil)
+          done    (atom false)
+          on-done (fn [] (reset! done true))
           on-next #(let [v (snapshot-value %)]
                      (when (:extract %) (reset! extract true))
                      (swap! r conj v))
           obs     {:on-done on-done :on-next on-next}]
       ((:sub x) obs)
-      (push-test-sources (:sources x))
+      (push-test-sources (stream-sources x))
+      #?(:clj  (while (not @done) (Thread/sleep 10))
+         :cljs (err "wait only works on test streams in js"))
       (if @extract (first @r) @r))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2526,6 +2556,6 @@
                 f (index a i)
                 e (initialize-qiss builtin)]
             (repl (if (empty? f)
-                    builtin
+                    e
                     (load-qiss-file e (first f))))))
   0)

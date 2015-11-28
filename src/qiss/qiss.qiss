@@ -17,7 +17,7 @@ rotate:{y(x+!#y)mod(#y)};
 str:{$x};
 union:{?x,y};
 upper:{@[x;i;{y};ALPHA p i:&26>p:alpha?x]};
+within:{((*y)<=x)&x<=last y};
 xcol:{+(x,(#x)_cols y)!.+y};
 xcols:{(x,cols[y]except x)#y}; / testing comments
 / Don't put a newline at EOF: the grammar needs work
-
