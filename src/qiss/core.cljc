@@ -2420,10 +2420,28 @@
   "Create new Spark Configuration by setting Master and AppName.
   Provides Spark the basic info necessary to access a cluster."
   (-> (sparkconf/spark-conf)
-      ;      (sparkconf/set (string key) (string val))
-    ;  (sparkconf/set "spark.driver.allowMultipleContexts" "true")
-    ;  (sparkconf/set "spark.executor.memory" "6g")
-    ;  (sparkconf/set "spark.eventLog.enabled" "true")
+      ;  (sparkconf/set (string key) (string val))
+      ;  (sparkconf/set "spark.driver.allowMultipleContexts" "true")
+      ;  (sparkconf/set "spark.executor.memory" "6g")
+      ;  (sparkconf/set "spark.eventLog.enabled" "true")
+      ;
+      ; Ship these jars over to the slaves
+      ;   Spark Dataframe dependency:
+      ;     https://github.com/databricks/spark-csv - set scalaVersion to 2.10.5 in build.sbt
+      ;     ([com.databricks/spark-csv_2.10 "1.3.0"])
+      ;     https://commons.apache.org/proper/commons-csv - direct jar download
+      ;   Flambo dependency:
+      ;    lein uberjar after git clone of Flambo
+      ; ** serializers are super sensitive remember to use to exactly the same version of
+      ;  spark v1.5.1 (not 1.5.0!)
+      ;  scala 2.10.5
+      ;  depedencies in project.clj profiles: {:provided {:dependencies
+      ;  must have the *EXACTLY* the same spark version
+      ;   [org.apache.spark/spark-core_2.10 "1.5.1"]  <--
+      ;  otherwise, serialization mayham will ensue
+      (sparkconf/jars ["/Users/ahnj/dev/spark-csv/target/scala-2.10/spark-csv_2.10-1.3.0.jar"
+                       "/Users/ahnj/dev/qiss/commons-csv-1.2.jar"
+                       "/Users/ahnj/dev/flambo/target/flambo-0.7.2-SNAPSHOT-standalone.jar"])
       (sparkconf/master (string master))
       (sparkconf/app-name (string app-name))))
 
