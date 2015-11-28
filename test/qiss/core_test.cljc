@@ -566,7 +566,8 @@
     (is (= [] (keval "<=(>=!0),>=!0")))
     (is (= [0 1] (keval "<=(>=!2),>=!0")))
     (is (= [2 3] (keval "<=(>=!0),>=2 3")))
-    (is (= [0 1 2 3] (keval "<=(>=!2),>=2 3"))))
+    (is (= [0 1 2 3] (keval "<=(>=!2),>=2 3")))
+    (is (= [0 1 10 20 100 200] (keval "<=(>=!2),(>=10 20),>=100 200"))))
   (testing "vector literals with stream components act like nested containers"
     (is (= [1 [0 1 2]] (keval "<='(1;>=!3)"))))
   (testing "indexing with @ with a stream on the rhs"

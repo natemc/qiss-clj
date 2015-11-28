@@ -139,7 +139,7 @@
 (defn snapshot-aware? [x r] ;; lambda, rank
   (and (:snapshot-aware x) (some #{r} (:snapshot-aware x))))
 (defn snapshot-event [x] (:event x))
-(defn snapshot-final? [x] (:final x))
+(defn snapshot-final? [x] (:final x)) ;; only for make-stream!
 (defn snapshot-source [x] (:source x))
 (defn snapshot-time [x] (:time x))
 (defn snapshot-value [x] (if (snapshot? x) (:value x) x))
@@ -572,25 +572,32 @@
 (defn join-stream-to-stream [s t]
   (let [obs-s     (atom nil)
         obs-t     (atom nil)
+        it        (atom []) ; items received from t before s finished
         subs      (atom [])
-        on-next   #(doseq [x @subs] ((:on-next x) %))
+        on-done   (fn []
+                    (doseq [x @subs] ((:on-done x)))
+                    (reset! subs []))
+        on-next-s #(doseq [x @subs] ((:on-next x) %))
+        on-next-t #(if @obs-s
+                     (swap! it conj %)
+                     (doseq [x @subs] ((:on-next x) %)))
         on-done-t (fn []
                     (reset! obs-t nil)
-                    (doseq [x @subs] ((:on-done x)))
-                    (reset! subs nil))
+                    (when (nil? @obs-s) (on-done)))
         on-done-s (fn []
                     (reset! obs-s nil)
-                    ((:sub t) (reset! obs-t
-                                      {:on-done on-done-t :on-next on-next}))
-                    nil)
+                    (doseq [i @it x @subs] ((:on-next x) i))
+                    (when (nil? @obs-t) (on-done)))
         ;; we have a potential problem: sources needs to change through time.
         r         {:sources (vec (distinct (mapcat :sources [s t])))
                    :stream  true
                    :sub     #(swap! subs conj %)
                    :unsub   #(when (= [] (swap! subs except %))
-                               ((:unsub s) @obs-s)
+                               (when-let [os @obs-s]
+                                 ((:unsub s) os))
                                ((:unsub t) @obs-t))}]
-    ((:sub s) (reset! obs-s {:on-done on-done-s :on-next on-next}))
+    ((:sub s) (reset! obs-s {:on-done on-done-s :on-next on-next-s}))
+    ((:sub t) (reset! obs-t {:on-done on-done-t :on-next on-next-t}))
     r))
 (defn join-stream-to-vec [s v]
   (let [on-done (fn [] (mapv #(make-snapshot 0 %) v))
