@@ -94,8 +94,9 @@
                                          (str/join " " y)
                                          ")"))))))
 (defn kstring? [s]
-  #?(:clj   (every? char? s)
-      :cljs (every? #(and (string? %) (= 1 (count %))) s)))
+  #?(:clj  (and (vector? s) (every? char? s))
+     :cljs (and (vector? s)
+                (every? #(and (string? %) (= 1 (count %))) s))))
 #?(:cljs (defn log [x] (.log js/console x)))
 (defn now []
   #?(:clj  (.getTime (java.util.Date.))
@@ -1477,7 +1478,7 @@
   ;; is completed later.  This appears to be the behavior of k anyhow.
   (let [max-rank (apply max (lambda-rank f))
         min-rank (apply min (lambda-rank f))
-        args     (cond (> (count a) max-rank) (err "rank")
+        args     (cond (> (count a) max-rank) (err "rank" (:text f))
                        (< (count a) min-rank)
                        ;; add holes if needed
                        (concat a (repeat (- min-rank (count a)) :hole))
@@ -1527,31 +1528,33 @@
                                                :rank [(count i)]}
                                               i))]))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn invoke-lambda [e f a]
+  (if (and (not (some #{:hole} a))
+           (some #{(count a)} (lambda-rank f)))
+    (if (and (not (stream-aware? f (count a)))
+             (some stream? a))
+      (invoke-with-streams e f a)
+      (if (and (not (snapshot-aware? f (count a)))
+               (some snapshot? a))
+        ;; TODO We need to find the source!
+        (err
+         "nyi: invoking non-snapshot-aware function with snapshots via invoke")
+        ;; [e (make-snapshot (apply (lambda-callable e f)
+        ;;                          (mapv #(if (snapshot? %)
+        ;;                                   (snapshot-value %)
+        ;;                                   %)
+        ;;                            a)))])
+        [e (apply (lambda-callable e f) a)]))
+    (invoke-partial e f a)))
 (defn invoke-helper [e f a]
   "Apply f to a. If f is not a lambda, index f at depth using a"
-  (if (not (lambda? f))
+  (if (lambda? f)
+    (invoke-lambda e f a)
     (cond (and (vector? f) (some #{:hole} f)) ;; (;4)3 => (3;4)
           [e (fill-vector-holes f a)]
           (or (stream? f) (stream? a) (some stream? a))
           (index-from-streams e f a)
-          :else [e (index-deep f a)])
-    (if (and (not (some #{:hole} a))
-             (some #{(count a)} (lambda-rank f)))
-      (if (and (not (stream-aware? f (count a)))
-               (some stream? a))
-        (invoke-with-streams e f a)
-        (if (and (not (snapshot-aware? f (count a)))
-                 (some snapshot? a))
-          ;; TODO We need to find the source!
-          (err
-           "nyi: invoking non-snapshot-aware function with snapshots via invoke")
-              ;; [e (make-snapshot (apply (lambda-callable e f)
-              ;;                          (mapv #(if (snapshot? %)
-              ;;                                   (snapshot-value %)
-              ;;                                   %)
-              ;;                            a)))])
-          [e (apply (lambda-callable e f) a)]))
-      (invoke-partial e f a))))
+          :else [e (index-deep f a)])))
 (defn invoke [e f a]
   (let [[e r] (invoke-helper e f a)]
     (if (and (map? r) (:new-env r))
@@ -1574,13 +1577,20 @@
 ;; adverbs must all be stream aware.
 (defn resolve-adverbed [tu e x]
   "Find the value of x, and adverbed expr"
-  (let [m    (adverbs (keyword (:adverb x)))
-        make (fn [o]
-               (merge o {:f (m o)
-                         :pass-global-env true
-                         :stream-aware [1 2]
-                         ;; :snapshot-aware [2] ;; inherit from o
-                         :text (str (:text o) (:adverb x))}))]
+  (let [a     (keyword (:adverb x))
+        m     (adverbs a)
+        make  (fn [o]
+                (merge o {:f (m o)
+                          :pass-global-env true
+                          :stream-aware [1 2]
+                          :text (str (:text o) (:adverb x))}))
+        make0 (fn [o] ; allow {debug"foo"}'...
+                (let [f (:f o)]
+                  (merge o {:f (m (assoc o :f (fn [ignored] (f))))
+                            :pass-global-env true
+                            :rank [1]
+                            :stream-aware [1]
+                            :text (str (:text o) (:adverb x))})))]
     (if (contains? x :lhs) ; eval must be right to left!
       (if (contains? x :rhs)
         (let [[e2 r] (kresolve tu e  (:rhs x))
@@ -1591,7 +1601,11 @@
       (if (contains? x :rhs)
         (let [[e2 r] (kresolve tu e  (:rhs x))
               [e3 o] (kresolve tu e2 (:verb x))]
-          (invoke e3 (make o) [r]))
+          (invoke e3
+                  (if (and (= [0] (:rank o)) (= :' a))
+                    (make0 o)
+                    (make o))
+                  [r]))
         (let [[e2 o] (kresolve tu e (:verb x))]
           [e2 (make o)])))))
 
@@ -2287,7 +2301,10 @@
                  :else        (err "invalid argument to dom:" s))))
 #?(:cljs (defn text
            ([e] (dom/text (:element e)))
-           ([e t] (dom/set-text! (:element e) (apply str t)))))
+           ([e t] (dom/set-text! (:element e)
+                                 (apply str (if (kstring? t)
+                                              t
+                                              (dollar t)))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Timer
 (defn set-timer [f t]

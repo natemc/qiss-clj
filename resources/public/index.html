@@ -7,13 +7,14 @@
     <script type='text/qiss'>
       / FRP without all the ceremony.  Events are time-varying values.
       / They automatically propagate through call chains.
-      show`click ev dom`go;      / dom with sym => single element by ID
-      dom[`result]text str every 2000;
+      / show`click ev dom`start;      / dom with sym => single element by ID
+      {dom[`result]text(`click ev dom`stop)#every 500}'`click ev dom`start;
+      / dom[`result]text every 2000;
       / dom with string => collection of elements via CSS selector
-      (dom".cx"){x text'$y*1+!x}/:{x@&0=x mod 2}`clientX of`mousemove ev dom`box;
+      (dom".cx"){x text'y*1+!x}/:{x@&0=x mod 2}`clientX of`mousemove ev dom`box;
       / The following don't work yet... 
-      / dom[`result],/:`click ev dom`go;
-      / dom[`result],/:{x;"<p>foo</p>"}'`click ev dom`go;
+      / dom[`result],/:`click ev dom`start;
+      / dom[`result],/:{x;"<p>foo</p>"}'`click ev dom`start;
     </script>
     <title>qisses</title>
   </head>
@@ -27,7 +28,8 @@
 	</div>
       </div>
       <form>
-        <input id='go' type='button' value='Go!'/>
+        <input id='start' type='button' value='Start'/>
+        <input id='stop' type='button' value='Stop'/>
       </form>
       <div id='result'>
       </div>
