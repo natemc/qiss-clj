@@ -142,7 +142,7 @@
 (defn snapshot-final? [x] (:final x))
 (defn snapshot-source [x] (:source x))
 (defn snapshot-time [x] (:time x))
-(defn snapshot-value [x] (:value x))
+(defn snapshot-value [x] (if (snapshot? x) (:value x) x))
 (def last-event-id (atom 0))
 (defn make-snapshot [source x]
   ;; sometimes you make a snapshot but you already have one:
@@ -606,22 +606,25 @@
         r       (make-stream (stream-sources s) on-next on-done)]
     ((:sub s) r)
     r))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn join
   ",x (enlist) and x,y (join)"
   ([x] [x])
-  ([x y] (cond (vector? x)              (cond (vector? y) (vec (concat x y))
-                                              (stream? y) (join-vec-to-stream x y)
-                                              :else       (conj x y))
-               (stream? x)              (cond (stream? y)
-                                              (join-stream-to-stream x y)
-                                              (vector? y) (join-stream-to-vec x y)
-                                              :else       (err "nyi: join" x y))
-               (dict? x)                (if (dict? y)
-                                          ((atomize (fn [_ y] y)) x y)
-                                          (err "can't join" x y))
-               (vector? y)              (vec (cons x y))
-               (or (coll? x) (coll? y)) (err "can't join" x y)
-               :else       [x y])))
+  ([x y] (cond (vector? x)    (cond (vector? y) (vec (concat x y))
+                                    (stream? y) (join-vec-to-stream x y)
+                                    :else       (conj x y))
+               (stream? x)    (cond (stream? y) (join-stream-to-stream x y)
+                                    (vector? y) (join-stream-to-vec x y)
+                                    :else       (join-stream-to-vec x [y]))
+               (dict? x)      (if (dict? y)
+                                ((atomize (fn [_ y] y)) x y)
+                                (err "can't join" x y))
+               (table? x)     (err "nyi: join tables")
+               (vector? y)    (vec (cons x y))
+               (stream? y)    (join-vec-to-stream [x] y)
+               (or (coll? x)
+                   (coll? y)) (err "can't join" x y)
+               :else          [x y])))
 
 (declare findv)
 (declare ktake)
@@ -923,6 +926,8 @@
 (defn each-left [f]
   "Create a dyadic function from f (which must be dyadic) that loops
   over its lhs argument"
+  (when-not (some #{2} (:rank f))
+    (err "rank: \\: can only be applied to dyadic functions"))
   (fn [e x y]
     (let [g #((lambda-callable e f) % y)] 
       (if (stream? x)
@@ -936,6 +941,8 @@
 (defn each-prior [f]
   "Create a dyadic function from f (which must be dyadic) that loops
   over a list passing each element and its prior, e.g., deltas is 0-':x"
+  (when-not (some #{2} (:rank f))
+    (err "rank: /: can only be applied to dyadic functions"))
   (fn [e & x]
     (let [g (lambda-callable e f)]
       (if (= 1 (count x))
@@ -964,6 +971,8 @@
 (defn each-right [f]
   "Create a dyadic function from f (which must be dyadic) that loops
   over its rhs argument"
+  (when-not (some #{2} (:rank f))
+    (err "rank: /: can only be applied to dyadic functions"))
   (fn [e x y]
     (let [g #((lambda-callable e f) x %)]
       (if (stream? y)
@@ -977,13 +986,17 @@
 (defn over [f]
   "Create a dyadic function from f (which must be dyadic) that
   performs a reduce (aka fold left) over its rhs argument"
+  (when-not (some #{2} (:rank f))
+    (err "rank: / can only be applied to dyadic functions"))
   (fn [e & x]
     (let [g (lambda-callable e f)]
       (if (= 1 (count x))
         (let [j (first x)]
           (if-not (stream? j)
-            (reduce g j)
-            (let [a       (atom nil) ;; accumulator
+            (if (:identity f)
+              (reduce g (:identity f) j)
+              (reduce g j))
+            (let [a       (atom (:identity f)) ;; accumulator
                   on-done (fn []
                             (assoc (make-snapshot-final @a) :extract true))
                   on-next (fn [ss] (swap! a (stream-reducer g) ss) nil)
@@ -1004,13 +1017,17 @@
   "Create a dyadic function from f (which must be dyadic) that
   performs reductions (a fold left but returning all intermediate
   results) over its rhs argument"
+  (when-not (some #{2} (:rank f))
+    (err "rank: \\ can only be applied to dyadic functions"))
   (fn [e & x]
     (let [g (lambda-callable e f)]
       (if (= 1 (count x))
         (let [j (first x)]
           (if-not (stream? j)
-            (vec (drop 1 (reductions g j)))
-            (let [a       (atom nil)
+            (if (:identity f)
+              (vec (drop 1 (reductions g (:identity f) j)))
+              (vec (reductions g j)))
+            (let [a       (atom (:identity f))
                   on-next #(swap! a (stream-reducer g) %)
                   s       (make-stream (:sources j) on-next)]
               ((:sub j) s)
@@ -1255,7 +1272,8 @@
           :% {:f fdiv :text "%" :rank [1 2]}
           :# {:f pound :text "#" :rank [1 2] :stream-aware [2]}
           :$ {:f dollar :text "$" :rank [1 2]}
-          (keyword ",") {:f join :text "," :rank [1 2] :stream-aware [2]}
+          (keyword ",") {:f join :identity []
+                         :text "," :rank [1 2] :stream-aware [2]}
           :& {:f amp :text "&" :rank [1 2] :snapshot-aware [1]}
           :| {:f pipe :text "|" :rank [1 2]}
           :_ {:f under :text "_" :rank [1 2] :stream-aware [2]}
@@ -1650,9 +1668,10 @@
     ;; We do need to deal with streams, tho
     ;; We can handle streams and holes at the same time,
     ;; but I don't know if that makes any sense.
-    (if (some stream? r)
-      [e2 (vec-with-streams e2 r)]
-      [e2 (vec r)])))
+    [e2 (vec r)]))
+    ;; (if (some stream? r)
+    ;;   [e2 (vec-with-streams e2 r)]
+    ;;   [e2 (vec r)])))
 
 (defn resolve-monop [tu e x]
   "Resolve the Op specified by x"
@@ -2285,8 +2304,9 @@
 ;; Testing event source
 (def test-streams (atom []))
 (defn into-stream [x] ;; x is a vector of events to push
-  (let [subs     (atom [])
-        i        (atom 0) ;; index of event in x to send next
+  (let [v        (if (vector? x) x [x])
+        subs     (atom [])
+        i        (atom 0) ;; index of event in v to send next
         source   (swap! last-event-source-id inc)
         stream   (atom {})
         on-done  (fn []
@@ -2297,37 +2317,56 @@
                    (let [curr-subs @subs
                          j         (if (= 0 (count curr-subs))
                                      @i
-                                     (swap! i #(+ 1 (min (count x) %))))]
+                                     (swap! i #(+ 1 (min (count v) %))))]
                      (when (< 0 (count curr-subs))
-                       (if (<= j (count x))
+                       (if (<= j (count v))
                          (do
-                           (let [ss (make-snapshot source (x (dec j)))]
+                           (let [ss (make-snapshot source (v (dec j)))]
                              (doseq [s curr-subs] ((:on-next s) ss)))
-                           (when (= j (count x))
+                           (when (= j (count v))
                              (on-done)))
-                         (when (= 0 (count x))
+                         (when (= 0 (count v))
                            (on-done))))
-                     (< j (count x)))) ;; more to send?
+                     (< j (count v)))) ;; more to send?
         r        {:push     push
                   :sources  [source]
                   :stream   true
                   :subs     subs ;; for debugging
                   :sub      #(swap! subs conj %)
                   :unsub    #(when (= [] (swap! subs except %))
-                               (reset! i (count x)))}]
+                               (reset! i (count v)))}]
     (swap! test-streams conj r)
     (reset! stream r)))
-(defn push-all-test-streams []
-  ;; push events from all test streams randomly
-  (loop [s @test-streams]
+(defn push-test-streams [streams]
+  ;; push events from streams randomly
+  ;; each stream must be pushable, which so far means only
+  ;; streams created via into-stream
+  (loop [s streams]
     (let [i (int (rand (count s)))]
       (if ((:push (s i)))
         (recur s)
         (if (< 1 (count s))
           (recur (removev s i)))))))
+(defn push-test-sources [sources]
+  ;; push events from the test streams identified by sources
+  ;; remove those streams from the global atom test-streams
+  (let [streams (atom [])]
+    (swap! test-streams
+           #(let [in-sources (mapv (fn [x]
+                                     (if (some (set (:sources x)) sources)
+                                       true
+                                       false))
+                                   %)]
+              (reset! streams (index % (where in-sources)))
+              (index % (where (mapv not in-sources)))))
+    (push-test-streams @streams)))
+(defn push-all-test-streams []
+  ;; push events from all test streams randomly
+  (push-test-streams @test-streams)
+  (reset! test-streams []))
 (defn wait [x]
-  "Force all test streams (created via into-stream) to push all
-  their data and wait for all callbacks to complete."
+  "Force all test streams (created via into-stream) that x depends on
+   to push all their data, and wait for all callbacks to complete."
   (if-not (stream? x)
     x
     (let [extract (atom false)
@@ -2338,7 +2377,7 @@
                      (swap! r conj v))
           obs     {:on-done on-done :on-next on-next}]
       ((:sub x) obs)
-      (push-all-test-streams)
+      (push-test-sources (:sources x))
       (if @extract (first @r) @r))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
