@@ -25,4 +25,10 @@ sparksqlrowtovec'rows         / each of the three rows to vec
 sparksqltablenames c          / is it really there? ---> (myfirsttable)
 sparksqlcolumns df            / equiv to cols
 sparksqlprintschema df        / meta
+sparksqlselect[df;"DATE";"NAME";"ADDRESS"; "STORE"]  / cherry pick cols
+sparksqlselectexpr[df;"NAME as newname";"abs(ZIPCODE * -2)"]  / expressions on cols
+df union df                  / sparksqlunion
+df inter df                  / sparksqlinter
+df except df                 / sparksqlexcept
+/
 / Don't put a newline at EOF: the grammar needs work

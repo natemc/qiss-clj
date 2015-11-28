@@ -10,9 +10,12 @@
                       [flambo.conf :as sparkconf]
                       [flambo.api :as spark]
                       [flambo.tuple :as ft]
-                      [flambo.sql :as sparksql])
+                      [flambo.sql :as sparksql]
+                     ; [t6.from-scala.core :refer [$ $$] :as $]
+                     )
             (:import [org.apache.spark.api.java JavaSparkContext]
-                     [org.apache.spark.sql SQLContext Row DataFrame])
+                     [org.apache.spark.sql SQLContext Row DataFrame GroupedData Column]
+                     )
             (:gen-class)])
   #?(:cljs (:require [clojure.string :as str]
                      [dommy.core :as dom :refer-macros [sel sel1]]
@@ -296,21 +299,26 @@
    :formals (:formals g)
    :rank    (:rank g)
    :text    (str (:text f) "comp" (:text g))})
+(declare spark-sql-except)
 (defn except "the elements in x not in y" [x y]
-  (let [p (cond (vector? y) #(some #{%} y)
-                (dict?   y) #(some #{%} (dict-val y))
-                :else       #(= % y))]
+  (let [p (cond (vector? y)        #(some #{%} y)
+                (dict?   y)        #(some #{%} (dict-val y))
+                (and (dframe? x)
+                     (dframe? y))  (spark-sql-except x y)
+                :else              #(= % y))]
     (vec (remove p x))))
 (defn in "true for those elements of x that exist in y" [x y]
   (if (vector? x)
     (mapv #(in % y) x)
     (if (some #{x} y) true false)))
 (declare spark-intersection)
+(declare spark-sql-intersect)
 (defn inter
   "Intersection of 2 vectors.  Preserves the order per x"
   [x y]
   (cond (and (rdd? x) (rdd? y))         (spark-intersection x y)
         (and (pairrdd? x) (pairrdd? y)) (spark-intersection x y)
+        (and (dframe? x) (dframe? y))   (spark-sql-intersect x y)
         :else (vec (filter #(some #{%} y) x))))
 (declare index)
 (defn klast "the last element of x" [x]
@@ -345,12 +353,14 @@
 (defn til [x] (vec (range x)))
 (defn til-count "0..count[x]-1" [x] (vec (range (kcount x))))
 (declare spark-union)
+(declare spark-sql-unionall)
 (defn union
   "Union of 2 vectors.  Preserves the order of x and the items added
   from y retain their relative order as well"
   [x y]
   (cond (and (rdd? x) (rdd? y))         (spark-union x y)
         (and (pairrdd? x) (pairrdd? y)) (spark-union x y)
+        (and (dframe? x) (dframe? y))   (spark-sql-unionall x y)
         :else (vec (distinct (concat x y)))))
 (defn where
   "All elements of x must be integers.  For each element of x (vector
@@ -2035,16 +2045,17 @@
 (declare spark-collect)
 (declare spark-sql-show)
 (defn show [x]
-  (cond (or (rdd? x) (pairrdd? x))          (spark-collect x)
-        (dframe? x)      (spark-sql-show x)
-        (vector? x)      (println (stringify-vector x))
-        (dict? x)        (show-dict x)
-        (table? x)       (show-table x)
-        (keyed-table? x) (show-keyed-table x)
-        (lambda? x)      (show-lambda x)
-        (snapshot? x)    (show (snapshot-value x))
-        (bool? x)        (println (stringify-boolean x))
-        :else            (println x)))
+  (cond (or (rdd? x)
+            (pairrdd? x))  (spark-collect x)
+        (dframe? x)        (spark-sql-show x)
+        (vector? x)        (println (stringify-vector x))
+        (dict? x)          (show-dict x)
+        (table? x)         (show-table x)
+        (keyed-table? x)   (show-keyed-table x)
+        (lambda? x)        (show-lambda x)
+        (snapshot? x)      (show (snapshot-value x))
+        (bool? x)          (println (stringify-boolean x))
+        :else              (println x)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; parser initialization
 ;; Used by the parse and parse functions to replace all limited
@@ -2693,17 +2704,80 @@
   [^DataFrame dataframe n]
   (.take dataframe n))
 
+(defn spark-sql-col
+  "Selects column based on the column name and return it as a [[Column]]"
+  [^DataFrame dataframe colname]
+  (.col dataframe (string colname)))
+
 (defn spark-sql-count
   "count"
-;  [^DataFrame dataframe]
-  [dataframe]
+  [^DataFrame dataframe]
   (.count dataframe))
 
+; remember that a single String argument for of the select
+; function is already taken by the SQL query fucntion
+(defn spark-sql-select
+  "df.select( fcolname, colnames )"
+  [^DataFrame dataframe firstcolname & colnames]
+  (.select dataframe (string firstcolname) (into-array String (map string colnames))))
+
+;  @scala.annotation.varargs
+; def select(col: String, cols: String*): DataFrame = select((col +: cols).map(Column(_)) : _*)
+(defn spark-sql-select-works
+  "df.select( colnamea, colnames )"
+  [^DataFrame dataframe colname &colnames]
+  (.select dataframe (string colname) (into-array String ["NAME" "ZIPCODE"])))
+
+
+(defn spark-sql-selectexpr
+  [^DataFrame dataframe & exprs]
+  (.selectExpr dataframe (into-array String (map string exprs))))
 
 (defn spark-sql-group-by
   ""
+  [^DataFrame dataframe firstcolname & colnames]
+  (.groupBy dataframe (string firstcolname) (into-array String (map string colnames))))
+;(.groupBy dataframe (string firstcolname) (spark-sql-col dataframe colname)))
+
+
+(defn spark-sql-rollup
+  ""
+  [^DataFrame dataframe firstcolname & colnames]
+  (.rollup dataframe (string firstcolname) (into-array String (map string colnames))))
+;(.groupBy dataframe (string firstcolname) (spark-sql-col dataframe colname)))
+
+(defn spark-sql-agg
+  ""
+  [^DataFrame dataframe firstcolname & colnames]
+  (.agg dataframe
+        (spark-sql-col dataframe firstcolname)
+        (into-array Column (map #(spark-sql-col dataframe %) colnames))))
+
+(defn spark-sql-unionall
+  "Returns a new [[DataFrame]] containing union of rows in this frame and another frame.\n   * This is equivalent to `UNION ALL` in SQL"
+  [^DataFrame dataframe ^DataFrame otherdf]
+  (.unionAll dataframe otherdf))
+
+(defn spark-sql-intersect
+  "This is equivalent to `INTERSECT` in SQL."
+  [^DataFrame dataframe ^DataFrame otherdf]
+  (.intersect dataframe otherdf))
+
+(defn spark-sql-except
+  "This is equivalent to `EXCEPT` in SQL."
+  [^DataFrame dataframe ^DataFrame otherdf]
+  (.except dataframe otherdf))
+
+(defn spark-sql-todf
+  "rename"
+  [^DataFrame dataframe & colnames]
+  (.toDF dataframe (into-array String (map string colnames))))
+
+(defn spark-sql-apply
+  ""
   [^DataFrame dataframe colname]
-  (.groupBy dataframe (string colname)))
+  (.apply dataframe (string colname)))
+
 
 (defn ^SQLContext spark-sql-context
   "Build a SQLContext from a JavaSparkContext"
@@ -2856,23 +2930,34 @@
                      :sparkstop {:f spark-stop :rank [1]}
                      :sparksortbykey {:f spark-sort-by-key :rank [1]}
                      :sparksql {:f spark-sql :rank [2]}
+                     :sparksqlagg {:f spark-sql-agg :rank [2 3 4 5 6 7 8 9 10]}
+                     :sparksqlapply {:f spark-sql-apply :rank [2]}
                      :sparksqlcachetable {:f spark-sql-cache-table :rank [2]}
+                     :sparksqlcol {:f spark-sql-col :rank [2]}
                      :sparksqlcolumns {:f spark-sql-columns :rank [1]}
                      :sparksqlclearcache {:f spark-sql-clear-cache :rank [1]}
                      :sparksqlcontext {:f spark-sql-context :rank [1]}
                      :sparksqlcount {:f spark-sql-count :rank [1]}
-                     :sparksqlgroupby {:f spark-sql-group-by :rank [2]}
-                     :sparksqljsonrdd {:f spark-sql-json-rdd :rank [2]}
+                     :sparksqlexcept {:f spark-sql-except :rank [2]}
+                     :sparksqlgroupby {:f spark-sql-group-by :rank [2 3 4 5 6 7 8 9 10]}
+                     :sparksqlintersect {:f spark-sql-intersect :rank [2]}
                      :sparksqliscached? {:f spark-sql-is-cached? :rank [2]}
+                     :sparksqljsonrdd {:f spark-sql-json-rdd :rank [2]}
                      :sparksqlload {:f spark-sql-load :rank [2 3]}
+                     :sparksqlselect {:f spark-sql-select :rank [3 4 5 6 7 8 9 10 11 12]}
+                     :sparksqlselectexpr {:f spark-sql-selectexpr :rank [2 3 4 5 6 7 8 9 10]}
+                     :sparksqlshow {:f spark-sql-show :rank [1]}
+                     :sparksqltodf {:f spark-sql-todf :rank [3 4 5 6 7 8 9 10]}
                      :sparksqlparquetfile {:f spark-sql-parquet-file :rank [2]}
                      :sparksqlprintschema {:f spark-sql-print-schema :rank [1]}
                      :sparksqlreadcsv {:f spark-sql-read-csv :rank [2 3]}
                      :sparksqlregistertemptable {:f spark-sql-register-temp-table :rank [2]}
                      :sparksqlregisterdataframeastable {:f spark-sql-register-data-frame-as-table :rank [3]}
+                     :sparksqlrollup {:f spark-sql-rollup :rank [2 3 4 5 6 7 8 9 10]}
                      :sparksqlrowtovec {:f spark-sql-row->vec :rank [1]}
                      :sparksqltable {:f spark-sql-table :rank [2]}
                      :sparksqltablenames {:f spark-sql-table-names :rank [1]}
+                     :sparksqlunionall {:f spark-sql-unionall :rank [2]}
                      :sparksqluncachetable {:f spark-sql-uncache-table :rank [2]}
                      :sparksubtract {:f spark-subtract :rank [2]}
                      :sparksubtractbykey {:f spark-subtract-by-key :rank [2]}
