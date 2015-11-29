@@ -311,6 +311,7 @@
   (let [p (re-pattern (string pattern))
         h (fn h [i]
             (cond (keyword? i) (not (nil? (re-find p (string i))))
+                  (string? i)  (not (nil? (re-find p i)))
                   (kstring? i) (not (nil? (re-find p (str/join i))))
                   :else        (mapv h i)))]
     (h x)))
