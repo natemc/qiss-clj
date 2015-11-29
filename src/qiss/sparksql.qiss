@@ -1,34 +1,57 @@
-/ ~800MB file
-/ http://mishadoff.com/blog/spark-in-clojure/
+/
+/  load ten row baby table into a dataframe
+/
+df:c sparksqlreadcsv "iowa_liquor_sales_fixed_with_header10.csv"   / csv -> df
+/
+/ dataframe operations
+/
+show df                       / sparksqlshow
+first df                      / pickoff the first row as a dataframe
+count df                      / 10
+distinct df                   / drop duplicates
+3 take df                     / take the first three rows
+df * 3 take df                / sparksqljoin (cartesian)  10 rows * 3 rows => 30 rows
+df,df                         / join(append) op is a unionall op for spark sql dataframes
+df union df                   / explicit sparksqlunionall
+df inter df                   / sparksqlinter
+df except df                  / sparksqlexcept
+df ~ df                       / unlike pandas, spark sql has no equals op. we use sparksqlexcept
+/
+/ single char operations still applies
+/
+*df                           / sparksqllimit(1)
+#df                           / sparksqlcount
+?df                           / sparksqldropduplicates
+3#df                          / sparksqllimit (note that neg values returns an empty DF)
+df * 3#df                     / sparksqljoin (cartesian when no column args are missing)
+df,df                         / sparksqlunionall
+rows:3 sparksqltake df        / returns type Rows (not DataFrame)
+sparksqlprintschema df        / meta
+sparksqlexplain[df;1b]        / super meta
+sparksqlshow[2;df;0b]         / show first two rows with no truncation
+sparksqlrowtovec'rows         / each of the three rows to vec
+sparksqlcolumns df            / equiv to cols
+sparksqlselect[df;"DATE";"NAME";"ADDRESS"; "STORE"]           / cherry pick cols
+sparksqlselectexpr[df;"NAME as newname";"abs(ZIPCODE * -2)"]  / expressions on cols
+/
+/ table operations (not dataframe)
+/
+sparksqlregisterdataframeastable[c;df;"myfirsttable"]       / df -> table
+tables c                      / sparksqltablenames c        / is it really there? ---> (myfirsttable)
+c sparksql "SELECT NAME, DATE, ZIPCODE from myfirsttable"   / we can apply a SQL query func
+df:sparksqltable[c; "myfirsttable"]                         / table -> df
+                                                            / now go back the other way..
+/
+/
 /
 / df:sparksqlload[ c;"iowa-liquor.csv";"com.databricks.spark.csv"]
 /
 / $ wc iowa_liquor_sales_fixed_with_header5.csv
        10     224    2621 iowa_liquor_sales_fixed_with_header5.csv
 / $
-/    # nine row baby table for testing
+/ ~800MB file
+/ http://mishadoff.com/blog/spark-in-clojure/
 /
-df:c sparksqlreadcsv "iowa_liquor_sales_fixed_with_header5.csv"   / csv -> df
-sparksqlregisterdataframeastable[c;df;"myfirsttable"]       / df -> table
-c sparksql "SELECT NAME, DATE, ZIPCODE from myfirsttable"   / we can apply a SQL query func
-                                                            / to tables
-/ now go back the other way..
-/ myfirstable -> df
-df:sparksqltable[c; "myfirsttable"]       / table -> df
-
-/ basic qiss-esque dataframe operations
-show df                       / sparksqlshow
-#df                           / sparksqlcount
-*df                           / sparksqlfirst df
-rows:3#df                     / sparksqltake 3
-sparksqlrowtovec'rows         / each of the three rows to vec
-sparksqltablenames c          / is it really there? ---> (myfirsttable)
-sparksqlcolumns df            / equiv to cols
-sparksqlprintschema df        / meta
-sparksqlselect[df;"DATE";"NAME";"ADDRESS"; "STORE"]  / cherry pick cols
-sparksqlselectexpr[df;"NAME as newname";"abs(ZIPCODE * -2)"]  / expressions on cols
-df union df                  / sparksqlunion
-df inter df                  / sparksqlinter
-df except df                 / sparksqlexcept
+/
 /
 / Don't put a newline at EOF: the grammar needs work

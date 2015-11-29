@@ -527,6 +527,7 @@
   "string from vector"
   (vec (str/join (if (vector? x) (str/join x) x)
                  (mapv str/join y))))
+(declare spark-sql-count)
 (defn tilde
   "~x (not) and x~y (match, i.e., non-atomic equals)"
   ([x] ;; not
@@ -535,22 +536,29 @@
          (table? x)       (make-table (cols x) (tilde (dict-val x)))
          (keyed-table? x) (make-keyed-table (dict-key x) (tilde (dict-val x)))
          :else            (if (= 0 x) true (not x))))
-  ([x y] (= x y))) ;; match
+  ([x y] ;; match
+   (cond
+     (and (dframe? x)     ; this seems to be super expensive. research SQL (optimizer) alternatives?
+          (dframe? y))    (= 0 (spark-sql-count (spark-sql-except x y)))
+     :else (= x y))))
 (defn first-from-snapshot [x]
   ;; :extract true is a hack to work with wait
   (assoc (make-snapshot-final x) :extract true))
 (declare spark-first)
+(declare spark-sql-limit)
+(declare spark-sql-join)
 (declare spark-cartesian)
 (defn times
   "*x (first) and x*y (atomic multiplication)"
   ([x]
    (cond (snapshot? x)                     (first-from-snapshot x)
          (or (rdd? x) (pairrdd? x))        (spark-first x)
-         (or (dframe? x))                  (spark-first x)
+         (or (dframe? x))                  (spark-sql-limit x 1)
          :else                             (first x)))
   ([x y]
    (cond (and (rdd? x) (rdd? y))           (spark-cartesian x y)
          (and (pairrdd? x) (pairrdd? y))   (spark-cartesian x y)
+         (and (dframe? x) (dframe? y))     (spark-sql-join x y)
          :else                             ((atomize *) x y))))
 (defn vs [x y]
   "vector from string"
@@ -664,10 +672,14 @@
     r))
 (declare rdd?)
 (declare spark-join)
+(declare spark-sql-unionall)
 (defn join
   ",x (enlist) and x,y (join)"
   ([x] [x])
-  ([x y] (cond (and (pairrdd? x) (pairrdd? y))  (spark-join x y)
+  ([x y] (cond (and (pairrdd? x)
+                    (pairrdd? y))       (spark-join x y)
+               (and (dframe? x)
+                    (dframe? y))        (spark-sql-unionall x y)
                (vector? x)              (cond (vector? y) (vec (concat x y))
                                               (stream? y) (join-vec-to-stream x y)
                                               :else       (conj x y))
@@ -826,6 +838,7 @@
         (err "nyi: reshape only supports vector on rhs")))
 (declare spark-take)
 (declare spark-sql-take)
+(declare spark-sql-limit)
 (defn ktake [x y]
   "x#y take from y the elements specified by x"
   ;; TODO: support stream for x?
@@ -834,7 +847,7 @@
     (let [n (if (bool? x) (if x 1 0) x)]
       (cond (or (rdd? y)
                 (pairrdd? y)) (spark-take n y)
-            (dframe? y)       (spark-sql-take y n)
+            (dframe? y)       (spark-sql-limit y n)
             (not (coll? y))   (vec (repeat n y))
             (vector? y)       (take-from-vec n y)
             (dict? y)         (take-from-dict n y)
@@ -906,11 +919,15 @@
            (repeatedly x #(rand y))
            (repeatedly x #(rand-int y))))))
 (declare spark-distinct)
+(declare spark-sql-distinct)
+(declare spark-sql-sample)
 (defn ques
   "?x (distinct) and x?y (find or rand depending on the arguments)"
   ([x] (cond (or (rdd? x) (pairrdd? x))  (spark-distinct x)
+             (dframe? x)                 (spark-sql-distinct x)
              :else (vec (distinct x))))
-  ([x y] (cond (or (rdd? y) (pairrdd? y))          (err "nyi: " x y)
+  ([x y] (cond (or (rdd? y) (pairrdd? y))           (err "nyi: " x y)
+               (and (number? x) (dframe? y))        (spark-sql-sample y false x)
                (vector? x)      (findv x y)
                (dict? x)        (index (dict-key x) (ques (dict-val x) y))
                (table? x)       (find-table x y)
@@ -2695,14 +2712,26 @@
 ;                except for spark-context-from-sql-text to avoid confusion.
 
 (defn spark-sql-show
-  "show"
-  [^DataFrame dataframe]
-  (.show dataframe))
+  "   * Displays the top 20 rows of [[DataFrame]] in a tabular form. Strings more than 20 characters\n   * will be truncated, and all cells will be aligned right.\n"
+  ([^DataFrame dataframe]
+   (.show dataframe))
+  ([^DataFrame numRows dataframe]   ; this order is flipped to make the usage more qiss-esque
+   (.show dataframe numRows))
+  ([^DataFrame numRows dataframe truncate]
+   (.show dataframe numRows truncate)))
 
 (defn spark-sql-take
-  "take"
+  "take (returns an array of rows - see spark-sql-limit for the true take"
   [^DataFrame dataframe n]
   (.take dataframe n))
+
+(defn spark-sql-sample
+  "Returns a new [[DataFrame]] by sampling a fraction of rows."
+  ([^DataFrame dataframe withReplacement fraction seed]
+   (.sample dataframe withReplacement fraction seed))
+  ([^DataFrame dataframe withReplacement fraction]
+   (.sample dataframe withReplacement fraction)))
+
 
 (defn spark-sql-col
   "Selects column based on the column name and return it as a [[Column]]"
@@ -2778,6 +2807,40 @@
   [^DataFrame dataframe colname]
   (.apply dataframe (string colname)))
 
+(defn spark-sql-na
+  "Dropping rows containing any null values"
+  [^DataFrame dataframe]
+  (.na dataframe))
+
+(defn spark-sql-limit
+  "Returns a new [[DataFrame]] by taking the first `n` rows. The difference between this function\n   * and `head` is that `head` returns an array while `limit` returns a new [[DataFrame]].\n"
+  [^DataFrame dataframe n]
+  (.limit dataframe n))
+
+(defn spark-sql-join
+  "Cartesian join with another"
+  ([^DataFrame dataframe ^DataFrame other]
+   (.join dataframe other))
+  ; Different from other join functions, the join column will only appear once in the output,
+  ; * i.e. similar to SQL's `JOIN USING` syntax.
+  ([^DataFrame dataframe ^DataFrame other usingColumn]
+   (.join dataframe other (string usingColumn)))
+  )
+
+(defn spark-sql-equi-join
+  "Cartesian join with another"
+  [^DataFrame dataframe ^DataFrame other usingColumn]
+  (.join dataframe other (string usingColumn)))
+
+(defn spark-sql-distinct
+  "This is an alias for `dropDuplicates`."
+  [^DataFrame dataframe]
+  (.dropDuplicates dataframe))
+
+(defn spark-sql-explain
+  "Prints the plans (logical and physical) to the console for debugging purposes"
+  ([^DataFrame dataframe] (.explain dataframe))
+  ([^DataFrame dataframe isExtended] (.explain dataframe isExtended)))
 
 (defn ^SQLContext spark-sql-context
   "Build a SQLContext from a JavaSparkContext"
@@ -2880,18 +2943,22 @@
 
 (def builtin-common {:cols     {:f cols :rank [1]}
                      :comp     {:f compose :rank [2]}
+                     :count    {:f pound  :rank [1 2] :stream-aware [2]} ; alias for operator #
+                     :distinct {:f ques :rank [1]}  ; alias for operator ?
                      :div      {:f div :rank [2]}
                      :done     {:f done :pass-global-env true :rank [2]
                                 :stream-aware[2]}
                      :eval     {:f #(keval (apply str %)) :rank [1]}
                      :every    {:f every :rank [1]}
+                     :first    {:f times :rank [1 2] :snapshot-aware [1]}
                      :inter    {:f inter :rank [2]}
                      :keys     {:f keycols :rank [1]}
                      :last     {:f klast :rank [1]}
                      :like     {:f like :rank [2]}
                      :lj       {:f lj :rank [2]}
+                     :meta     {:f spark-sql-explain :rank [1 2]}
                      :mod      {:f kmod :rank [2]}
-                     :show     {:f show :rank [1] :snapshot-aware [1]}
+                     :show     {:f show :rank [1 2] :snapshot-aware [1]}
                      :sparkcartesian {:f spark-cartesian :rank [2]}
                      :sparkcheckpoint {:f spark-checkpoint :rank [0]}
                      :sparkcogroup {:f spark-cogroup :rank [1 2]}
@@ -2938,15 +3005,22 @@
                      :sparksqlclearcache {:f spark-sql-clear-cache :rank [1]}
                      :sparksqlcontext {:f spark-sql-context :rank [1]}
                      :sparksqlcount {:f spark-sql-count :rank [1]}
+                     :sparksqldistinct {:f spark-sql-distinct :rank [1]}
                      :sparksqlexcept {:f spark-sql-except :rank [2]}
+                     :sparksqlexplain {:f spark-sql-explain :rank [1 2]}
                      :sparksqlgroupby {:f spark-sql-group-by :rank [2 3 4 5 6 7 8 9 10]}
                      :sparksqlintersect {:f spark-sql-intersect :rank [2]}
                      :sparksqliscached? {:f spark-sql-is-cached? :rank [2]}
+                     :sparksqljoin {:f spark-sql-join :rank [2 3 4 5 6 7 8 9 10]}
+                     :sparksqlequijoin {:f spark-sql-equi-join :rank [3]}
                      :sparksqljsonrdd {:f spark-sql-json-rdd :rank [2]}
+                     :sparksqltlimit {:f spark-sql-limit :rank [2]}
                      :sparksqlload {:f spark-sql-load :rank [2 3]}
+                     :sparksqlna {:f spark-sql-na :rank [1]}
+                     :sparksqlsample {:f spark-sql-sample :rank [3 4]}
                      :sparksqlselect {:f spark-sql-select :rank [3 4 5 6 7 8 9 10 11 12]}
                      :sparksqlselectexpr {:f spark-sql-selectexpr :rank [2 3 4 5 6 7 8 9 10]}
-                     :sparksqlshow {:f spark-sql-show :rank [1]}
+                     :sparksqlshow {:f spark-sql-show :rank [1 2 3]}
                      :sparksqltodf {:f spark-sql-todf :rank [3 4 5 6 7 8 9 10]}
                      :sparksqlparquetfile {:f spark-sql-parquet-file :rank [2]}
                      :sparksqlprintschema {:f spark-sql-print-schema :rank [1]}
@@ -2967,6 +3041,8 @@
                      ; :values {:f values :rank [1]}
                      :stop     {:f stop :rank [1] :stream-aware [1]}
                      :sv       {:f sv :rank [2]}
+                     :tables   {:f spark-sql-tablenames :rank [1]}
+                     :take     {:f pound :rank [2]}   ; alias for operator #
                      :throttle {:f throttle :rank [2] :stream-aware [2]}
                      :union    {:f union :rank [2]} ; TODO: accept arb number of args like sparkunion
                      :vs       {:f vs :rank [2]}
