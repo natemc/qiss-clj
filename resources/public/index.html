@@ -8,11 +8,15 @@
       / FRP without all the ceremony.  Events are time-varying values.
       / They automatically propagate through call chains.
       / show`click ev dom`start;      / dom with sym => single element by ID
-      {dom[`result]text(`click ev dom`stop)#every 500}'`click ev dom`start;
       / dom[`result]text every 2000;
+      {dom[`result]text(`click ev dom`stop)#every 500}'`click ev dom`start;
       / dom with string => collection of elements via CSS selector
-      (dom".cx"){x text'y*1+!x}/:{x@&0=x mod 2}`clientX of`mousemove ev dom`box;
-      / The following don't work yet... 
+      / (dom".cx"){x text'y*1+!x}/:{x@&0=x mod 2}`clientX of`mm ev dom`box;
+      / The following don't work yet...
+      md:`md ev dom`movable;
+      show`clientX`clientY#/:md;
+      mm:,/{#.`mu`mm ev\:dom`box}'md;
+      (dom".cx")text'/:`clientX`clientY of/:mm;
       / dom[`result],/:`click ev dom`start;
       / dom[`result],/:{x;"<p>foo</p>"}'`click ev dom`start;
     </script>
@@ -22,7 +26,12 @@
     <h1>qisses</h1>
     <div id="app">
       <div id='box' style='height:400px;width:100%;'>
-	<div class='cx' id='left' style='float:left;height:inherit;width:50%;'>
+        <div id='movable'
+	     style='height:30px;width:30px;background-color:blue'>
+	</div>
+        <div id='spacer' style='height:30px'></div>
+	<div class='cx' id='left'
+	  style='float:left;height:inherit;width:50%;'>
 	</div>
 	<div class='cx' id='right' style='float:left;height:inherit;width:50%;'>
 	</div>

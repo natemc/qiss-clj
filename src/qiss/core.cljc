@@ -85,11 +85,12 @@
 ;; Really? see
 ;; https://github.com/clojure/clojurescript/wiki/Bootstrapping-the-Compiler
 ;; http://swannodette.github.io/2015/07/29/clojurescript-17/
+(declare string)
 (defn k-new
   "create instance of java class x using params in y"
-  ([x] #?(:clj (eval (read-string (str "(new " (name x) ")")))))
+  ([x] #?(:clj (eval (read-string (str "(new " (string x) ")")))))
   ([x y] #?(:clj (eval (read-string (str "(new "
-                                         (name x)
+                                         (string x)
                                          " "
                                          (str/join " " y)
                                          ")"))))))
@@ -107,7 +108,9 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; qiss data structure ctors, accessors, mutators
-(defn make-dict ([] (make-dict [] [])) ([k v] {:k k :v v}))
+(defn make-dict
+  ([] (make-dict [] []))
+  ([k v] {:k (if (vector? k) k [k]) :v (if (vector? v) v [v])}))
 (defn make-keyed-table [k v] {:k k :v v :kt true})
 (defn make-table [c d] {:k c :v d :t true})
 (defn dict? [x] (and (map? x) (:k x) (:v x) (not (:t x)) (not (:kt x))))
@@ -307,7 +310,7 @@
 (defn like [x pattern]
   (let [p (re-pattern (string pattern))
         h (fn h [i]
-            (cond (keyword? i) (not (nil? (re-find p (name i))))
+            (cond (keyword? i) (not (nil? (re-find p (string i))))
                   (kstring? i) (not (nil? (re-find p (str/join i))))
                   :else        (mapv h i)))]
     (h x)))
@@ -318,7 +321,7 @@
 (defn string [x]
   "make a string from one of string, keyword, vector<char>"
   (cond (string? x)  x
-        (keyword? x) (name x)
+        (keyword? x) (subs (str x) 1)
         :else        (str/join x))) ;; vector of char
 (declare kcount)
 (defn til [x] (vec (range x)))
@@ -802,15 +805,17 @@
         (reshape (mapv #(if (bool? %) (if % 1 0) %) x) y)
         :else
         (let [n (if (bool? x) (if x 1 0) x)]
-          (cond (not (coll? y))  (vec (repeat n y))
-                (vector? y)      (take-from-vec n y)
-                (dict? y)        (take-from-dict n y)
-                (table? y)       (take-from-table n y)
-                (keyed-table? y) (take-from-keyed-table n y)
-                (stream? y)      (if (< n 0)
-                                   (take-last-from-stream (- n) y)
-                                   (take-from-stream n y))
-                :else            (err "nyi: # on " y)))))
+          (cond (and (number? n)
+                     (not (coll? y))) (vec (repeat n y))
+                (vector? y)           (take-from-vec n y)
+                (dict? y)             (take-from-dict n y)
+                (table? y)            (take-from-table n y)
+                (keyed-table? y)      (take-from-keyed-table n y)
+                (stream? y)           (if (< n 0)
+                                        (take-last-from-stream (- n) y)
+                                        (take-from-stream n y))
+                :else                 #?(:clj  (err "nyi: # on " y)
+                                         :cljs (make-dict x (index y x)))))))
 (defn pound
   "#x (count) and x#y (take)"
   ([x] (kcount x))
@@ -911,7 +916,7 @@
     s))
 (defn kdrop [x y]
   "Remove the first x elements from y (negative x => drop from the back)"
-  (let [o (if (<= 0 x) (partial drop x) (partial drop-last (- x)))]
+  (let [o (if (<= 0 x) #(vec (drop x %)) #(vec (drop-last (- x) %)))]
     (cond (vector? y)      (vec (o y))
           (dict? y)        (apply make-dict (map o [(dict-key y) (dict-val y)]))
           (table? y)       (make-table (dict-key y) (mapv o (dict-val y)))
@@ -1279,17 +1284,22 @@
         :else (err "nyi: parse type" (str x))))
 (defn rcsv [c f] ;; col types and file name
   "Read csv file f with column types specified by c per the parse-data function"
-  #?(:clj (let [d (csv/parse-csv (slurp (string f)))] ;; assumes header line
+  #?(:clj (let [d (csv/parse-csv (slurp (string f)))] ;; assumes no header line
             (mapv parse-data (string c) (flip (vec d))))))
 (defn rcsvh [c f] ;; col types and file name
   "Read csv file f, whose first line is a header, with column types
   specified by c per the parse-data function"
  #?(:clj (let [[h & d] (csv/parse-csv (slurp (string f)))] ;; assumes header line
-           (make-table (mapv keyword h) (mapv parse-data (string c) (flip (vec d)))))))
+           (make-table (mapv keyword h)
+                       (mapv parse-data (string c) (flip (vec d)))))))
 (defn wcsv [f t] ;; output file and table
   "Write to csv file f the content of table t"
-  #?(:clj (let [make-string (fn [x] (mapv #(if (keyword? %) (name %) (str %)) x))
-                d (cons (mapv name (cols t)) (map make-string (flip (dict-val t))))]
+  #?(:clj (let [make-string (fn [x] (mapv #(if (keyword? %)
+                                             (string %)
+                                             (str %))
+                                          x))
+                d (cons (mapv name (cols t))
+                        (map make-string (flip (dict-val t))))]
             (with-open [w (io/writer (string f))]
               (.write w (csv/write-csv d))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1452,7 +1462,7 @@
         (snapshot? x)    (derive-snapshot x (index (snapshot-value x) i))
         ;;; object? doesn't work; it just tests if the ctor is Object
         :else            #?(:clj  (err "can't index" x "with" i)
-                            :cljs (aget x (name i)))))
+                            :cljs (aget x (string i)))))
 (defn index-deep [x i]
   "The elements of x specified by i, where x is nested and the
   dimensions of i create a cross-product index over x's dimensions"
@@ -1478,7 +1488,8 @@
   ;; is completed later.  This appears to be the behavior of k anyhow.
   (let [max-rank (apply max (lambda-rank f))
         min-rank (apply min (lambda-rank f))
-        args     (cond (> (count a) max-rank) (err "rank" (:text f))
+        args     (cond (> (count a) max-rank)
+                       (err "rank" (:rank f) (:text f) a)
                        (< (count a) min-rank)
                        ;; add holes if needed
                        (concat a (repeat (- min-rank (count a)) :hole))
@@ -1488,9 +1499,10 @@
         passing (loop [x args y formals r []]
                   (cond (empty? x) r
                         (empty? y) (catv r x)
-                        (= :hole (first x)) (recur (rest x)
-                                                   (rest y)
-                                                   (conj r [:id (name (first y))]))
+                        (= :hole (first x))
+                        (recur (rest x)
+                               (rest y)
+                               (conj r [:id (string (first y))]))
                         :else (recur (next x) y (conj r [:raw (first x)]))))
         w {:formals formals
            :exprs [[:call [:target [:raw f]] (push :actuals passing)]]
@@ -1586,7 +1598,7 @@
                           :text (str (:text o) (:adverb x))}))
         make0 (fn [o] ; allow {debug"foo"}'...
                 (let [f (:f o)]
-                  (merge o {:f (m (assoc o :f (fn [ignored] (f))))
+                  (merge o {:f (m (assoc o :f (fn [e ignored] (f e))))
                             :pass-global-env true
                             :rank [1]
                             :stream-aware [1]
@@ -2282,21 +2294,25 @@
 ;; DOM
 (def last-event-source-id (atom 0))
 #?(:cljs (defn ev [event ele]
-           (let [source (swap! last-event-source-id inc)
-                 subs   (atom [])
-                 cb     (fn [e] (let [ss (make-snapshot source e)]
-                                  (doseq [s @subs] ((:on-next s) ss))))]
-             (dom/listen! (:element ele) event cb)
-             (merge ele {:on-done (fn [] (dom/unlisten! (:element ele) event cb))
+           (let [aliases {:md :mousedown
+                          :mm :mousemove
+                          :mu :mouseup}
+                 ename   (if-let [a (event aliases)] a event)
+                 source  (swap! last-event-source-id inc)
+                 subs    (atom [])
+                 cb      (fn [e] (let [ss (make-snapshot source e)]
+                                   (doseq [s @subs] ((:on-next s) ss))))]
+             (dom/listen! (:element ele) ename cb)
+             (merge ele {:on-done (fn [] (dom/unlisten! (:element ele) ename cb))
                          :stream  true
-                         :event   event
+                         :event   ename
                          :sources [source]
                          :sub     #(swap! subs conj %)
                          :unsub   #(when (= [] (swap! subs except %))
-                                     (dom/unlisten! (:element ele) event cb))}))))
+                                     (dom/unlisten! (:element ele) ename cb))}))))
 #?(:cljs (defn kdom [s]
            (cond (and (coll? s) (not (kstring? s))) (mapv kdom s)
-                 (keyword? s) {:element (dom/sel1 (str "#" (name s)))}
+                 (keyword? s) {:element (dom/sel1 (str "#" (string s)))}
                  (kstring? s) (mapv (fn [x] {:element x}) (dom/sel (apply str s)))
                  :else        (err "invalid argument to dom:" s))))
 #?(:cljs (defn text
@@ -2445,7 +2461,8 @@
 
 (declare load-code)
 #?(:clj (defn load-qiss-file [e f] (load-code e (slurp (string f)))))
-#?(:clj (defn load-qiss-file-from-qiss [e f] {:new-env (load-qiss-file e f)}))
+#?(:clj (defn load-qiss-file-from-qiss [e f]
+          {:new-env (load-qiss-file e f)}))
 
 (def builtin-common {:cols     {:f cols :rank [1]}
                      :comp     {:f compose :rank [2]}
