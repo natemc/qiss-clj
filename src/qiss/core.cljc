@@ -2449,7 +2449,7 @@
   Provides Spark the basic info necessary to access a cluster."
   (-> (sparkconf/spark-conf)
       ;  (sparkconf/set (string key) (string val))
-      ;  (sparkconf/set "spark.driver.allowMultipleContexts" "true")
+       (sparkconf/set "spark.driver.allowMultipleContexts" "true")
       ;  (sparkconf/set "spark.executor.memory" "6g")
       ;  (sparkconf/set "spark.eventLog.enabled" "true")
       ;
@@ -2927,6 +2927,19 @@
 (def spark-sql-row->vec
   sparksql/row->vec)
 
+(defn spark-sql-splash
+  []
+  (println (clojure.string/join "\n" [
+"          _              _____                  ____    __  "
+"   ____ _(_)_________   / ___/____  ____ ______/ __ \\  / /  "
+"  / __ `/ / ___/ ___/   \\__ \\/ __ \\/ __ `/ ___/ / / / / /   "
+" / /_/ / (__  |__  )   ___/ / /_/ / /_/ / /  / /_/ / / /___ "
+" \\__, /_/____/____/   /____/ .___/\\__,_/_/   \\___\\_\\/_____/ "
+"   / /                    / /"
+"  /_/                    /_/"
+" "
+                                      ])))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (declare genv)
@@ -3121,6 +3134,7 @@
    (defn repl
      ([] (repl @genv))
      ([e] ;; env cmdline
+      (spark-sql-splash)
       (println "Welcome to qiss.  qiss is short and simple.")
       (loop [e e]
         (do ;; (print "e ") (println e)
