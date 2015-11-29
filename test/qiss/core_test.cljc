@@ -321,6 +321,13 @@
   (testing "4-arg . is selective xform at depth with rhs"
     (is (= (keval "`a`b`c!(0 1 2;30 4 500;6 7 8)")
            (keval ".[`a`b`c!(0 1 2;3 4 5;6 7 8);(`b;0 2);*;10 100]")))))
+(deftest test-like
+  (testing "like works on clojure strings"
+    (is (like "foo.qiss" ".*\\.qiss")))
+  (testing "like works on qiss strings"
+    (is (like (keval "\"foo.qiss\"") (keval "\".*\\.qiss\""))))
+  (testing "like works on qiss symbols"
+    (is (like (keval "`foo.qiss") (keval "`.*\\.qiss")))))
 (deftest test-join
   (testing "monadic , envectors"
     (is (= [1] (keval ",1")))
