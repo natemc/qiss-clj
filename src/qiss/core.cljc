@@ -1684,7 +1684,9 @@
   (assoc x :rank [2]))
 (defn resolve-juxt [tu e x]
   "Resolve two expressions next to each other without punctuation"
-  (let [[e2 rhs] (kresolve tu e (:rhs x))
+  (let [[e2 rhs] (if (= :adverbed (first (:lhs x)))
+                   (resolve-full-expr tu e (:rhs x))
+                   (kresolve tu e (:rhs x)))
         [e3 lhs] (kresolve tu e2 (:lhs x))]
     (cond
       (:second rhs)       (invoke e3 rhs [lhs (:second rhs)])  ; 1 in 1 2 3
@@ -1734,7 +1736,7 @@
 (defn resolve-monop [tu e x]
   "Resolve the Op specified by x"
   (let [o      (ops (keyword (:op x)))
-        [e2 a] (kresolve tu e (:rhs x))]
+        [e2 a] (resolve-full-expr tu e (:rhs x))]
     (invoke e2 o [a])))
 
 (defn sub-table [t i]
@@ -1775,11 +1777,13 @@
             (let [n      (if (= :assign (first a))
                            (keyword (second (second a)))
                            (guess-col a))
-                  [e2 d] (kresolve tu e (insta/transform (sub-table t i) a))]
+                  [e2 d] (resolve-full-expr tu
+                                            e
+                                            (insta/transform (sub-table t i)
+                                                             a))]
               [e2 (add-to-dict r n d)]))
           [e (make-dict)]
           aggs))
-
 (defn resolve-delcols [tu e x]
   "Resolve the delete (columns) expr specified by x"
   (let [[_ t] (kresolve tu e (:from x))
@@ -2058,7 +2062,9 @@
 ;; Used by the parse and parse functions to replace all limited
 ;; non-terminals with their regular (not limited) versions, as the
 ;; limits apply only for parsing and are not relevant to evaluation.
-(def xform   {:ladverbed (fn [& x] (vec (cons :adverbed x)))
+(def xform   {:advcore   (fn [& x] (vec (cons :adverbed x)))
+              :ladvcore  (fn [& x] (vec (cons :adverbed x)))
+              :ladverbed (fn [& x] (vec (cons :adverbed x)))
               :lassign   (fn [& x] (vec (cons :assign x)))
               :alhs      (fn [& x] (vec (cons :lhs x)))
               :dalhs     (fn [& x] (vec (cons :darg x)))
