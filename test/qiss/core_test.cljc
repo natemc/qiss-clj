@@ -554,8 +554,30 @@
     (is (= [0 1] (keval "<=-1_>=!3")))
     (is (= [] (keval "<=-3_>=!3")))
     (is (= [] (keval "<=-4_>=!3"))))
-  (testing "vector literals with stream components"
-    (is (= [[1 0] [1 1] [1 2]] (keval "<=(1;>=!3)"))))
+  (testing "atom,stream works"
+    (is (= [4] (keval "<=4,>=!0")))
+    (is (= [4 0 1 2] (keval "<=4,>=!3"))))
+  (testing "stream,atom works"
+    (is (= [4] (keval "<=(>=()),4")))
+    (is (= [0 1 2 4] (keval "<=(>=!3),4"))))
+  (testing "vector,stream works"
+    (is (= [] (keval "<=(),>=()")))
+    (is (= [0 1] (keval "<=0 1,>=()")))
+    (is (= [2 3] (keval "<=(),>=2 3")))
+    (is (= [0 1 2 3] (keval "<=0 1,>=2 3"))))
+  (testing "stream,vector works"
+    (is (= [] (keval "<=(>=!0),!0")))
+    (is (= [0 1] (keval "<=(>=0 1),()")))
+    (is (= [2 3] (keval "<=(>=!0),2 3")))
+    (is (= [0 1 2 3] (keval "<=(>=!2),2 3"))))
+  (testing "stream,stream is concatAll"
+    (is (= [] (keval "<=(>=!0),>=!0")))
+    (is (= [0 1] (keval "<=(>=!2),>=!0")))
+    (is (= [2 3] (keval "<=(>=!0),>=2 3")))
+    (is (= [0 1 2 3] (keval "<=(>=!2),>=2 3")))
+    (is (= [0 1 10 20 100 200] (keval "<=(>=!2),(>=10 20),>=100 200"))))
+  (testing "vector literals with stream components act like nested containers"
+    (is (= [1 [0 1 2]] (keval "<='(1;>=!3)"))))
   (testing "indexing with @ with a stream on the rhs"
     (is (= [0 2 4] (keval "<=(!5)@>=0 2 4"))))
   (testing "indexing via @ with a stream on the lhs"
@@ -577,10 +599,12 @@
     (is (= [[] [3] [3 2] [3 2 1]] (keval "<=(>=!4)#\\:3 2 1"))))
   (testing "/ over a stream works"
     (is (= 6 (keval "<=+/>=!4")))
-    (is (= 9 (keval "<=3+/>=!4"))))
+    (is (= 9 (keval "<=3+/>=!4")))
+    (is (= [0 1 2 3 4] (keval "<=,/>='(0 1;2 3;4)"))))
   (testing "\\ over a stream works"
     (is (= [0 1 3 6] (keval "<=+\\>=!4")))
-    (is (= [3 4 6 9] (keval "<=3+\\>=!4"))))
+    (is (= [3 4 6 9] (keval "<=3+\\>=!4")))
+    (is (= [[0] [0 1] [0 1 2]] (keval "<=,\\!3"))))
   (testing "': over a stream works"
     (is (= [3 7 4 6] (keval "<=-':>=3 10 14 20")))
     (is (= [2 7 4 6] (keval "<=1-':>=3 10 14 20")))))
