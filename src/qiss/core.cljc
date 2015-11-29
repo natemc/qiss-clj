@@ -3041,7 +3041,7 @@
                      ; :values {:f values :rank [1]}
                      :stop     {:f stop :rank [1] :stream-aware [1]}
                      :sv       {:f sv :rank [2]}
-                     :tables   {:f spark-sql-tablenames :rank [1]}
+                     :tables   {:f spark-sql-table-names :rank [1]}
                      :take     {:f pound :rank [2]}   ; alias for operator #
                      :throttle {:f throttle :rank [2] :stream-aware [2]}
                      :union    {:f union :rank [2]} ; TODO: accept arb number of args like sparkunion

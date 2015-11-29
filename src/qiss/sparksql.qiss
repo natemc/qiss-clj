@@ -1,5 +1,5 @@
 /
-/  load ten row baby table into a dataframe
+/  load ten row baby csv table into a dataframe with headers
 /
 df:c sparksqlreadcsv "iowa_liquor_sales_fixed_with_header10.csv"   / csv -> df
 /
@@ -7,17 +7,17 @@ df:c sparksqlreadcsv "iowa_liquor_sales_fixed_with_header10.csv"   / csv -> df
 /
 show df                       / sparksqlshow
 first df                      / pickoff the first row as a dataframe
-count df                      / 10
-distinct df                   / drop duplicates
-3 take df                     / take the first three rows
-df * 3 take df                / sparksqljoin (cartesian)  10 rows * 3 rows => 30 rows
-df,df                         / join(append) op is a unionall op for spark sql dataframes
+count df                      / -> 10
+count distinct df             / drop duplicates  -> 9
+3 take df                     / take the first three rows.  returns a 3 row dataframe.
+count df * 3 take df          / sparksqljoin (cartesian)  10 rows * 3 rows -> 30 rows
+count df,df                   / -> 20 join(append) op is a unionall op for spark sql dataframes
 df union df                   / explicit sparksqlunionall
-df inter df                   / sparksqlinter
-df except df                  / sparksqlexcept
-df ~ df                       / unlike pandas, spark sql has no equals op. we use sparksqlexcept
+df inter df                   / -> 10 sparksqlinter
+df except df                  / -> 0  sparksqlexcept
+df ~ df                       / 1b (true) unlike pandas, spark sql has no equals op. we use sparksqlexcept
 /
-/ single char operations still applies
+/ single char operations still apply
 /
 *df                           / sparksqllimit(1)
 #df                           / sparksqlcount

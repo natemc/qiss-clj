@@ -22,3 +22,4 @@ pom.xml.asc
 *.csv#
 
 workerdir/*
+iowa_liquor_sales_fixed_with_header.csv
