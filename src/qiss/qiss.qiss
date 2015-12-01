@@ -21,7 +21,7 @@ upper:{@[x;i;{y};ALPHA p i:&26>p:alpha?x]};
 within:{[x;b t](b<=x)&x<=t};
 xcol:{+(x,(#x)_cols y)!.+y};
 xcols:{(x,cols[y]except x)#y}; / testing comments
-/ remove the next line when command line file loading via argument is implemented
+/
 load `src/qiss/sparkinit.qiss;
-/ load "src/qiss/sparksql.qiss"
+/ load `src/qiss/sparksql.qiss
 / Don't put a newline at EOF: the grammar needs work

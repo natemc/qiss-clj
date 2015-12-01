@@ -9,9 +9,7 @@
                      ; [sparkling.core :as spark]
                       [flambo.conf :as sparkconf]
                       [flambo.api :as spark]
-                      [flambo.tuple :as ft]
                       [flambo.sql :as sparksql]
-                     ; [t6.from-scala.core :refer [$ $$] :as $]
                      )
             (:import [org.apache.spark.api.java JavaSparkContext]
                      [org.apache.spark.sql SQLContext Row DataFrame GroupedData Column]
@@ -76,9 +74,12 @@
 (defn err "throw x" [& x]
   (throw #?(:clj (Exception. (str/join ["'" (str/join " " (map lose-env x))]))
             :cljs (js/Error. (str/join ["'" (str/join " " (map lose-env x))])))))
+(declare keval)
 (defn exit
   "exit this process"
-  ([] (exit 0))
+  ([]
+   (exit 0)
+    #?(:clj (keval "sparkstop sc")))
   ([x] #?(:clj (System/exit x))))
 ;; ACK js is all Number.  Use meta to distinguish?
 #?(:cljs (defn float? [x] (not= x (.floor js/Math x))))
@@ -282,7 +283,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; handy code
 (declare invoke)
-(defonce DEBUG false)
+(defonce DEBUG true)
 (defn null!
   "Like 0N! but variadic, e.g., (null! msg thing) => thing"
   [& x]
@@ -1887,7 +1888,7 @@
         [_ i] (apply-constraints tu e3 ut (:where x))
         u      (index-table ut (except (til-count ut) i))]
     [e (if (not (keyed-table? t)) u (key-table-by-colnames (keycols t) u))]))
-(defn resolve-select [tu e x]
+(defn resolve-select-table [tu e x] ; qiss table select (not dataframe)
   "Resolve the select expr specified by x"
   (let [[e2 t] (kresolve tu e (:from x))
         ut     (unkey-table t)
@@ -1913,6 +1914,19 @@
         [e (if (keyed-table? t)
               (key-table-by-colnames (keycols t) (index ut i))
               (index t i))]))))
+(declare spark-sql-todf)
+(declare spark-sql-selectexpr)
+(defn resolve-select-dframe [tu e x]          ; tu -> "select from df"
+  "Resolve the select expr specified by x"    ; x  ->  parse tree
+  (let [[e2 df] (kresolve tu e (:from x))]
+    (if-let [a (:aggs x)]
+      [e2 (spark-sql-selectexpr df (vec (last (first a))))]
+      [e2 (spark-sql-todf df)])))
+(defn resolve-select [tu e x]  ; tu -> "select from df"
+  "select"                     ; e -> env   x -> df?
+  (let [[e2 df] (kresolve tu e (:from x))]  ; pass the e2 on?
+    (cond (dframe? df)     (resolve-select-dframe tu e x)
+          :else            (resolve-select-table tu e x))))
 
 (defn resolve-table-helper [tu e b]
   (let [c (map (comp map-from-tuples next)
@@ -1989,6 +2003,9 @@
 (defn xasc [x y] (sort-table x y less))
 (defn xdesc [x y] (sort-table x y greater))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;   tu -> "select from df"  this is the initial expression to be evaluated
+;   e  -> @genv
+;   x  -> (next tu)
 (defn kresolve [tu e x] ; translation unit, env, parse tree
   "Resolve the expr specified by x in the context of environment e"
   (let [t (if (coll? x) (first x) x)
@@ -2021,7 +2038,7 @@
           (= t :float   ) [e (parse-double v)]
           (= t :floats  ) [e (parse-double (str/split v #"[ \n\r\t]+"))]
           (= t :hole    ) [e :hole] ;; nil ?
-          (= t :id      ) (let [u ((keyword v) e)]
+          (= t :id      ) (let [u ((keyword v) e)]  ; dereference the variable-id from the env, assign to u
                             (if-not (nil? u)
                               [e u]
                               (err v "not found in scope")))
@@ -2044,6 +2061,9 @@
           (= t :vec     ) (resolve-vec tu e v)
           :else           [e x])))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;   tu -> "select from df"  this is the initial expression to be evaluated
+;   e  -> @genv
+;   x  -> (next tu)
 (defn resolve-full-expr [tu e x]
   "Resolve x in the context of e.  If x resolves to an ambivalent
   expression and one argument is present, execute it"
@@ -2552,7 +2572,6 @@
 
 (def spark-STORAGE-LEVELS
    spark/STORAGE-LEVELS)
-
 (defn spark-conf [master app-name]
   "Create new Spark Configuration by setting Master and AppName.
   Provides Spark the basic info necessary to access a cluster."
@@ -2581,87 +2600,67 @@
                        "/Users/ahnj/dev/flambo/target/flambo-0.7.2-SNAPSHOT-standalone.jar"])
       (sparkconf/master (string master))
       (sparkconf/app-name (string app-name))))
-
 (defn spark-context [conf]
   "Main entry point for Spark.
   establish connection to a Spark cluster defined
   in passed in argument configuration"
   (spark/spark-context conf))
-
 (defn spark-collect [rdd]
   "RDD version of collect"
   (spark/collect rdd))
-
 (def spark-count
   "RDD version of count"
   spark/count)
-
 (def spark-glom
   spark/glom)
-
 (def spark-cache
   spark/cache)
-
 (def spark-lookup
   ; spark/lookup
   )
-
 (def spark-collect-map
   ; spark/collect-map
   )
-
-
 (defn spark-distinct
   "RDD version of distinct"
   ([rdd]
    (spark/distinct rdd))
   ([rdd n]                                                  ; n is the num of partitions?
    (spark/distinct rdd n)))
-
-
 (defn spark-filter [e rdd pred]
   (spark/filter (lambda-callable e pred) rdd))
-
 (defn spark-filter-hack [e rdd pred]
   (spark/filter #(= 0 (mod % 2)) rdd))
-
 (defn spark-first [rdd]
   "RDD version of first"
   (spark/first rdd))
-
 (defn spark-parallelize
   "instantiate a Spark parallelizable version of passed in native data"
   ([sc data]
    (spark/parallelize sc data))
   ([sc data num-slices]
    (spark/parallelize sc data num-slices)))
-
 (defn spark-parallelize-pairs
   "instantiate a Spark parallelizable version of passed in native data pairs"
   ([sc data]
     (spark/parallelize-pairs sc data))
   ([sc data num-slices]
     (spark/parallelize-pairs sc data num-slices)))
-
 (defn spark-partitions
   "Returns a vector of paritions for a given RDD"
   [rdd]
   (spark/partitions rdd))
-
 (defn spark-sample
   "Returns a vector of paritions for a given RDD"
   [rdd with-replacement? fraction seed]
   (spark/sample with-replacement? fraction seed rdd))
-
 (def spark-count-partitions
   ; spark/count-partitions
   )
-
 (defn spark-text-file [sc uri]
   "create a RDD from URI of a text file.
   URI can be hdfs://... or s3n:// or a local fs path"
   (spark/text-file sc (string uri)))
-
 (declare keval)
 (defn spark-map-old [f rdd]
    (spark/map (partial (lambda-code (keval "{x * 2}"))) rdd))
@@ -2682,7 +2681,6 @@
 
 (defn spark-flat-map [f rdd]
   (spark/flat-map f rdd))
-
 ; (clojure.pprint/pprint
 ;   (macroexpand '(sparkling.function/gen-function Function function)))
 ;(def function
@@ -2716,73 +2714,57 @@
   "shutdown SparkContext"
   ; (spark/stop sc)
   )
-
 (defn spark-tuple [x y]
   ; (spark/tuple x y)
   )
-
 (defn spark-take [n rdd]
   (spark/take n rdd))
-
 (defn spark-union
   "union operation on two or more RDDs"
   ([& rdds]
    (apply spark/union rdds)))
-
 (defn spark-join
   "When called on `rdd` of type (K, V) and (K, W), returns a dataset of
    (K, (V, W)) pairs with all pairs of elements for each key."
   ([rdd other]
    (spark/join rdd other)))
-
 (defn spark-left-outer-join
   "Performs a left outer join of `rdd` and `other`. For each element (K, V)
    in the RDD, the resulting RDD will either contain all pairs (K, (V, W)) for W in other,
    or the pair (K, (V, nil)) if no elements in other have key K."
   ([rdd other]
    (spark/join rdd other)))
-
-
 (defn spark-intersection
   "intersection operation on two or more RDDs"
   ([rdd1 rdd2]
   ; (spark/intersection rdd1 rdd2)
   ))
-
 (defn spark-subtract
   "rdd1 except rdd2"
   ([rdd1 rdd2]
    (spark/subtract rdd1 rdd2)))
-
 (defn spark-subtract-by-key
   "Return each (key, value) pair in rdd1 that has no pair with matching key in rdd2."
   ([rdd1 rdd2]
    ; (spark/subtract-by-key rdd1 rdd2)
     ))
-
 (def spark-values
   spark/values)
-
 (def spark-keys
   ; spark/keys
   )
-
 (def spark-group-by-key
   spark/group-by-key)
-
 (def spark-sort-by-key
   spark/sort-by-key)
-
 (def spark-count-by-key
   "Only available on RDDs of type (K, V).
   Returns a map of (K, Int) pairs with the count of each key."
   spark/count-by-key)
-
 (def spark-count-by-value
   "Return the count of each unique value in `rdd` as a map of (value, count)
   pairs."
   spark/count-by-value)
-
 (def spark-collect-as-map
   "Returns all elements of `pair-rdd` as a map at the driver process.
   Attention: The resulting map will only have one entry per key.
@@ -2790,24 +2772,19 @@
              The function itself will *not* issue a warning of any kind!"
   ; spark/collect-map
   )
-
 (def spark-cogroup
   ; spark/cogroup
   )
-
 (def spark-checkpoint
   ; spark/checkpoint
   )
-
 (def spark-cartesian
   spark/cartesian)
-
 (defn spark-rdd-name
   ([rdd name]
    (spark/rdd-name rdd (string name)))
   ([rdd]
    (spark/rdd-name rdd)))
-
 (defn spark-save-as-text-file
   "Writes the elements of `rdd` as a text file (or set of text files)
   in a given directory `path` in the local filesystem, HDFS or any other Hadoop-supported
@@ -2828,104 +2805,86 @@
    (.show dataframe numRows))
   ([^DataFrame numRows dataframe truncate]
    (.show dataframe numRows truncate)))
-
 (defn spark-sql-take
   "take (returns an array of rows - see spark-sql-limit for the true take"
   [^DataFrame dataframe n]
   (.take dataframe n))
-
 (defn spark-sql-sample
   "Returns a new [[DataFrame]] by sampling a fraction of rows."
   ([^DataFrame dataframe withReplacement fraction seed]
    (.sample dataframe withReplacement fraction seed))
   ([^DataFrame dataframe withReplacement fraction]
    (.sample dataframe withReplacement fraction)))
-
-
 (defn spark-sql-col
   "Selects column based on the column name and return it as a [[Column]]"
   [^DataFrame dataframe colname]
   (.col dataframe (string colname)))
-
 (defn spark-sql-count
   "count"
   [^DataFrame dataframe]
   (.count dataframe))
-
 ; remember that a single String argument for of the select
 ; function is already taken by the SQL query fucntion
 (defn spark-sql-select
   "df.select( fcolname, colnames )"
   [^DataFrame dataframe firstcolname & colnames]
   (.select dataframe (string firstcolname) (into-array String (map string colnames))))
-
 ;  @scala.annotation.varargs
 ; def select(col: String, cols: String*): DataFrame = select((col +: cols).map(Column(_)) : _*)
 (defn spark-sql-select-works
   "df.select( colnamea, colnames )"
   [^DataFrame dataframe colname &colnames]
   (.select dataframe (string colname) (into-array String ["NAME" "ZIPCODE"])))
-
-
 (defn spark-sql-selectexpr
   [^DataFrame dataframe & exprs]
-  (.selectExpr dataframe (into-array String (map string exprs))))
-
+  (let [varg (into-array String (map string exprs))]
+    (println varg)
+    (.selectExpr dataframe varg)))
 (defn spark-sql-group-by
   ""
   [^DataFrame dataframe firstcolname & colnames]
   (.groupBy dataframe (string firstcolname) (into-array String (map string colnames))))
 ;(.groupBy dataframe (string firstcolname) (spark-sql-col dataframe colname)))
-
-
 (defn spark-sql-rollup
   ""
   [^DataFrame dataframe firstcolname & colnames]
   (.rollup dataframe (string firstcolname) (into-array String (map string colnames))))
-;(.groupBy dataframe (string firstcolname) (spark-sql-col dataframe colname)))
-
 (defn spark-sql-agg
   ""
   [^DataFrame dataframe firstcolname & colnames]
   (.agg dataframe
         (spark-sql-col dataframe firstcolname)
         (into-array Column (map #(spark-sql-col dataframe %) colnames))))
-
 (defn spark-sql-unionall
   "Returns a new [[DataFrame]] containing union of rows in this frame and another frame.\n   * This is equivalent to `UNION ALL` in SQL"
   [^DataFrame dataframe ^DataFrame otherdf]
   (.unionAll dataframe otherdf))
-
 (defn spark-sql-intersect
   "This is equivalent to `INTERSECT` in SQL."
   [^DataFrame dataframe ^DataFrame otherdf]
   (.intersect dataframe otherdf))
-
 (defn spark-sql-except
   "This is equivalent to `EXCEPT` in SQL."
   [^DataFrame dataframe ^DataFrame otherdf]
   (.except dataframe otherdf))
-
 (defn spark-sql-todf
   "rename"
-  [^DataFrame dataframe & colnames]
-  (.toDF dataframe (into-array String (map string colnames))))
-
+  ([^DataFrame dataframe]
+   (.toDF dataframe))
+  ([^DataFrame dataframe & colnames]
+   (.toDF dataframe (into-array String (map string colnames)))))
 (defn spark-sql-apply
   ""
   [^DataFrame dataframe colname]
   (.apply dataframe (string colname)))
-
 (defn spark-sql-na
   "Dropping rows containing any null values"
   [^DataFrame dataframe]
   (.na dataframe))
-
 (defn spark-sql-limit
   "Returns a new [[DataFrame]] by taking the first `n` rows. The difference between this function\n   * and `head` is that `head` returns an array while `limit` returns a new [[DataFrame]].\n"
   [^DataFrame dataframe n]
   (.limit dataframe n))
-
 (defn spark-sql-join
   "Cartesian join with another"
   ([^DataFrame dataframe ^DataFrame other]
@@ -2935,48 +2894,39 @@
   ([^DataFrame dataframe ^DataFrame other usingColumn]
    (.join dataframe other (string usingColumn)))
   )
-
 (defn spark-sql-equi-join
   "Cartesian join with another"
   [^DataFrame dataframe ^DataFrame other usingColumn]
   (.join dataframe other (string usingColumn)))
-
 (defn spark-sql-distinct
   "This is an alias for `dropDuplicates`."
   [^DataFrame dataframe]
   (.dropDuplicates dataframe))
-
 (defn spark-sql-explain
   "Prints the plans (logical and physical) to the console for debugging purposes"
   ([^DataFrame dataframe] (.explain dataframe))
   ([^DataFrame dataframe isExtended] (.explain dataframe isExtended)))
-
 (defn ^SQLContext spark-sql-context
   "Build a SQLContext from a JavaSparkContext"
   [^JavaSparkContext spark-context]
   (sparksql/sql-context spark-context))
-
 (defn ^JavaSparkContext spark-context-from-sql-context
   "Get reference to the SparkContext out of a SQLContext"
   [^SQLContext sql-context]
   (sparksql/spark-context sql-context))
-
 (defn spark-sql
   "Execute a query. The dialect that is used for SQL parsing can be configured with 'spark.sql.dialect'."
   [sql-context query]
   (sparksql/sql sql-context (string query)))
-
 (def spark-sql-parquet-file
   "Loads a Parquet file, returning the result as a DataFrame."
   sparksql/parquet-file)
-
 (defn spark-sql-load
   "Returns the dataset stored at path as a DataFrame."
   ([sql-context path]                   ; data source type configured by spark.sql.sources.default
    (sparksql/load sql-context (string path)))
   ([sql-context path source-type]       ; specify data source type
    (sparksql/load sql-context (string path) (string source-type))))
-
 (defn spark-sql-read-csv
   "Reads a file in table format and creates a data frame from it, with cases corresponding to
   lines and variables to fields in the file. A clone of R's read.csv."
@@ -2989,53 +2939,41 @@
 (def spark-sql-cache-table
   "Caches the specified table in memory."
   sparksql/cache-table)
-
 (def spark-sql-json-rdd
   "Load an RDD of JSON strings (one object per line), inferring the schema, and returning a DataFrame"
   sparksql/json-rdd)
-
 (def spark-sql-uncache-table
   "Removes the specified table from the in-memory cache."
   sparksql/uncache-table)
-
 (def spark-sql-clear-cache
   "Remove all tables from cache"
   sparksql/clear-cache)
-
 (def spark-sql-is-cached?
   "Is the given table cached"
   sparksql/is-cached?)
-
 (defn ^DataFrame spark-sql-table
   "Return a table as a DataFrame"
   [sql-context table-name]
   (sparksql/table sql-context (string table-name)))
-
 (def spark-sql-table-names
   "Return a seq of strings of table names, optionally within a specific database"
   sparksql/table-names)
-
 (def spark-sql-register-temp-table
   "Registers this dataframe as a temporary table using the given name."
   sparksql/register-temp-table)
-
 (defn spark-sql-register-data-frame-as-table
   "Registers the given DataFrame as a temporary table in the
   catalog. Temporary tables exist only during the lifetime of this
   instance of SQLContex."
   [sql-context df table-name]
   (sparksql/register-data-frame-as-table sql-context df (string table-name)))
-
 (def spark-sql-columns
   "Returns all column names as a sequence."
   sparksql/columns)
-
 (def spark-sql-print-schema
   sparksql/print-schema)
-
 (def spark-sql-row->vec
   sparksql/row->vec)
-
 (defn spark-sql-splash
   []
   (println (clojure.string/join "\n" [
@@ -3144,7 +3082,7 @@
                      :sparksqlselect {:f spark-sql-select :rank [3 4 5 6 7 8 9 10 11 12]}
                      :sparksqlselectexpr {:f spark-sql-selectexpr :rank [2 3 4 5 6 7 8 9 10]}
                      :sparksqlshow {:f spark-sql-show :rank [1 2 3]}
-                     :sparksqltodf {:f spark-sql-todf :rank [3 4 5 6 7 8 9 10]}
+                     :sparksqltodf {:f spark-sql-todf :rank [1 2 3 4 5 6 7 8 9 10]}
                      :sparksqlparquetfile {:f spark-sql-parquet-file :rank [2]}
                      :sparksqlprintschema {:f spark-sql-print-schema :rank [1]}
                      :sparksqlreadcsv {:f spark-sql-read-csv :rank [2 3]}

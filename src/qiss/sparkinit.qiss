@@ -2,13 +2,14 @@
 /   spark stand-alone cluster setup:
 /     1. git clone https://github.com/apache/spark.git
 /        cd spark; git checkout branch-1.5; git checkout tags/v1.5.1 ; build/mvn -DskipTests clean package
-/     2. export SPARK_HOME=`pwd`   # above git directory as SPARK_HOME
-/        edit $SPARK_HOME/conf/sprk-env.sh to include the following:
+/     2. export SPARK_HOME=`pwd`      # above git directory as SPARK_HOME
+/        mkdir $SPARK_HOME/workerdir
+/        edit $SPARK_HOME/conf/spark-env.sh to include the following:
 /          export SPARK_WORKER_MEMORY=1g
 /          export SPARK_EXECUTOR_MEMORY=512m
 /          export SPARK_EXECUTOR_INSTANCES=4
 /          export SPARK_WORKER_CORES=2
-/          export SPARK_WORKER_DIR=/Users/ahnj/dev/qiss/workerdir
+/          export SPARK_WORKER_DIR=$SPARK_HOME/workerdir
 /     3. cp $SPARK_HOME/conf/slaves.template $SPARK_HOME/conf/slaves   # slave hostname goes here (localhost is default)
 /     4. $SPARK_HOME/sbin/start-all.sh   # be sure you have ssh enabled (http://bluishcoder.co.nz/articles/mac-ssh.html)
 /     5. tail -f $SPARK_HOME/logs/*      # to observe master/slave log output
