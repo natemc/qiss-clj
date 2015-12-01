@@ -246,7 +246,10 @@
 (deftest test-2-arg-at
   (testing "@ can be called like a 2-arg function using []"
     (is (= [1 3] (keval "@[1 2 3 4;0 2]")))
-    (is (= 8 (keval "@[{x+x};4]")))))
+    (is (= 8 (keval "@[{x+x};4]"))))
+  (testing "2-arg @ can apply monadic functions"
+    (is (= 4 (keval "{x*x}@2")))
+    (is (= [0 1 2 3 4] (keval ",/@(0 1;2 3;4)")))))
 (deftest test-3-arg-at
   (testing "3-arg @ on a vector indexed with a long is selective xform"
     (is (= [0 2 2 3] (keval "@[!4;1;{x*2}]"))))
@@ -326,6 +329,13 @@
   (testing "4-arg . is selective xform at depth with rhs"
     (is (= (keval "`a`b`c!(0 1 2;30 4 500;6 7 8)")
            (keval ".[`a`b`c!(0 1 2;3 4 5;6 7 8);(`b;0 2);*;10 100]")))))
+(deftest test-like
+  (testing "like works on clojure strings"
+    (is (like "foo.qiss" ".*\\.qiss")))
+  (testing "like works on qiss strings"
+    (is (like (keval "\"foo.qiss\"") (keval "\".*\\.qiss\""))))
+  (testing "like works on qiss symbols"
+    (is (like (keval "`foo.qiss") (keval "`.*\\.qiss")))))
 (deftest test-join
   (testing "monadic , envectors"
     (is (= [1] (keval ",1")))
@@ -605,6 +615,7 @@
     (is (= [0 1 3 6] (keval "<=+\\>=!4")))
     (is (= [3 4 6 9] (keval "<=3+\\>=!4")))
     (is (= [[0] [0 1] [0 1 2]] (keval "<=,\\!3"))))
+    ;; ,\ over multiple streams doesn't do what you want.  maybe.
   (testing "': over a stream works"
     (is (= [3 7 4 6] (keval "<=-':>=3 10 14 20")))
     (is (= [2 7 4 6] (keval "<=1-':>=3 10 14 20")))))
