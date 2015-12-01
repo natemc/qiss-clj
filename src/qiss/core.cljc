@@ -2603,20 +2603,21 @@
       ;   [org.apache.spark/spark-core_2.10 "1.5.1"]  <--
       ;  otherwise, serialization mayham will ensue
       ;
-      ; follow this script to recreate the jars:
+      ; follow this script to recreate two uberjar files:
       ;  1. mkdir $HOME/dev
       ;  2. cd $HOME/dev
       ;     git clone https://github.com/databricks/spark-csv.git
-      ;     cd spark-csv; git checkout tags/v1.3.0; sbt/sbt package
+      ;     cd spark-csv; git checkout tags/v1.3.0
+      ;     set scalaVersion to 2.10.5 in build.sbt
+      ;     add sbt-assembly as a dependency in project/assembly.sbt by adding the following line:
+      ;        addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "0.14.1")
+      ;     sbt/sbt assembly
       ;  3. cd $HOME/dev
       ;     git clone https://github.com/yieldbot/flambo.git
       ;     cd flambo; git checkout ; lein uberjar
-      ;  4. cd $HOME/dev/qiss
-      ;     curl http://www.us.apache.org/dist//commons/csv/binaries/commons-csv-1.2-bin.tar.gz | tar xvz
       ;
-      (sparkconf/jars [(str (System/getenv "HOME") "/dev/spark-csv/target/scala-2.10/spark-csv_2.10-1.3.0.jar")
-                       (str (System/getenv "HOME") "/dev/flambo/target/flambo-0.7.2-SNAPSHOT-standalone.jar")
-                       (str (System/getenv "HOME") "/dev/qiss/commons-csv-1.2.jar")])
+      (sparkconf/jars [(str (System/getenv "HOME") "/dev/spark-csv/target/scala-2.10/spark-csv-assembly-1.3.0.jar")
+                       (str (System/getenv "HOME") "/dev/flambo/target/flambo-0.7.2-SNAPSHOT-standalone.jar")])
       (sparkconf/master (string master))
       (sparkconf/app-name (string app-name))))
 (defn spark-context [conf]
