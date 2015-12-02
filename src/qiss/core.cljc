@@ -2858,7 +2858,7 @@
 (defn spark-sql-selectexpr
   [^DataFrame dataframe & exprs]
   (let [varg (into-array String (map string exprs))]
-    (println varg)
+    ; (println varg)
     (.selectExpr dataframe varg)))
 (defn spark-sql-group-by
   ""

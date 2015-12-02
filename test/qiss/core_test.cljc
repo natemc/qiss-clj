@@ -374,6 +374,10 @@
     (is (= (keval "([]a:1 2 3)") (keval "select from([]a:1 2 3)"))))
   (testing "id agg guesses result column to match original column"
     (is (= (keval "([]a:1 2 3)") (keval "select a from([]a:1 2 3)"))))
+  (testing "operator on column correctly assigns matching column name"
+    (is (= (keval "([]a:2 3 4)") (keval "select a+1 from([]a:1 2 3)"))))
+  (testing "operator on column correctly assigns matching column name, regardless of order"
+    (is (= (keval "([]a:2 3 4)") (keval "select 1+a from([]a:1 2 3)"))))
   (testing "select works on keyed tables"
     (is (= (keval "([a:`a`b]b:1 2)") (keval "select from([a:`a`b]b:1 2)")))))
 (deftest test-by

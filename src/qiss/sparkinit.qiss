@@ -23,5 +23,6 @@ c:sparksqlcontext sc:sparkcontext "spark://macbookpro15.local:7077" sparkconf "q
 /                   c --> spark sql context handle
 / spark-sql init
 / c:sparksqlcontext sc  TODO: sc is not available for when this line executes during start-up
+/ tname:([]a:9#1 2 3;b:9#10 20 30;cee:9#10 20 30)
 / .z.exit:{sparkstop sc}  /  as of spark 1.5, the spark shutdown is triggered automatically
 / Don't put a newline at EOF: the grammar needs work
