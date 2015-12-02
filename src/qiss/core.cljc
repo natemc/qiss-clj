@@ -1858,10 +1858,13 @@
   "When an aggregation is not assigned a name, use the name of the
   last variable used in the aggregation expression.  If no variable
   name appears in the aggregate expression, use x"
-  (cond (empty? x)        :x
-        (= :id (first x)) (keyword (second x))
-        :else (last (map guess-col (next x)))))
-
+  (let [g (fn h [n] ;; ast node
+            (cond (empty? n)        nil
+                  (= :id (first n)) (keyword (second n))
+                  :else             (last (filter #(not (nil? %))
+                                                  (map h (next n))))))]
+    (if-let [c (g x)] c :x)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn compute-aggs [tu e t i aggs]
   "Compute the aggregations defined by (expr trees) aggs for the rows
   of t indexed by i, all within environment e"
@@ -3011,12 +3014,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (declare genv)
 (defn set-genv [e] (reset! genv e) nil)
-(defn keval
-  ([x] (let [[e r] (resolve-full-expr x @genv (second (parse x)))]
-         (set-genv e)
-         (lose-env r)))
-  ([e x] (lose-env (last (resolve-full-expr x e (second (parse x)))))))
-
+(declare keval)
 (declare load-code)
 #?(:clj (defn load-qiss-file [e f] (load-code e (slurp (string f)))))
 #?(:clj (defn load-qiss-file-from-qiss [e f]
@@ -3144,7 +3142,11 @@
                               :text   {:f text :rank [2]}})))
 
 (def genv (atom builtin))
-
+(defn keval
+  ([x] (let [[e r] (resolve-full-expr x @genv (second (parse x)))]
+         (set-genv e)
+         (lose-env r)))
+  ([e x] (lose-env (last (resolve-full-expr x e (second (parse x)))))))
 (defn eval-no-env [x] (last (kresolve x {} (second (parse x)))))
 
 (defn krun
@@ -3171,6 +3173,7 @@
                        (xhr/send s (fn [v] (aset r i (response-text v))
                                      (when (every? some? r)
                                        (set-genv (reduce load-code @genv r))
+                                       (def original-env @genv)
                                        (null! "qisses loaded"))))))))))
   ([env x]
    (reduce #(let [[ne r] (resolve-full-expr x %1 %2)]
@@ -3225,8 +3228,12 @@
                 (recur e2)))))))))
 
 #?(:clj  (when-not *command-line-args* ;; i.e., we're in a clojure repl
-           (set-genv (initialize-qiss builtin)))
+           (set-genv (initialize-qiss builtin))
+           (def original-env @genv))
    :cljs (initialize-qiss)) ;; DO NOT set-genv here; it's async
+(declare original-env)
+(defn ktest [x] (keval original-env x))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn -main
   "qiss repl"
@@ -3236,6 +3243,7 @@
                 i (where (like a ".*\\.qiss"))
                 f (index a i)
                 e (initialize-qiss builtin)]
+            (def original-env e)
             (repl (if (empty? f)
                     e
                     (load-qiss-file e (first f))))))
