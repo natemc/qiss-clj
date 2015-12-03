@@ -2842,6 +2842,11 @@
   "Selects column based on the column name and return it as a [[Column]]"
   [^DataFrame dataframe colname]
   (.col dataframe (string colname)))
+; qiss)sparksqlwithcolumn[df; "ZIPCODENEW"; sparksqlcol[df;"ZIPCODE"]]
+(defn spark-sql-with-column
+  "Returns a new [[DataFrame]] by adding a column or replacing the existing column that has\n   * the same name.\n"
+  [^DataFrame dataframe colname ^Column column]
+  (.withColumn dataframe (string colname) column))
 (defn spark-sql-count
   "count"
   [^DataFrame dataframe]
@@ -2868,10 +2873,65 @@
   [^DataFrame dataframe firstcolname & colnames]
   (.groupBy dataframe (string firstcolname) (into-array String (map string colnames))))
 ;(.groupBy dataframe (string firstcolname) (spark-sql-col dataframe colname)))
+
+(defn spark-sql-groupeddata-count
+  "Count the number of rows for each group"
+  [^GroupedData groupeddf]
+  (.count groupeddf))
+
+; credit - https://en.wikibooks.org/wiki/Clojure_Programming/Examples#Invoking_Java_method_through_method_name_as_a_String
+(defn str-invoke [instance method-str & args]
+  (clojure.lang.Reflector/invokeInstanceMethod
+    instance
+    method-str
+    (to-array args)))
+(defn spark-sql-groupeddata-agg
+  "Compute aggregates by specifying a series of aggregate columns"
+  [^GroupedData groupeddf expr]
+  (apply str-invoke groupeddf [(string expr)]))
+; qiss)sparksqlgroupeddatamax[gdf:sparksqlgroupby[df; "ZIPCODE"];  "BTL PRICE"]
+(defn spark-sql-groupeddata-max
+  "Compute the max value for each numeric columns for each group.
+  The resulting DataFrame will also contain the grouping columns.
+  When specified columns are given, only compute the max values for them.\n"
+  ([^GroupedData groupeddf & colnames]
+   (.max groupeddf (into-array String (map string (vec colnames))))))
+; qiss)sparksqlgroupeddatamean[gdf:sparksqlgroupby[df; "ZIPCODE"];  "BTL PRICE"]
+(defn spark-sql-groupeddata-mean
+  "Compute the average value for each numeric columns for each group. This is an alias for avg.
+  The resulting DataFrame will also contain the grouping columns.
+  When specified columns are given, only compute the average values for them."
+  ([^GroupedData groupeddf & colnames]
+   (.mean groupeddf (into-array String (map string (vec colnames))))))
+; qiss)sparksqlgroupeddatamin[gdf:sparksqlgroupby[df; "ZIPCODE"];  "BTL PRICE"]
+(defn spark-sql-groupeddata-min
+  "Compute the min value for each numeric columns for each group.
+  The resulting DataFrame will also contain the grouping columns.
+  When specified columns are given, only compute the min values for them.\n"
+  ([^GroupedData groupeddf & colnames]
+   (.min groupeddf (into-array String (map string (vec colnames))))))
+; qiss)sparksqlgroupeddatasum[gdf:sparksqlgroupby[df; "ZIPCODE"];  "BTL PRICE"]
+(defn spark-sql-groupeddata-sum
+  "Compute the sum for each numeric columns for each group.
+  The resulting DataFrame will also contain the grouping columns.
+  When specified columns are given, only compute the sum for them."
+  ([^GroupedData groupeddf & colnames]
+   (.sum groupeddf (into-array String (map string (vec colnames))))))
+; qiss)sparksqlgroupeddataavg[gdf:sparksqlgroupby[df; "ZIPCODE"];  "BTL PRICE"]
+(defn spark-sql-groupeddata-avg
+  "Compute the mean value for each numeric columns for each group.
+  The resulting DataFrame will also contain the grouping columns.
+  When specified columns are given, only compute the mean values for them."
+  ([^GroupedData groupeddf & colnames]
+   (.avg groupeddf (into-array String (map string (vec colnames))))))
 (defn spark-sql-rollup
   ""
   [^DataFrame dataframe firstcolname & colnames]
   (.rollup dataframe (string firstcolname) (into-array String (map string colnames))))
+(defn spark-sql-cube
+  ""
+  [^DataFrame dataframe firstcolname & colnames]
+  (.cube dataframe (string firstcolname) (into-array String (map string colnames))))
 (defn spark-sql-agg
   ""
   [^DataFrame dataframe firstcolname & colnames]
@@ -2904,8 +2964,15 @@
   "Dropping rows containing any null values"
   [^DataFrame dataframe]
   (.na dataframe))
+; qiss)sparksqldrop[df; "DATE"]
+(defn spark-sql-drop
+  "Returns a new [[DataFrame]] with a column dropped"
+  [^DataFrame dataframe colname]
+  (.drop dataframe (string colname)))
 (defn spark-sql-limit
-  "Returns a new [[DataFrame]] by taking the first `n` rows. The difference between this function\n   * and `head` is that `head` returns an array while `limit` returns a new [[DataFrame]].\n"
+  "Returns a new [[DataFrame]] by taking the first `n` rows.
+  The difference between this function\n   * and `head` is that `head`
+  returns an array while `limit` returns a new [[DataFrame]].\n"
   [^DataFrame dataframe n]
   (.limit dataframe n))
 (defn spark-sql-join
@@ -2925,6 +2992,10 @@
   "This is an alias for `dropDuplicates`."
   [^DataFrame dataframe]
   (.dropDuplicates dataframe))
+(defn spark-sql-drop-duplicates
+  "Returns a new DataFrame with duplicate rows removed, considering only the subset of columns."
+  [^DataFrame dataframe & colnames]
+  (.dropDuplicates dataframe (into-array String (map string (vec colnames)))))
 (defn spark-sql-explain
   "Prints the plans (logical and physical) to the console for debugging purposes"
   ([^DataFrame dataframe] (.explain dataframe))
@@ -2950,12 +3021,26 @@
    (sparksql/load sql-context (string path)))
   ([sql-context path source-type]       ; specify data source type
    (sparksql/load sql-context (string path) (string source-type))))
+
+(defn read-csv
+  "Reads a file in table format and creates a data frame from it, with cases corresponding to
+  lines and variables to fields in the file. A clone of R's read.csv."
+  [sql-context path &{:keys [header separator quote inferSchema]
+                      :or   {header false separator "," quote "'" inferSchema true}}]
+  (let [options (new java.util.HashMap)]
+    (.put options "path" path)
+    (.put options "header" (if header "true" "false"))
+    (.put options "separator" separator)
+    (.put options "quote" quote)
+    (.put options "inferSchema" (if inferSchema "true" "false"))
+    (.load sql-context "com.databricks.spark.csv" options)))
+
 (defn spark-sql-read-csv
   "Reads a file in table format and creates a data frame from it, with cases corresponding to
   lines and variables to fields in the file. A clone of R's read.csv."
   [sql-context path &{:keys [header separator quote]
                       :or   {header false separator "," quote "'"}}]
-  (sparksql/read-csv sql-context (string path) :header true :quote "\""))
+  (read-csv sql-context (string path) :header true :quote "\"" :inferSchema true ))
 ; TODO: discuss 'enriched arguments in qiss w/nate'
 ; (sql/read-csv c "test/resources/cars.csv" :header true)
 
@@ -2995,6 +3080,18 @@
   sparksql/columns)
 (def spark-sql-print-schema
   sparksql/print-schema)
+; all varients of vararg works from clojure to scala in this scala function invocation
+; qiss)sparksqldescribe[df]                     / no arg
+; qiss)sparksqldescribe[df;"TOTAL"]             / 1 arg
+; qiss)sparksqldescribe[df;"TOTAL";"PACK"]      / n args
+(defn spark-sql-describe
+  "Computes statistics for numeric columns, including count, mean, stddev, min, and max.
+  If no columns are given, this function computes statistics for all numerical columns.
+  This function is meant for exploratory data analysis,
+  as we make no guarantee about the backward compatibility of the schema of the resulting DataFrame.
+  If you want to programmatically compute summary statistics, use the agg function instead."
+  [^DataFrame dataframe & colnames]
+  (.describe dataframe (into-array String (map string (vec colnames)))))
 (def spark-sql-row->vec
   sparksql/row->vec)
 (defn spark-sql-splash
@@ -3084,10 +3181,21 @@
                      :sparksqlclearcache {:f spark-sql-clear-cache :rank [1]}
                      :sparksqlcontext {:f spark-sql-context :rank [1]}
                      :sparksqlcount {:f spark-sql-count :rank [1]}
+                     :sparksqlgcube {:f spark-sql-cube :rank [2 3 4 5 6 7 8 9 10]}
                      :sparksqldistinct {:f spark-sql-distinct :rank [1]}
+                     :sparksqldescribe {:f spark-sql-describe :rank [1 2 3 4 5 6 7 8 9 10]}
+                     :sparksqldrop {:f spark-sql-drop :rank [2]}
+                     :sparksqldropduplicates {:f spark-sql-drop-duplicates :rank [2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30]}
                      :sparksqlexcept {:f spark-sql-except :rank [2]}
                      :sparksqlexplain {:f spark-sql-explain :rank [1 2]}
                      :sparksqlgroupby {:f spark-sql-group-by :rank [2 3 4 5 6 7 8 9 10]}
+                     :sparksqlgroupeddataagg {:f spark-sql-groupeddata-agg :rank [2 3 4 5 6 7 8 9 10]}
+                     :sparksqlgroupeddataavg {:f spark-sql-groupeddata-avg :rank [2 3 4 5 6 7 8 9 10]}
+                     :sparksqlgroupeddatacount {:f spark-sql-groupeddata-count :rank [1 2 3 4 5 6 7 8 9 10]}
+                     :sparksqlgroupeddatamax {:f spark-sql-groupeddata-max :rank [2 3 4 5 6 7 8 9 10]}
+                     :sparksqlgroupeddatamean {:f spark-sql-groupeddata-mean :rank [2 3 4 5 6 7 8 9 10]}
+                     :sparksqlgroupeddatamin {:f spark-sql-groupeddata-min :rank [2 3 4 5 6 7 8 9 10]}
+                     :sparksqlgroupeddatasum {:f spark-sql-groupeddata-sum :rank [2 3 4 5 6 7 8 9 10]}
                      :sparksqlintersect {:f spark-sql-intersect :rank [2]}
                      :sparksqliscached? {:f spark-sql-is-cached? :rank [2]}
                      :sparksqljoin {:f spark-sql-join :rank [2 3 4 5 6 7 8 9 10]}
@@ -3112,6 +3220,7 @@
                      :sparksqltablenames {:f spark-sql-table-names :rank [1]}
                      :sparksqlunionall {:f spark-sql-unionall :rank [2]}
                      :sparksqluncachetable {:f spark-sql-uncache-table :rank [2]}
+                     :sparksqlwithcolumn {:f spark-sql-with-column :rank [3]}
                      :sparksubtract {:f spark-subtract :rank [2]}
                      :sparksubtractbykey {:f spark-subtract-by-key :rank [2]}
                      :sparkSTORAGE_LEVELS {:f spark-STORAGE-LEVELS :rank [0]}
