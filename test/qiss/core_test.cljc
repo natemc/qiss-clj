@@ -369,6 +369,9 @@
     (is (= (ktest "([a:1 3]b:1 3)")
            (ktest "delete from ([a:1 2 3]b:1 2 3)where a=2")))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(deftest test-prompt-eating
+  (testing "eat the prompt on cut and pasted qiss code"
+    (is (= (ktest "2") (ktest "qiss)1+1")))))
 (deftest test-select
   (testing "select does not require any agg exprs"
     (is (= (ktest "([]a:1 2 3)") (ktest "select from([]a:1 2 3)"))))

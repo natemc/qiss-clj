@@ -1924,6 +1924,8 @@
               (index t i))]))))
 (declare spark-sql-todf)
 (declare spark-sql-selectexpr)
+; sparksqlgroupeddatasum[gdf:sparksqlgroupby[df; "ZIPCODE"]; "ITEM"]
+; select sum(ITEM) by ZIPCODE from df
 (defn resolve-select-dframe [tu e x]          ; tu -> "select from df"
   "Resolve the select expr specified by x"    ; x  ->  parse tree
   (let [[e2 df] (kresolve tu e (:from x))]
@@ -2819,9 +2821,11 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;  spark sql  -- all function names start with "spark-sql-"
 ;                except for spark-context-from-sql-text to avoid confusion.
-
+;
+; many of the comments are cut/paste jobs from apache spark source code/docs.
 (defn spark-sql-show
-  "   * Displays the top 20 rows of [[DataFrame]] in a tabular form. Strings more than 20 characters\n   * will be truncated, and all cells will be aligned right.\n"
+  "Displays the top 20 rows of [[DataFrame]] in a tabular form. Strings more than 20 characters
+   will be truncated, and all cells will be aligned right.\n"
   ([^DataFrame dataframe]
    (.show dataframe))
   ([^DataFrame numRows dataframe]   ; this order is flipped to make the usage more qiss-esque
@@ -2939,7 +2943,8 @@
         (spark-sql-col dataframe firstcolname)
         (into-array Column (map #(spark-sql-col dataframe %) colnames))))
 (defn spark-sql-unionall
-  "Returns a new [[DataFrame]] containing union of rows in this frame and another frame.\n   * This is equivalent to `UNION ALL` in SQL"
+  "Returns a new [[DataFrame]] containing union of rows in this frame and another frame.
+  * This is equivalent to `UNION ALL` in SQL"
   [^DataFrame dataframe ^DataFrame otherdf]
   (.unionAll dataframe otherdf))
 (defn spark-sql-intersect

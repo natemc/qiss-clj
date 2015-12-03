@@ -52,6 +52,8 @@ df:sparksqltable[c; "myfirsttable"]                         / table -> df
 / ~800MB file
 / http://mishadoff.com/blog/spark-in-clojure/
 /
+tname:([]a:,/3#/:1 2 3;b:9#10 20 30;cee:9#10 20 30)
+/
 /
 /
 / Don't put a newline at EOF: the grammar needs work
