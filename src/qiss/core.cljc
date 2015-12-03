@@ -1924,14 +1924,26 @@
               (index t i))]))))
 (declare spark-sql-todf)
 (declare spark-sql-selectexpr)
+(declare spark-sql-group-by)
+(declare spark-sql-groupeddata-sum)
 ; sparksqlgroupeddatasum[gdf:sparksqlgroupby[df; "ZIPCODE"]; "ITEM"]
 ; select sum(ITEM) by ZIPCODE from df
 (defn resolve-select-dframe [tu e x]          ; tu -> "select from df"
   "Resolve the select expr specified by x"    ; x  ->  parse tree
   (let [[e2 df] (kresolve tu e (:from x))]
-    (if-let [a (:aggs x)]
-      [e2 (spark-sql-selectexpr df (vec (last (first a))))]
-      [e2 (spark-sql-todf df)])))
+    (if-let [b (:by x)] ; is there a by clause? construct GroupedData first
+      (let [
+            gdf (spark-sql-group-by df (vec (last (first b))))  ; b is col being grouped by.
+                                                                ; TODO: apply constraint to env, set to e4 (skipping constraint application for now)
+            ]
+        (if-let [a (:aggs x)] ;
+          [e2 (spark-sql-groupeddata-sum gdf (vec (last (first a))))]
+          [e2 (spark-sql-todf gdf)]))
+      (if-let [a (:aggs x)]  ; this is the existing else block "select a from df" (no by)
+        [e2 (spark-sql-selectexpr df (vec (last (first a))))]
+        [e2 (spark-sql-todf df)]))
+    )
+  )
 (defn resolve-select [tu e x]  ; tu -> "select from df"
   "select"                     ; e -> env   x -> df?
   (let [[e2 df] (kresolve tu e (:from x))]  ; pass the e2 on?
@@ -2021,7 +2033,7 @@
   (let [t (if (coll? x) (first x) x)
         v (if (coll? x)
             (cond (= :vec t)           (next x)
-                  (= :expr t)          (second x)
+                  (= :expr t)          (second x)    ; goes here on the very first resolve call
                   (= :parexpr t)       (second x)
                   (= :raw t)           (second x)
                   (= :dotn t)          (next x)
