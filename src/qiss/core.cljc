@@ -13,6 +13,7 @@
                      )
             (:import [org.apache.spark.api.java JavaSparkContext]
                      [org.apache.spark.sql SQLContext Row DataFrame GroupedData Column]
+                     [com.google.common.collect ImmutableMap]
                      )
             (:gen-class)])
   #?(:cljs (:require [clojure.string :as str]
@@ -1926,22 +1927,33 @@
 (declare spark-sql-selectexpr)
 (declare spark-sql-group-by)
 (declare spark-sql-groupeddata-sum)
-; sparksqlgroupeddatasum[gdf:sparksqlgroupby[df; "ZIPCODE"]; "ITEM"]
+(declare spark-sql-groupeddata-agg)
+; sparksqlgroupeddatasum[ gdf:sparksqlgroupby[df; "ZIPCODE"]; "ITEM"]
 ; select sum(ITEM) by ZIPCODE from df
+;
+; sparksqlgroupeddataagg[ gdf:sparksqlgroupby[df; "ZIPCODE"]; "ITEM"; "sum"]
+; x = {:aggs ([:juxt [:lhs [:id sum]] [:rhs [:parexpr [:id ITEM]]]]), :by ([:id ZIPCODE]), :from [:id df]}{:aggs ([:juxt [:lhs [:id sum]] [:rhs [:parexpr [:id ITEM]]]]), :by ([:id ZIPCODE]), :from [:id df]}
 (defn resolve-select-dframe [tu e x]          ; tu -> "select from df"
   "Resolve the select expr specified by x"    ; x  ->  parse tree
   (let [[e2 df] (kresolve tu e (:from x))]
-    (if-let [b (:by x)] ; is there a by clause? construct GroupedData first
-      (let [
-            gdf (spark-sql-group-by df (vec (last (first b))))  ; b is col being grouped by.
-                                                                ; TODO: apply constraint to env, set to e4 (skipping constraint application for now)
-            ]
-        (if-let [a (:aggs x)] ;
-          [e2 (spark-sql-groupeddata-sum gdf (vec (last (first a))))]
-          [e2 (spark-sql-todf gdf)]))
-      (if-let [a (:aggs x)]  ; this is the existing else block "select a from df" (no by)
-        [e2 (spark-sql-selectexpr df (vec (last (first a))))]
-        [e2 (spark-sql-todf df)]))
+    (do
+      (println x)
+      (if-let [b (:by x)] ; is there a by clause? construct GroupedData first
+        (let [gdf (spark-sql-group-by df (vec (last (first b))))]  ; b is col being grouped by.
+          ; TODO: apply constraint to env, set to e4 (skipping constraint application for now)
+          (if-let [a (:aggs x)]
+            (if-let [[:juxt [:lhs [:id func]] [:rhs [:parexpr [:id colname]]]]  (first a)]
+              (do
+                (println a)
+                (println func)
+                (println colname)
+                [e2 (spark-sql-groupeddata-agg gdf colname func)])
+              [e2 (spark-sql-groupeddata-sum gdf (vec (last (first a))))])
+            [e2 (spark-sql-todf gdf)]))
+        (if-let [a (:aggs x)]  ; this is the existing else block "select a from df" (no by)
+          [e2 (spark-sql-selectexpr df (vec (last (first a))))]
+          [e2 (spark-sql-todf df)]))
+      )
     )
   )
 (defn resolve-select [tu e x]  ; tu -> "select from df"
@@ -2901,10 +2913,20 @@
     instance
     method-str
     (to-array args)))
+; qiss.core=> (krun "sparksqlgroupeddataagg[gdf:sparksqlgroupby[df; \"ZIPCODE\"]; \"ITEM\"; \"sum\"] ")
 (defn spark-sql-groupeddata-agg
-  "Compute aggregates by specifying a series of aggregate columns"
-  [^GroupedData groupeddf expr]
-  (apply str-invoke groupeddf [(string expr)]))
+  "Compute aggregates by specifying a series of aggregate columns
+     * (Java-specific) Compute aggregates by specifying a map from column name to
+     * aggregate methods. The resulting [[DataFrame]] will also contain the grouping columns.
+     *
+     * The available aggregate methods are `avg`, `max`, `min`, `sum`, `count`.
+     * {{{
+     *   // Selects the age of the oldest employee and the aggregate expense for each department
+     *   import com.google.common.collect.ImmutableMap;
+     *   df.groupBy(\"department\").agg(ImmutableMap.of(\"age\", \"max\", \"expense\", \"sum\"));\n   * }}}"
+  [^GroupedData groupeddf ^String key0 ^String val0]
+  (.agg groupeddf (ImmutableMap/of key0 val0)))
+;  (.agg groupeddf (ImmutableMap/of "ITEM" "max")))
 ; qiss)sparksqlgroupeddatamax[gdf:sparksqlgroupby[df; "ZIPCODE"];  "BTL PRICE"]
 (defn spark-sql-groupeddata-max
   "Compute the max value for each numeric columns for each group.
