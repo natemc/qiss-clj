@@ -3363,16 +3363,20 @@
           (if (or (empty? line) (= \/ (first line))) ; skip comments
             (recur e)
             (if (and (not= "\\\\" line) (not= "exit" line))
-              (let [e2 (try
-                         (let [x (second (parse line))
-                               [ne r] (resolve-full-expr line e x)]
-                           (if (and (not= :assign (first x))
-                                    (not (nil? r)))
-                             (show r))
-                           ne)
-                         (catch Exception ex
-                           (println (.getMessage ex))
-                           e))]
+              (let [code (if (and (< 4 (count line))
+                                  (= "qiss)" (subs line 0 5)))
+                           (subs line 5)
+                           line)
+                    e2   (try
+                           (let [x (second (parse code))
+                                 [ne r] (resolve-full-expr code e x)]
+                             (if (and (not= :assign (first x))
+                                      (not (nil? r)))
+                               (show r))
+                             ne)
+                           (catch Exception ex
+                             (println (.getMessage ex))
+                             e))]
                 (recur e2)))))))))
 
 #?(:clj  (when-not *command-line-args* ;; i.e., we're in a clojure repl
