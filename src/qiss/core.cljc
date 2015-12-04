@@ -1897,6 +1897,20 @@
         [_ i] (apply-constraints tu e3 ut (:where x))
         u      (index-table ut (except (til-count ut) i))]
     [e (if (not (keyed-table? t)) u (key-table-by-colnames (keycols t) u))]))
+(defn kresolve-where-parse-tree [ptree]
+  "parse-tree -> sparksql where expression string"
+  (when-let[[:dyop [:lhs [:id lhs]] [:op operand] [:rhs [:long rhs]]] (first ptree) ]
+    (do
+      (println ptree)
+      (println lhs)
+      (println operand)
+      (println rhs)
+      (str lhs operand rhs)
+      )))
+; parse tree processing order:
+;  1. :where - the where clause
+;  2. :by    - grouping
+;  3. :aggs  - min/max/count funcs on grouped cols
 (defn resolve-select-table [tu e x] ; qiss table select (not dataframe)
   "Resolve the select expr specified by x"
   (let [[e2 t] (kresolve tu e (:from x))
@@ -1933,26 +1947,32 @@
 ;
 ; sparksqlgroupeddataagg[ gdf:sparksqlgroupby[df; "ZIPCODE"]; "ITEM"; "sum"]
 ; x = {:aggs ([:juxt [:lhs [:id sum]] [:rhs [:parexpr [:id ITEM]]]]), :by ([:id ZIPCODE]), :from [:id df]}{:aggs ([:juxt [:lhs [:id sum]] [:rhs [:parexpr [:id ITEM]]]]), :by ([:id ZIPCODE]), :from [:id df]}
+;
+; qiss)sparksqlselect[ sparksqlwhere[df; "PACK=6"]; "DESCRIPTION"; "ITEM" ]
+; select DESCRIPTION, ITEM from df where PACK=6
+(declare spark-sql-where)
 (defn resolve-select-dframe [tu e x]          ; tu -> "select from df"
   "Resolve the select expr specified by x"    ; x  ->  parse tree
-  (let [[e2 df] (kresolve tu e (:from x))]
-    (do
-      (println x)
-      (if-let [b (:by x)] ; is there a by clause? construct GroupedData first
-        (let [gdf (spark-sql-group-by df (vec (last (first b))))]  ; b is col being grouped by.
-          ; TODO: apply constraint to env, set to e4 (skipping constraint application for now)
-          (if-let [a (:aggs x)]
-            (if-let [[:juxt [:lhs [:id func]] [:rhs [:parexpr [:id colname]]]]  (first a)]
-              (do
-                (println a)
-                (println func)
-                (println colname)
-                [e2 (spark-sql-groupeddata-agg gdf colname func)])
-              [e2 (spark-sql-groupeddata-sum gdf (vec (last (first a))))])
-            [e2 (spark-sql-todf gdf)]))
-        (if-let [a (:aggs x)]  ; this is the existing else block "select a from df" (no by)
-          [e2 (spark-sql-selectexpr df (vec (last (first a))))]
-          [e2 (spark-sql-todf df)]))
+  (let [[e2 df0] (kresolve tu e (:from x))]
+    (if-let [whereexpr (kresolve-where-parse-tree (:where x))]  ; parse-tree -> sparksql where expression string
+      (do
+        (println x)
+        (let [df (spark-sql-where df0 whereexpr)]
+          (if-let [b (:by x)] ; is there a by clause? construct GroupedData first
+            (let [gdf (spark-sql-group-by df (vec (last (first b))))]  ; b is col being grouped by.
+              ; TODO: apply constraint to env, set to e4 (skipping constraint application for now)
+              (if-let [a (:aggs x)]
+                (if-let [[:juxt [:lhs [:id func]] [:rhs [:parexpr [:id colname]]]]  (first a)]
+                  (do
+                    (println a)
+                    (println func)
+                    (println colname)
+                    [e2 (spark-sql-groupeddata-agg gdf colname func)])
+                  [e2 (spark-sql-groupeddata-sum gdf (vec (last (first a))))])
+                [e2 (spark-sql-todf gdf)])))))
+      (if-let [a (:aggs x)]  ; this is the existing else block "select a from df" (no by)
+        [e2 (spark-sql-selectexpr df0 (vec (last (first a))))]
+        [e2 (spark-sql-todf df0)])
       )
     )
   )
@@ -2999,6 +3019,10 @@
   ""
   [^DataFrame dataframe colname]
   (.apply dataframe (string colname)))
+(defn spark-sql-where
+  "Filters rows using the given SQL expression"
+  [^DataFrame dataframe conditionExpr]
+  (.where dataframe (string conditionExpr)))
 (defn spark-sql-na
   "Dropping rows containing any null values"
   [^DataFrame dataframe]
@@ -3260,6 +3284,7 @@
                      :sparksqlunionall {:f spark-sql-unionall :rank [2]}
                      :sparksqluncachetable {:f spark-sql-uncache-table :rank [2]}
                      :sparksqlwithcolumn {:f spark-sql-with-column :rank [3]}
+                     :sparksqlwhere {:f spark-sql-where :rank [2]}
                      :sparksubtract {:f spark-subtract :rank [2]}
                      :sparksubtractbykey {:f spark-subtract-by-key :rank [2]}
                      :sparkSTORAGE_LEVELS {:f spark-STORAGE-LEVELS :rank [0]}

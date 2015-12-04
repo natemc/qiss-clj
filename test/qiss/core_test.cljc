@@ -687,17 +687,19 @@
 
 (deftest qiss-sparkql-select-function-test
   (testing "select all cols from dataframe"
-    (is (= (keval "df") (keval "select from df"))))
+    (is (keval "df ~ (select from df)")))
 ;;  (testing "select a single column from dataframe"  ; TODO - make sparksqlselect() single column select is broken, multiple works below
-;;    (is (keval "sparksqlselect[df;\"ZIPCODE\"] ~ select ZIPCODE from df")))
+;;    (is (keval "sparksqlselect[df;\"ZIPCODE\"] ~ (select ZIPCODE from df"))))
   (testing "select a single column from dataframe via selectExpr"
-    (is (keval "sparksqlselectexpr[df;\"ZIPCODE\"] ~ select ZIPCODE from df")))
+    (is (keval "sparksqlselectexpr[df;\"ZIPCODE\"] ~ (select ZIPCODE from df)")))
   (testing "group a single column by ZIPCODE from dataframe, apply average"
-    (is (keval "sparksqlgroupeddataagg[ sparksqlgroupby[df; \"ZIPCODE\"]; \"ITEM\"; \"avg\" ] ~ (select avg(ITEM) by ZIPCODE from df)")))
+    (is (keval "sparksqlgroupeddataagg[ sparksqlgroupby[df; \"ZIPCODE\"]; \"ITEM\"; \"avg\" ] ~ (select avg(ITEM) by ZIPCODE from df")))  ; TODO: eliminate the need for the parens around the select
   (testing "group a single column by ZIPCODE from dataframe, apply max"
-    (is (keval "sparksqlgroupeddataagg[ sparksqlgroupby[df; \"ZIPCODE\"]; \"ITEM\"; \"max\" ] ~ (select max(ITEM) by ZIPCODE from df)")))
+    (is (keval "sparksqlgroupeddataagg[ sparksqlgroupby[df; \"ZIPCODE\"]; \"ITEM\"; \"max\" ] ~ (select max(ITEM) by ZIPCODE from df")))
   ;;  (testing "select multiple columns from dataframe"
-  ;;    (is (keval "sparksqlselect[df;\"ZIPCODE\"; \"NAME\"] ~ select ZIPCODE, NAME from df")))
+  ;;    (is (keval "sparksqlselect[df;\"ZIPCODE\"; \"NAME\"] ~ (select ZIPCODE, NAME from df"))))
   ;;  (testing "select multiple column from dataframe via selectExpr"
-  ;;    (is (keval "sparksqlselectexpr[df;\"ZIPCODE\"; \"NAME\"] ~ select ZIPCODE, NAME from df")))
+  ;;    (is (keval "sparksqlselectexpr[df;\"ZIPCODE\"; \"NAME\"] ~ (select ZIPCODE, NAME from df"))))
+;  (testing "where claused group a single column by ZIPCODE from dataframe, apply count"
+;    (is (keval "sparksqlgroupeddataagg[ sparksqlgroupby[ sparksqlwhere[df; \"PACK=12\"] ; \"ZIPCODE\"]; \"ITEM\"; \"count\" ] ~ (select count(ITEM) by ZIPCODE from df where PACK=12")))
   )
