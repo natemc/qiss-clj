@@ -13,6 +13,20 @@
                [qiss.core :refer :all])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn load-db-tables
+  []
+  (keval "df:c sparksqlreadcsv \"iowa_liquor_sales_fixed_with_header10.csv\""))
+(defn destroy-db-tables
+  []
+  (keval "df:()"))
+(defn my-test-fixture [f]
+  (load-db-tables)
+  (f)
+  (destroy-db-tables))
+
+; Here we register my-test-fixture to be called once, wrapping ALL tests
+; in the namespace
+(use-fixtures :once my-test-fixture)
 
 (deftest test-bool-literals
   (testing "bools eval to themselves"
@@ -369,9 +383,9 @@
     (is (= (ktest "([a:1 3]b:1 3)")
            (ktest "delete from ([a:1 2 3]b:1 2 3)where a=2")))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(deftest test-prompt-eating
-  (testing "eat the prompt on cut and pasted qiss code"
-    (is (= (ktest "2") (ktest "qiss)1+1")))))
+;(deftest test-prompt-eating
+;  (testing "eat the prompt on cut and pasted qiss code"
+;    (is (= "2" (ktest "qiss)1+1")))))
 (deftest test-select
   (testing "select does not require any agg exprs"
     (is (= (ktest "([]a:1 2 3)") (ktest "select from([]a:1 2 3)"))))
@@ -651,7 +665,6 @@
 ;  ))
 
 
-
 ;; spark tests
 ;(deftest spark-configuration-and-context
 ;  (testing
@@ -671,3 +684,20 @@
 ;    ""
 ;    (is (= 3
 ;     (keval "sparkcount sparkcollect sparkfilter[  sc sparkparallelize (0;1;2;3;4;5) ; {0=x mod 2} ]\n")))))
+
+(deftest qiss-sparkql-select-function-test
+  (testing "select all cols from dataframe"
+    (is (= (keval "df") (keval "select from df"))))
+;;  (testing "select a single column from dataframe"  ; TODO - make sparksqlselect() single column select is broken, multiple works below
+;;    (is (keval "sparksqlselect[df;\"ZIPCODE\"] ~ select ZIPCODE from df")))
+  (testing "select a single column from dataframe via selectExpr"
+    (is (keval "sparksqlselectexpr[df;\"ZIPCODE\"] ~ select ZIPCODE from df")))
+  (testing "group a single column by ZIPCODE from dataframe, apply average"
+    (is (keval "sparksqlgroupeddataagg[ sparksqlgroupby[df; \"ZIPCODE\"]; \"ITEM\"; \"avg\" ] ~ (select avg(ITEM) by ZIPCODE from df)")))
+  (testing "group a single column by ZIPCODE from dataframe, apply max"
+    (is (keval "sparksqlgroupeddataagg[ sparksqlgroupby[df; \"ZIPCODE\"]; \"ITEM\"; \"max\" ] ~ (select max(ITEM) by ZIPCODE from df)")))
+  ;;  (testing "select multiple columns from dataframe"
+  ;;    (is (keval "sparksqlselect[df;\"ZIPCODE\"; \"NAME\"] ~ select ZIPCODE, NAME from df")))
+  ;;  (testing "select multiple column from dataframe via selectExpr"
+  ;;    (is (keval "sparksqlselectexpr[df;\"ZIPCODE\"; \"NAME\"] ~ select ZIPCODE, NAME from df")))
+  )

@@ -2924,8 +2924,8 @@
      *   // Selects the age of the oldest employee and the aggregate expense for each department
      *   import com.google.common.collect.ImmutableMap;
      *   df.groupBy(\"department\").agg(ImmutableMap.of(\"age\", \"max\", \"expense\", \"sum\"));\n   * }}}"
-  [^GroupedData groupeddf ^String key0 ^String val0]
-  (.agg groupeddf (ImmutableMap/of key0 val0)))
+  [^GroupedData groupeddf key0 val0]
+  (.agg groupeddf (ImmutableMap/of (string key0) (string val0))))
 ;  (.agg groupeddf (ImmutableMap/of "ITEM" "max")))
 ; qiss)sparksqlgroupeddatamax[gdf:sparksqlgroupby[df; "ZIPCODE"];  "BTL PRICE"]
 (defn spark-sql-groupeddata-max
