@@ -307,8 +307,11 @@
           (if (= (count x) i)
             i
             (- (count x) (+ 1 i)))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn re-pattern? [x]
+  (instance? #?(:clj java.util.regex.Pattern :cljs js/RegExp) x))
 (defn like [x pattern]
-  (let [p (re-pattern (string pattern))
+  (let [p (if (re-pattern? pattern) pattern (re-pattern (string pattern)))
         h (fn h [i]
             (cond (keyword? i) (not (nil? (re-find p (string i))))
                   (string? i)  (not (nil? (re-find p i)))
@@ -2575,10 +2578,7 @@
           (if (or (empty? line) (= \/ (first line))) ; skip comments
             (recur e)
             (if (and (not= "\\\\" line) (not= "exit" line))
-              (let [code (if (and (< 4 (count line))
-                                  (= "qiss)" (subs line 0 5)))
-                           (subs line 5)
-                           line)
+              (let [code (if (like line #"qiss[)]") (subs line 5) line)
                     e2   (try
                            (let [x (second (parse code))
                                  [ne r] (resolve-full-expr code e x)]
@@ -2604,7 +2604,7 @@
   [& args]
   ;; TODO support stdin and stdout in the usual way
   #?(:clj (let [a (vec args)
-                i (where (like a ".*\\.qiss"))
+                i (where (like a #".*\.qiss"))
                 f (index a i)
                 e (initialize-qiss builtin)]
             (def original-env e)
