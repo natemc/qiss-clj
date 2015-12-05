@@ -18,9 +18,12 @@
 / c:sparksqlcontext sc:sparkcontext "local[*]" sparkconf  "qiss-local-cluster"
 /
 / MASTER:"spark://macbookpro15.local:7077"
-c:sparksqlcontext sc:sparkcontext "spark://macbookpro15.local:7077" sparkconf "qiss-stand-alone-cluster"
+sc:sparkcontext "spark://macbookpro15.local:7077" sparkconf "qiss-stand-alone-cluster";
+c:sparksqlcontext sc;
+ssc:sc sparkstreamingcontext 1;
 /                  sc --> spark context handle
 /                   c --> spark sql context handle
+/                 ssc --> spark streaming context handle
 / spark-sql init
 / c:sparksqlcontext sc  TODO: sc is not available for when this line executes during start-up
 / tname:([]a:9#1 2 3;b:9#10 20 30;cee:9#10 20 30)

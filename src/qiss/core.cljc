@@ -1,19 +1,24 @@
 (ns qiss.core
-  #?@(:clj [(:require [clojure-csv.core :as csv]
+  #?@(:clj [
+            (:require [clojure-csv.core :as csv]
                       [clojure.java.io :as io]
-                      [clojure.stacktrace :as st] ;; handy from the repl
+                      [clojure.stacktrace :as st]           ;; handy from the repl
                       [clojure.string :as str]
                       [instaparse.core :as insta]
                       [instaparse.viz :as instav]
-                     ; [sparkling.conf :as sparkconf]
-                     ; [sparkling.core :as spark]
+              ; [sparkling.conf :as sparkconf]
+              ; [sparkling.core :as spark]
                       [flambo.conf :as sparkconf]
                       [flambo.api :as spark]
                       [flambo.sql :as sparksql]
-                     )
+                      [flambo.streaming :as sparkstreaming])
             (:import [org.apache.spark.api.java JavaSparkContext]
                      [org.apache.spark.sql SQLContext Row DataFrame GroupedData Column]
+                     [org.apache.spark.streaming.api.java JavaStreamingContext]
+                     [org.apache.spark.streaming Duration]
                      [com.google.common.collect ImmutableMap]
+                     ; [org.apache.spark.streaming.twitter TwitterUtils]
+                     [org.apache.log4j Level Logger]
                      )
             (:gen-class)])
   #?(:cljs (:require [clojure.string :as str]
@@ -2782,6 +2787,7 @@
 (defn spark-stop [sc]
   "shutdown SparkContext"
   ; (spark/stop sc)
+  (.stop sc)
   )
 (defn spark-tuple [x y]
   ; (spark/tuple x y)
@@ -2846,6 +2852,8 @@
   )
 (def spark-checkpoint
   ; spark/checkpoint
+
+
   )
 (def spark-cartesian
   spark/cartesian)
@@ -3085,6 +3093,141 @@
   ([sql-context path source-type]       ; specify data source type
    (sparksql/load sql-context (string path) (string source-type))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;  spark-streaming
+(defn spark-streaming-context
+  "Create a JavaStreamingContext using an existing JavaSparkContext (or SparkConf)"
+  [spark-context batch-duration]
+  (sparkstreaming/streaming-context spark-context batch-duration))
+(defn spark-streaming-local-streaming-context
+  [app-name duration]
+  (sparkstreaming/local-streaming-context app-name duration))
+(defn spark-streaming-duration
+  [ms]
+  (sparkstreaming/duration ms))
+(defn spark-streaming-time
+  [ms]
+  (sparkstreaming/time ms))
+(defn spark-streaming-checkpoint
+;  ([^JavaStreamingContext streaming-context path]
+;   (sparkstreaming/checkpoint streaming-context path))
+  ([dstream interval]
+   (sparkstreaming/checkpoint dstream interval)))
+; https://github.com/yieldbot/flambo/blob/4c25aa14f39388408ad5a777049c7fedf82a79b2/src/clojure/flambo/streaming.clj
+
+(defn spark-streaming-text-file-stream
+  "Create an input stream that monitors a Hadoop-compatible filesystem for new files and reads them
+  as text files (using key as LongWritable, value as Text and input format as TextInputFormat).
+  Files must be written to the monitored directory by \"moving\" them from another location within
+  the same file system. File names starting with . are ignored.\n"
+  [^JavaStreamingContext streaming-context directory]
+  (.textFileStream streaming-context (string directory)))
+(defn spark-streaming-socket-text-stream
+  "Create an input stream from network source hostname:port. Data is received using a TCP socket
+  and the receive bytes is interpreted as UTF8 encoded \\n delimited lines. Storage level of the
+   data will be the default StorageLevel.MEMORY_AND_DISK_SER_2.\n"
+  [^JavaStreamingContext streaming-context hostname port]
+  (.socketTextStream streaming-context (string hostname) port))
+(defn spark-streaming-kafka-stream
+  [streaming-context zk-connect group-id topic-map]
+  (sparkstreaming/kafka-stream streaming-context zk-connect group-id topic-map))
+(defn spark-streaming-kafka-direct-stream
+  [streaming-context key-class value-class key-decoder-class value-decoder-class kafka-params topic-set]
+  (sparkstreaming/kafka-direct-stream streaming-context key-class value-class key-decoder-class value-decoder-class kafka-params topic-set))
+(defn spark-streaming-flume-stream
+  [streaming-context host port]
+  (sparkstreaming/flume-stream streaming-context host port))
+(defn spark-streaming-flume-polling-stream
+  [streaming-context host port]
+  (sparkstreaming/flume-polling-stream streaming-context host port))
+(defn spark-streaming-flat-map
+  [dstream f]
+  (sparkstreaming/flat-map dstream f))
+(defn spark-streaming-map
+  [dstream f]
+  (sparkstreaming/map dstream f))
+(defn spark-streaming-reduce-by-key
+  "Call reduceByKey on dstream of type JavaPairDStream"
+  [dstream f]
+  (sparkstreaming/reduce-by-key dstream f))
+(defn spark-streaming-map-to-pair
+  [dstream f]
+  (sparkstreaming/map-to-pair dstream f))
+;
+; Transformations
+(defn spark-streaming-transform
+  [dstream f]
+  (sparkstreaming/transform dstream f))
+(defn spark-streaming-repartition
+  [dstream num-partitions]
+  (sparkstreaming/repartition dstream num-partitions))
+(defn spark-streaming-union
+  [dstream other-stream]
+  (sparkstreaming/union dstream other-stream))
+;; ## Window Operations
+;;
+(defn spark-streaming-window
+  [dstream window-length slide-interval]
+  (sparkstreaming/window dstream window-length slide-interval))
+(defn spark-streaming-count
+  [dstream]
+  (sparkstreaming/count dstream))
+(defn spark-streaming-count-by-window
+  [dstream window-length slide-interval]
+  (sparkstreaming/count-by-window dstream window-length slide-interval))
+(defn spark-streaming-group-by-key-and-window
+  [dstream window-length slide-interval]
+  (sparkstreaming/group-by-key-and-window dstream window-length slide-interval))
+(defn spark-streaming-reduce-by-window
+  [dstream f f-inv window-length slide-interval]
+  (sparkstreaming/reduce-by-window dstream f f-inv window-length slide-interval))
+(defn spark-streaming-reduce-by-key-and-window
+  [dstream f window-length slide-interval]
+  (sparkstreaming/reduce-by-key-and-window dstream f window-length slide-interval))
+;; ## Actions
+;;
+(def spark-streaming-print
+  (memfn print))
+(defn spark-streaming-foreach-rdd
+  [dstream f]
+  (sparkstreaming/foreach-rdd dstream f))
+;; ## Output
+;;
+(defn spark-streaming-save-as-text-files
+  ;;TODO: check whether first param is of type
+  ;;DStream or just let an exception be thrown?
+  ([dstream prefix suffix]
+   (sparkstreaming/save-as-text-files dstream prefix suffix))
+  ([dstream prefix]
+   (sparkstreaming/save-as-text-files dstream prefix)))
+
+(defn spark-streaming-remember
+  "Sets each DStreams in this context to remember RDDs it generated in the last given duration.
+  DStreams remember RDDs only for a limited duration of duration and releases them for garbage collection.
+  This method allows the developer to specify how long to remember the RDDs ( if the developer wishes
+  to query old data outside the DStream computation).\n"
+  [^JavaStreamingContext streaming-context duration]
+  (.remember streaming-context (new Duration duration)))
+(defn spark-streaming-start
+  "Start the execution of the streams"
+  [^JavaStreamingContext streaming-context]
+  (.start streaming-context))
+(defn spark-streaming-stop
+  "Stop the execution of the streams. Will stop the associated JavaSparkContext as well"
+  [^JavaStreamingContext streaming-context]
+  (.stop streaming-context))
+(defn spark-streaming-get-state
+  "Return the current state of the context. The context can be in three possible states
+    * StreamingContextState.INTIALIZED  - The context has been created, but not been started yet.
+        Input DStreams, transformations and output operations can be created on the context.
+    * StreamingContextState.ACTIVE - The context has been started, and been not stopped.
+        Input DStreams, transformations and output operations cannot be created on the context.
+    * StreamingContextState.STOPPED - The context has been stopped and cannot be used any more."
+  [^JavaStreamingContext streaming-context]
+  (.getState streaming-context))
+
+; end of spark streaming funcs
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn read-csv
   "Reads a file in table format and creates a data frame from it, with cases corresponding to
   lines and variables to fields in the file. A clone of R's read.csv."
@@ -3234,6 +3377,8 @@
                      :sparksample {:f spark-sample :rank [4]}
                      :sparksaveastextfile {:f spark-save-as-text-file :rank [2]}
                      :sparkstop {:f spark-stop :rank [1]}
+                     :sparkstreamingcontext {:f spark-streaming-context :rank [2]}
+                     :sparkstreamingsockettextstream {:f spark-streaming-socket-text-stream :rank [3]}
                      :sparksortbykey {:f spark-sort-by-key :rank [1]}
                      :sparksql {:f spark-sql :rank [2]}
                      :sparksqlagg {:f spark-sql-agg :rank [2 3 4 5 6 7 8 9 10]}
@@ -3378,6 +3523,7 @@
    (defn repl
      ([] (repl @genv))
      ([e] ;; env cmdline
+      (.setLevel (Logger/getRootLogger) Level/WARN)  ; keep spark quiet
       (spark-sql-splash)
       (println "Welcome to qiss.  qiss is short and simple.")
       (loop [e e]
