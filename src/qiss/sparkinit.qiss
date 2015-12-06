@@ -20,7 +20,21 @@
 / MASTER:"spark://macbookpro15.local:7077"
 sc:sparkcontext "spark://macbookpro15.local:7077" sparkconf "qiss-stand-alone-cluster";
 c:sparksqlcontext sc;
-ssc:sc sparkstreamingcontext 1;
+ssc:sc sparkstreamingcontext 2000;  / spark streaming context with 2 second batch interval
+/ streaming test code
+stream0:sparkstreamingkafkastream[ssc;"localhost:2181";"word-count"; "test";1 ];
+stream1:sparkstreamingmap[stream0; {key x}];
+stream2:sparkstreamingflatmap[stream1; {key x}];
+/ stream3:sparkstreamingmapw[stream2; {}];
+stream3:stream2;
+/ stream4:sparkstreamingreducebykeyandwindow[ stream3 ; {}; 10 * 60 * 1000; 2000];
+/ stream4:sparkstreamingcountbywindow[ stream3 ; 10 * 60 * 1000; 2000];
+stream4:sparkstreamingmaptopair[stream3; {}];
+stream5:sparkstreaminggroupbykeyandwindow[ stream4 ; 10 * 60 * 1000; 2000];
+sparkstreamingprint stream5;
+/ futureproducelines[]
+/ sparkstreamingstart ssc;
+/ sparkstreamingawaittermination ssc
 /                  sc --> spark context handle
 /                   c --> spark sql context handle
 /                 ssc --> spark streaming context handle

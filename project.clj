@@ -9,8 +9,8 @@
                  [instaparse "1.4.1"]
                  [midje "1.6.3"]
                  [rhizome "0.2.5"]
-                 ; [gorillalabs/sparkling "1.2.4-SNAPSHOT"]
                  [yieldbot/flambo "0.7.2-SNAPSHOT"]
+                 [clj-kafka "0.3.4"]
 
                  ;; clojurescript from here down
                  [com.lucasbradstreet/instaparse-cljs "1.4.1.0"]

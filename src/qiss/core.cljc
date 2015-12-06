@@ -6,15 +6,16 @@
                       [clojure.string :as str]
                       [instaparse.core :as insta]
                       [instaparse.viz :as instav]
-              ; [sparkling.conf :as sparkconf]
-              ; [sparkling.core :as spark]
                       [flambo.conf :as sparkconf]
                       [flambo.api :as spark]
                       [flambo.sql :as sparksql]
-                      [flambo.streaming :as sparkstreaming])
+                      [flambo.tuple :as ft]
+                      [flambo.streaming :as sparkstreaming]
+                      [clj-kafka.producer :as p]
+                      [clj-kafka.zk :as zk])
             (:import [org.apache.spark.api.java JavaSparkContext]
                      [org.apache.spark.sql SQLContext Row DataFrame GroupedData Column]
-                     [org.apache.spark.streaming.api.java JavaStreamingContext]
+                     [org.apache.spark.streaming.api.java JavaStreamingContext JavaPairDStream]
                      [org.apache.spark.streaming Duration]
                      [com.google.common.collect ImmutableMap]
                      ; [org.apache.spark.streaming.twitter TwitterUtils]
@@ -2641,6 +2642,8 @@
        (sparkconf/set "spark.driver.allowMultipleContexts" "true")
       ;  (sparkconf/set "spark.executor.memory" "6g")
       ;  (sparkconf/set "spark.eventLog.enabled" "true")
+      (sparkconf/set "spark.files.overwrite" "true")
+      (sparkconf/set "spark.akka.timeout" "300") ; from https://github.com/joshrotenberg/flambo-kafka-streaming-example/blob/master/src/flambo_kafka_streaming_example/core.clj
       ;
       ; Ship these jars over to the slaves
       ;   Spark Dataframe dependency:
@@ -2671,7 +2674,8 @@
       ;     cd flambo; git checkout ; lein uberjar
       ;
       (sparkconf/jars [(str (System/getenv "HOME") "/dev/spark-csv/target/scala-2.10/spark-csv-assembly-1.3.0.jar")
-                       (str (System/getenv "HOME") "/dev/flambo/target/flambo-0.7.2-SNAPSHOT-standalone.jar")])
+                       (str (System/getenv "HOME") "/dev/flambo/target/flambo-0.7.2-SNAPSHOT-standalone.jar")
+                       (str (System/getenv "HOME") "/dev/flambo-kafka-streaming-example/target/flambo-kafka-streaming-example-0.1.0-SNAPSHOT-standalone.jar")])
       (sparkconf/master (string master))
       (sparkconf/app-name (string app-name))))
 (defn spark-context [conf]
@@ -3128,9 +3132,12 @@
    data will be the default StorageLevel.MEMORY_AND_DISK_SER_2.\n"
   [^JavaStreamingContext streaming-context hostname port]
   (.socketTextStream streaming-context (string hostname) port))
+; qiss)sparkstreamingkafkastream[ssc;"localhost:2181";"word-count"; "test";1 ]
+; qiss)sparkstreamingkafkastream[ssc;"localhost:2181";"word-count";("test";1)] <-- this is preferable? (pass a dict?)
 (defn spark-streaming-kafka-stream
-  [streaming-context zk-connect group-id topic-map]
-  (sparkstreaming/kafka-stream streaming-context zk-connect group-id topic-map))
+  [streaming-context zk-connect group-id topic-key topic-val]
+  (let[topic-map {(string topic-key) topic-val}]
+    (sparkstreaming/kafka-stream streaming-context (string zk-connect) (string group-id) topic-map)))
 (defn spark-streaming-kafka-direct-stream
   [streaming-context key-class value-class key-decoder-class value-decoder-class kafka-params topic-set]
   (sparkstreaming/kafka-direct-stream streaming-context key-class value-class key-decoder-class value-decoder-class kafka-params topic-set))
@@ -3140,19 +3147,36 @@
 (defn spark-streaming-flume-polling-stream
   [streaming-context host port]
   (sparkstreaming/flume-polling-stream streaming-context host port))
-(defn spark-streaming-flat-map
-  [dstream f]
-  (sparkstreaming/flat-map dstream f))
+; hardcoded version for now
 (defn spark-streaming-map
+  [^JavaPairDStream dstream f]
+  (sparkstreaming/map dstream (memfn _2)))
+(defn spark-streaming-map-orig
   [dstream f]
   (sparkstreaming/map dstream f))
+(defn spark-streaming-flat-map-orig
+  [dstream f]
+  (sparkstreaming/flat-map dstream f))
+(defn spark-streaming-flat-map
+  [dstream f]
+  (sparkstreaming/flat-map dstream (spark/fn [l] (clojure.string/split l #" "))))
+(defn spark-streaming-mapw
+  [dstream f]
+  (sparkstreaming/map dstream (flambo.function/flat-map-function (spark/fn [w] [w 1]))))
+(defn spark-streaming-map-values
+  "Return a new DStream by applying a map function to the value of each key-value pairs in 'this' DStream without changing the key.\n"
+  [dstream f]  ; JavaPairDStream
+  (.mapValues dstream (spark/fn [w] [w 1])))
 (defn spark-streaming-reduce-by-key
   "Call reduceByKey on dstream of type JavaPairDStream"
   [dstream f]
   (sparkstreaming/reduce-by-key dstream f))
-(defn spark-streaming-map-to-pair
+(defn spark-streaming-map-to-pair-orig
   [dstream f]
   (sparkstreaming/map-to-pair dstream f))
+(defn spark-streaming-map-to-pair
+  [dstream f]
+  (sparkstreaming/map-to-pair dstream (spark/fn [w] (ft/tuple w 1))))
 ;
 ; Transformations
 (defn spark-streaming-transform
@@ -3172,18 +3196,26 @@
 (defn spark-streaming-count
   [dstream]
   (sparkstreaming/count dstream))
+
 (defn spark-streaming-count-by-window
   [dstream window-length slide-interval]
   (sparkstreaming/count-by-window dstream window-length slide-interval))
+
 (defn spark-streaming-group-by-key-and-window
   [dstream window-length slide-interval]
-  (sparkstreaming/group-by-key-and-window dstream window-length slide-interval))
+  (sparkstreaming/group-by-key-and-window dstream window-length slide-interval))  ; no matching method
+
 (defn spark-streaming-reduce-by-window
   [dstream f f-inv window-length slide-interval]
   (sparkstreaming/reduce-by-window dstream f f-inv window-length slide-interval))
-(defn spark-streaming-reduce-by-key-and-window
+
+(defn spark-streaming-reduce-by-key-and-window-org
   [dstream f window-length slide-interval]
-  (sparkstreaming/reduce-by-key-and-window dstream f window-length slide-interval))
+  (sparkstreaming/reduce-by-key-and-window dstream f window-length slide-interval))    ; no matching method
+
+(defn spark-streaming-reduce-by-key-and-window ; TODO: handle function passing
+  [^JavaPairDStream dstream f window-length slide-interval]
+  (sparkstreaming/reduce-by-key-and-window dstream (spark/fn [x y] (+ x y)) window-length slide-interval))
 ;; ## Actions
 ;;
 (def spark-streaming-print
@@ -3216,6 +3248,9 @@
   "Stop the execution of the streams. Will stop the associated JavaSparkContext as well"
   [^JavaStreamingContext streaming-context]
   (.stop streaming-context))
+(defn spark-streaming-await-termination
+  [^JavaStreamingContext streaming-context]
+  (.awaitTermination streaming-context))
 (defn spark-streaming-get-state
   "Return the current state of the context. The context can be in three possible states
     * StreamingContextState.INTIALIZED  - The context has been created, but not been started yet.
@@ -3225,6 +3260,31 @@
     * StreamingContextState.STOPPED - The context has been stopped and cannot be used any more."
   [^JavaStreamingContext streaming-context]
   (.getState streaming-context))
+
+
+(defn produce-lines
+  "Publishes lines from the text to kafka, keyed on a random word in the line with the full line as
+  the value."
+  [frequency]
+  (let [brokers (zk/brokers {"zookeeper.connect" "localhost:2181"})
+        broker-list (zk/broker-list brokers)
+        producer (p/producer {"metadata.broker.list" broker-list})
+        topic "test"                 ; TODO - make this path more general!
+        lines (clojure.string/split (slurp (str (System/getenv "HOME") "/dev/qiss/resources/data.txt")) #"\n")]
+    (loop []
+      (p/send-messages producer
+                       (map #(p/message topic
+                                        (.getBytes (rand-nth (clojure.string/split % #" ")))
+                                        (.getBytes %)) lines))
+      (Thread/sleep frequency)
+      (recur))))
+
+;; in a separate thread, pull lines from data.txt and randomly publish them into kafka
+(defn future-produce-lines
+  []
+  (future (produce-lines 1000))
+ )
+
 
 ; end of spark streaming funcs
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -3333,6 +3393,7 @@
                      :eval     {:f #(keval (apply str %)) :rank [1]}
                      :every    {:f every :rank [1]}
                      :first    {:f times :rank [1 2] :snapshot-aware [1]}
+                     :futureproducelines {:f future-produce-lines :rank [0]}
                      :inter    {:f inter :rank [2]}
                      :keys     {:f keycols :rank [1]}
                      :last     {:f klast :rank [1]}
@@ -3377,8 +3438,20 @@
                      :sparksample {:f spark-sample :rank [4]}
                      :sparksaveastextfile {:f spark-save-as-text-file :rank [2]}
                      :sparkstop {:f spark-stop :rank [1]}
+                     :sparkstreamingawaittermination {:f spark-streaming-await-termination :rank [1]}
                      :sparkstreamingcontext {:f spark-streaming-context :rank [2]}
+                     :sparkstreamingflatmap {:f spark-streaming-flat-map :rank [2]}
+                     :sparkstreamingkafkastream {:f spark-streaming-kafka-stream :rank [5]}
+                     :sparkstreamingmap {:f spark-streaming-map :rank [2]}
+                     :sparkstreamingmaptopair {:f spark-streaming-map-to-pair :rank [2]}
+                     :sparkstreamingmapw {:f spark-streaming-mapw :rank [2]}
+                     :sparkstreamingprint {:f spark-streaming-print :rank [1]}
+                     :sparkstreamingcountbywindow {:f spark-streaming-count-by-window :rank [3]}
+                     :sparkstreaminggroupbykeyandwindow {:f spark-streaming-group-by-key-and-window :rank [3]}
+                     :sparkstreamingreducebywindow {:f spark-streaming-reduce-by-window :rank [5]}
+                     :sparkstreamingreducebykeyandwindow {:f spark-streaming-reduce-by-key-and-window :rank [4]}
                      :sparkstreamingsockettextstream {:f spark-streaming-socket-text-stream :rank [3]}
+                     :sparkstreamingstart {:f spark-streaming-start :rank [1]}
                      :sparksortbykey {:f spark-sort-by-key :rank [1]}
                      :sparksql {:f spark-sql :rank [2]}
                      :sparksqlagg {:f spark-sql-agg :rank [2 3 4 5 6 7 8 9 10]}
