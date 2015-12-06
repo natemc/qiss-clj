@@ -90,6 +90,8 @@
   ([x] #?(:clj (System/exit x))))
 ;; ACK js is all Number.  Use meta to distinguish?
 #?(:cljs (defn float? [x] (not= x (.floor js/Math x))))
+#?(:clj (defn hostname []
+          (vec (.. java.net.InetAddress getLocalHost getHostName))))
 (defn index-of
   "The first index in x where e appears, or (count x) if e does not
   exist in x"
@@ -2671,8 +2673,10 @@
       ;     sbt/sbt assembly
       ;  3. cd $HOME/dev
       ;     git clone https://github.com/yieldbot/flambo.git
-      ;     cd flambo; git checkout ; lein uberjar
-      ;
+      ;     cd flambo && lein uberjar
+      ;; 4. cd $HOME/dev
+      ;;    git clone https://github.com/joshrotenberg/flambo-kafka-streaming-example.git
+      ;;    cd flambo-kafka-streaming-example && lein uberjar
       (sparkconf/jars [(str (System/getenv "HOME") "/dev/spark-csv/target/scala-2.10/spark-csv-assembly-1.3.0.jar")
                        (str (System/getenv "HOME") "/dev/flambo/target/flambo-0.7.2-SNAPSHOT-standalone.jar")
                        (str (System/getenv "HOME") "/dev/flambo-kafka-streaming-example/target/flambo-kafka-streaming-example-0.1.0-SNAPSHOT-standalone.jar")])
@@ -2752,10 +2756,11 @@
   (spark/map rdd (spark/fn [x] ((partial ((keval "{x * 2}") :f)) {} x))))
 
 ; #(keval (apply str %))
-(defn spark-map [f rdd]
+(defn spark-map [e f rdd]
   ;  (spark/map rdd (spark/fn [x] (* 2 x)))) ; order is flipped in flambo
-  (let [ff #(keval (apply str %))]
-    (spark/map rdd (spark/fn [x] ((partial ((keval "{x * 2}") :f)) {} x)))))
+;;  (let [ff #(keval (apply str %))]
+;;    (spark/map rdd (spark/fn [x] ((partial ((keval "{x * 2}") :f)) {} x)))))
+  (spark/map rdd (spark/fn [x] (lambda-callable {} f) x)))
 
 (defn spark-flat-map [f rdd]
   (spark/flat-map f rdd))
@@ -3270,7 +3275,7 @@
         broker-list (zk/broker-list brokers)
         producer (p/producer {"metadata.broker.list" broker-list})
         topic "test"                 ; TODO - make this path more general!
-        lines (clojure.string/split (slurp (str (System/getenv "HOME") "/dev/qiss/resources/data.txt")) #"\n")]
+        lines (clojure.string/split (slurp "resources/public/data.txt") #"\n")]
     (loop []
       (p/send-messages producer
                        (map #(p/message topic
@@ -3424,7 +3429,7 @@
                      :sparkgroupbykey {:f spark-group-by-key :rank [1 2]}
                      :sparkkeys {:f spark-keys :rank [1]}
                      :sparkleftouterjoin {:f spark-left-outer-join :rank [2]}
-                     :sparkmap {:f spark-map  :rank [2]}
+                     :sparkmap {:f spark-map  :pass-global-env true :rank [2]}
                      :sparkmaphack {:f spark-map-hack :rank [2]}
                      :sparkmaphack2 {:f spark-map-hack2 :rank [2]}
                      :sparkreduce {:f spark-reduce :rank [2]}
@@ -3520,6 +3525,8 @@
                      :xdesc    {:f xdesc :rank [2]}})
 (def builtin (merge builtin-common
                     #?(:clj  {:exit   {:f exit :rank [0 1]}
+                              :futurecancel {:f future-cancel :rank [1]}
+                              :hostname {:f hostname :rank [0]}
                               :load   {:f load-qiss-file-from-qiss
                                        :pass-global-env true
                                        :rank [1]}
@@ -3596,7 +3603,7 @@
    (defn repl
      ([] (repl @genv))
      ([e] ;; env cmdline
-      (.setLevel (Logger/getRootLogger) Level/WARN)  ; keep spark quiet
+;;      (.setLevel (Logger/getRootLogger) Level/WARN)  ; keep spark quiet
       (spark-sql-splash)
       (println "Welcome to qiss.  qiss is short and simple.")
       (loop [e e]
