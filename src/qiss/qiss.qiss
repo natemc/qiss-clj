@@ -23,5 +23,5 @@ xcol:{+(x,(#x)_cols y)!.+y};
 xcols:{(x,cols[y]except x)#y}; / testing comments
 /
 / load `src/qiss/sparkinit.qiss;
-/ load `src/qiss/sparksql.qiss
+/ load `src/qiss/sparksql.qiss;
 / Don't put a newline at EOF: the grammar needs work

@@ -2779,18 +2779,17 @@
 ;    (.map rdd wrappedf)
   )
 
+(defmacro make-partial-func [ff]
+  `(spark/fn [x#] ((partial ((keval ~ff) :f)) {} x#)))
 
 (defn spark-map-hack [f rdd]
-;  (let [myf #(keval "{x * 2}")
-;        wrappedf (function myf)]
-;    (.map rdd wrappedf)
-  )
+  (spark/map rdd (spark/fn [x] ((partial ((keval "{x * x}") :f)) {} x))))
 
 ; this is not necessary
 ; (and shortcut form for fn #() cannot be used
 ; for maps
-(defn spark-map-hack2 [f rdd]
-  (spark/map #(fn [x] (* 2 x)) rdd))
+(defn spark-map-hack2 [f-spark-map-hack rdd]
+  (spark/map rdd (make-partial-func f-spark-map-hack)))
 
 (defn spark-reduce [rdd function]
   (spark/reduce function rdd))
