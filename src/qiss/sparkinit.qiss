@@ -16,11 +16,11 @@
 /     7. $SPARK_HOME/sbin/start-all.sh   # be sure you have ssh enabled (http://bluishcoder.co.nz/articles/mac-ssh.html)
 /     8. tail -f $SPARK_HOME/logs/*      # to observe master/slave log output
 /
-/ MASTER:"local[*]"
-/ c:sparksqlcontext sc:sparkcontext "local[*]" sparkconf  "qiss-local-cluster"
+/ MASTER:"local[*]";
+/ c:sparksqlcontext sc:sparkcontext "local[*]" sparkconf  "qiss-local-cluster";
 /
-/ MASTER:"spark://macbookpro15.local:7077"
-sc:sparkcontext "spark://Nathans-iMac.home:7077" sparkconf "qiss-stand-alone-cluster";
+MASTER:"spark://macbookpro15.local:7077";
+sc:sparkcontext MASTER sparkconf "qiss-stand-alone-cluster";
 c:sparksqlcontext sc;
 ssc:sc sparkstreamingcontext 2000;  / spark streaming context with 2 second batch interval
 / streaming test code

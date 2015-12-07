@@ -2679,7 +2679,9 @@
       ;;    cd flambo-kafka-streaming-example && lein uberjar
       (sparkconf/jars [(str (System/getenv "HOME") "/dev/spark-csv/target/scala-2.10/spark-csv-assembly-1.3.0.jar")
                        (str (System/getenv "HOME") "/dev/flambo/target/flambo-0.7.2-SNAPSHOT-standalone.jar")
-                       (str (System/getenv "HOME") "/dev/flambo-kafka-streaming-example/target/flambo-kafka-streaming-example-0.1.0-SNAPSHOT-standalone.jar")])
+                       (str (System/getenv "HOME") "/dev/flambo-kafka-streaming-example/target/flambo-kafka-streaming-example-0.1.0-SNAPSHOT-standalone.jar")
+                       (str (System/getenv "HOME") "/dev/qiss/target/uberjar/qiss-0.1.0-SNAPSHOT-standalone.jar")
+                       ])
       (sparkconf/master (string master))
       (sparkconf/app-name (string app-name))))
 (defn spark-context [conf]
@@ -3597,7 +3599,8 @@
 (defn initialize-qiss
   #?(:cljs ([] (initialize-qiss-common load-code)))
   #?(:clj  ([e] (initialize-qiss-common
-                 (fn [] (load-code e (slurp "src/qiss/qiss.qiss")))))))
+                  (fn [] (load-code e (slurp "https://raw.githubusercontent.com/natemc/qiss/master/src/qiss/qiss.qiss")))))))
+;                 (fn [] (load-code e (slurp "src/qiss/qiss.qiss")))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 #?(:clj
    (defn repl
