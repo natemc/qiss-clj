@@ -1,0 +1,6 @@
+/bar
+alpha:"abcdefghijklmnopqrstuvwxyz";
+
+/ foo
+debug:{show x;x};
+ALPHA:"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
