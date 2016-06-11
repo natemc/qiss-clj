@@ -812,7 +812,7 @@
           u (int (Math/floor c))]           ;; cols in small rows
       (if (= t u)
         (matrix-from-vector m t v)
-        (let [s (- (count v) (* m u))       ;; # of big rows
+        (let [b (- (count v) (* m u))       ;; # of big rows
               s (- m b)]                    ;; # of small rows
           (catv (matrix-from-vector b t v)
                 (matrix-from-vector s u (vec (drop (* b t) v)))))))))
