@@ -329,7 +329,6 @@ a| b
 3| 20
 3| 30
 qiss)`b!t / create key column(s) by name
-qiss)`b!t
 b | a
 --| -
 10| 1
