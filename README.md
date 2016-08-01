@@ -356,7 +356,7 @@ a | b
 :d| 40
 :e| 50
 qiss)
-qiss)/ a query on a keyed table preserve its keys if the query 
+qiss)/ a query on a keyed table preserves its keys if the query 
 qiss)/ has no aggregations and no by clause
 qiss)select from 1!t where a in 1 2
 a| b 
